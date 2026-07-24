@@ -20,6 +20,7 @@ from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRul
 from .core.planner import PlanError, UpdatePlanner
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
+from .pages_api import PagesAPIMixin
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
 __version__ = "0.1.0"
@@ -32,12 +33,19 @@ _current_instance: "UpdateManagerPlugin | None" = None
     "凝心溯溪-焕，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
-class UpdateManagerPlugin(Star):
+class UpdateManagerPlugin(PagesAPIMixin, Star):
     def __init__(self, context: Context, config: Any = None) -> None:
         super().__init__(context)
         global _current_instance
         _current_instance = self
         self.context, self._config = context, config
+        self._native_config = config if callable(getattr(config, "save_config", None)) else None
+        self._config_overrides: dict[str, Any] = {}
+        data_root = self._resolve_data_root()
+        self.store = AtomicJsonStore(data_root)
+        saved_overrides = self.store.read("manager-config.json", {})
+        if isinstance(saved_overrides, dict):
+            self._config_overrides = saved_overrides
         self.enabled = self._get_bool("enabled", True)
         self.auto_update_enabled = self._get_bool("auto_update_enabled", False)
         self._terminated = False
@@ -45,8 +53,6 @@ class UpdateManagerPlugin(Star):
         plugin_root = Path(
             str(self._get("plugin_root", "")) or Path(__file__).resolve().parent.parent
         )
-        data_root = self._resolve_data_root()
-        self.store = AtomicJsonStore(data_root)
         self.adapter = AstrBotAdapter(context)
         self.catalog = PluginCatalog(self.adapter)
         self.planner = UpdatePlanner(
@@ -75,6 +81,7 @@ class UpdateManagerPlugin(Star):
         self.scheduler = ScheduleService(
             getattr(context, "cron_manager", None), self.store, self._scheduled_run
         )
+        self._register_pages_web_api()
         interrupted = self.coordinator.recover_interrupted()
         logger.info(
             "[update-manager] v%s loaded; recovered=%d; automatic=%s",
@@ -84,6 +91,8 @@ class UpdateManagerPlugin(Star):
         )
 
     def _get(self, key: str, default: Any) -> Any:
+        if key in self._config_overrides:
+            return self._config_overrides[key]
         if isinstance(self._config, dict):
             return self._config.get(key, default)
         getter = getattr(self._config, "get", None)

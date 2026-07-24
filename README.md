@@ -9,6 +9,9 @@
 - 经 AstrBot 核心串行更新，单事务加文件租约锁，杜绝并发。
 - 更新前自动备份，更新后健康稳定观察窗口，失败自动回滚。
 - 持久化每日规则、审计记录与备份清理策略（按数量、天数、容量）。
+- 提供 AstrBot Plugin Page 便捷设置页面，可查看总览、修改常用配置并浏览插件目录。
+- Plugin Page API 采用运行时能力探测；旧版 AstrBot 不支持页面能力时自动降级，不影响命令与调度功能。
+- `github_token` 等敏感配置按只写方式处理：只显示“是否已配置”，敏感 token 不回显到页面、接口响应或审计。
 - `enabled=false` 时统一门禁全部命令与调度。
 
 ## 安装
@@ -31,6 +34,18 @@
 | `/aup cancel` | 在当前事务边界后停止批次 |
 | `/aup status` | 查看运行状态 |
 
+## 便捷设置页面
+
+在支持 Plugin Page 的 AstrBot 版本中，可从插件详情进入“更新管理”页面：
+
+- **总览**：查看插件状态、AstrBot 版本、更新能力探测结果与每日规则。
+- **设置**：修改常用配置并即时应用；配置仍会持久化到 AstrBot `data` 目录。
+- **插件目录**：查看已安装插件、当前版本、来源与自动更新资格。
+
+为兼容旧版 AstrBot，插件会在运行时探测 Plugin Page 注册接口。若当前 AstrBot 不提供该接口，插件仅跳过页面与管理 API 注册，原有 `/aup` 命令、更新事务和调度能力继续按运行时可用能力工作，无需额外配置。
+
+`github_token` 是只写敏感项：页面和 API 仅返回是否已配置，敏感 token 不回显原值；保存空值或占位符不会清除现有 token。如需替换 token，请输入新值后保存。
+
 ## 配置
 
 配置项定义于 `_conf_schema.json`，关键项：
@@ -41,7 +56,7 @@
 | `auto_update_enabled` | bool | false | 允许每日规则执行更新 |
 | `network_timeout_seconds` | int | 15 | 候选查询总超时 |
 | `cache_ttl_seconds` | int | 300 | 候选与条件请求缓存时长 |
-| `github_token` | string | "" | 可选 GitHub token（按秘密保存，永不写入审计） |
+| `github_token` | string | "" | 可选 GitHub token（按秘密保存，仅显示是否已配置，不在页面、API 或审计中回显） |
 | `health_stability_seconds` | float | 2.0 | 更新重载后的健康稳定观察窗口 |
 | `backup_capacity_mb` | int | 2048 | 备份总容量上限，永不删除唯一恢复点 |
 
