@@ -1,0 +1,16 @@
+{
+  "enabled": {"type": "bool", "description": "启用自动更新管理命令与调度服务", "default": true},
+  "auto_update_enabled": {"type": "bool", "description": "允许已显式配置的每日规则执行更新；默认关闭", "default": false},
+  "data_dir": {"type": "string", "description": "运行状态目录；留空时使用 AstrBot 插件 data 目录", "default": ""},
+  "plugin_root": {"type": "string", "description": "AstrBot 插件根目录；留空时由当前插件位置推导", "default": ""},
+  "plan_ttl_seconds": {"type": "int", "description": "冻结计划有效期（秒）", "default": 900},
+  "network_timeout_seconds": {"type": "int", "description": "异步候选查询总超时（秒）", "default": 15},
+  "cache_ttl_seconds": {"type": "int", "description": "候选与条件请求缓存时长（秒）", "default": 300},
+  "proxy": {"type": "string", "description": "候选查询代理；留空时遵循系统环境", "default": ""},
+  "github_token": {"type": "string", "description": "可选 GitHub API token；按 AstrBot 秘密配置保存且永不写入审计", "default": "", "obvious_hint": false, "secret": true},
+  "health_stability_seconds": {"type": "float", "description": "更新重载后的健康稳定观察窗口（秒）", "default": 2.0},
+  "backup_keep_success": {"type": "int", "description": "每次清理至少保留的最近恢复点数量", "default": 3},
+  "backup_failed_days": {"type": "int", "description": "失败相关备份保留天数", "default": 7},
+  "backup_capacity_mb": {"type": "int", "description": "备份总容量上限（MB），永不删除唯一恢复点", "default": 2048},
+  "log_level": {"type": "string", "description": "插件日志级别", "default": "INFO", "options": ["DEBUG", "INFO", "WARNING", "ERROR"]}
+}

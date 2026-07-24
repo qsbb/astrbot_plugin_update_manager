@@ -1,0 +1,450 @@
+"""凝心溯溪-更：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.star import Context, Star, register
+
+from .core.adapters.astrbot import AstrBotAdapter
+from .core.adapters.registry import CandidateRegistry, RegistryError
+from .core.adapters.storage import AtomicJsonStore, redact
+from .core.catalog import PluginCatalog
+from .core.coordinator import UpdateCoordinator
+from .core.health import HealthChecker
+from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
+from .core.planner import PlanError, UpdatePlanner
+from .core.scheduler import RuleConflictError, ScheduleService
+from .core.transaction import PluginTransaction
+
+PLUGIN_NAME = "astrbot_plugin_auto_updater"
+__version__ = "0.4.0"
+_current_instance: "AutoUpdaterPlugin | None" = None
+
+
+@register(
+    PLUGIN_NAME,
+    "Justice-ocr",
+    "凝心溯溪-更，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
+    __version__,
+)
+class AutoUpdaterPlugin(Star):
+    def __init__(self, context: Context, config: Any = None) -> None:
+        super().__init__(context)
+        global _current_instance
+        _current_instance = self
+        self.context, self._config = context, config
+        self.enabled = self._get_bool("enabled", True)
+        self.auto_update_enabled = self._get_bool("auto_update_enabled", False)
+        self._terminated = False
+        self._apply_log_level(str(self._get("log_level", "INFO")))
+        plugin_root = Path(
+            str(self._get("plugin_root", "")) or Path(__file__).resolve().parent.parent
+        )
+        data_root = self._resolve_data_root()
+        self.store = AtomicJsonStore(data_root)
+        self.adapter = AstrBotAdapter(context)
+        self.catalog = PluginCatalog(self.adapter)
+        self.planner = UpdatePlanner(
+            ttl_seconds=int(self._get("plan_ttl_seconds", 900))
+        )
+        self.registry = CandidateRegistry(
+            timeout_seconds=int(self._get("network_timeout_seconds", 15)),
+            cache_ttl_seconds=int(self._get("cache_ttl_seconds", 300)),
+            proxy=str(self._get("proxy", "")),
+            github_token=str(self._get("github_token", "")),
+        )
+        health = HealthChecker(
+            self.adapter,
+            stability_seconds=float(self._get("health_stability_seconds", 2.0)),
+        )
+        self.transaction = PluginTransaction(
+            self.adapter,
+            health,
+            self.store,
+            plugin_root=plugin_root,
+            backup_root=data_root / "backups",
+        )
+        self.coordinator = UpdateCoordinator(
+            self.catalog, self.planner, self.transaction, self.store
+        )
+        self.scheduler = ScheduleService(
+            getattr(context, "cron_manager", None), self.store, self._scheduled_run
+        )
+        interrupted = self.coordinator.recover_interrupted()
+        logger.info(
+            "[auto-updater] v%s loaded; recovered=%d; automatic=%s",
+            __version__,
+            interrupted,
+            self.auto_update_enabled,
+        )
+
+    def _get(self, key: str, default: Any) -> Any:
+        if isinstance(self._config, dict):
+            return self._config.get(key, default)
+        getter = getattr(self._config, "get", None)
+        if callable(getter):
+            try:
+                return getter(key, default)
+            except TypeError:
+                value = getter(key)
+                return default if value is None else value
+        return default
+
+    def _get_bool(self, key: str, default: bool) -> bool:
+        value = self._get(key, default)
+        return (
+            value.strip().lower() in {"1", "true", "yes", "on"}
+            if isinstance(value, str)
+            else bool(value)
+        )
+
+    def _resolve_data_root(self) -> Path:
+        configured = str(self._get("data_dir", "")).strip()
+        if configured:
+            return Path(configured) / PLUGIN_NAME
+        getter = getattr(self.context, "get_plugin_data_dir", None)
+        if callable(getter):
+            try:
+                return Path(getter(PLUGIN_NAME))
+            except TypeError:
+                return Path(getter())
+        return Path.cwd() / "data" / "plugin_data" / PLUGIN_NAME
+
+    @staticmethod
+    def _apply_log_level(level_name: str) -> None:
+        level = getattr(logging, level_name.upper(), None)
+        underlying = getattr(logger, "_logger", None) or getattr(logger, "logger", None)
+        if (
+            isinstance(level, int)
+            and underlying is not None
+            and callable(getattr(underlying, "setLevel", None))
+        ):
+            underlying.setLevel(level)
+
+    async def initialize(self) -> None:
+        """插件激活后恢复唯一 runtime job；配置关闭时不注册调度。"""
+        if not self.enabled:
+            return
+        try:
+            if self.auto_update_enabled:
+                await self.scheduler.rebuild()
+            else:
+                await self.scheduler.remove_job()
+            self.transaction.cleanup(
+                keep_success=max(1, int(self._get("backup_keep_success", 3))),
+                failed_days=max(0, int(self._get("backup_failed_days", 7))),
+                capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
+                * 1024**2,
+            )
+        except Exception as exc:
+            logger.error("[auto-updater] initialize failed: %s", type(exc).__name__)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command_group("aup")
+    def aup_group(self) -> None:
+        """自动更新管理员命令。"""
+
+    @aup_group.command("probe")
+    async def aup_probe(self, event: AstrMessageEvent):
+        report = self.adapter.probe_capabilities()
+        lines = [
+            "凝心溯溪-更 / 能力探针",
+            f"PluginManager: {self._yn(report.plugin_manager)}",
+            f"插件目录: {self._yn(report.list_plugins)}",
+            f"安装来源: {self._yn(report.install_sources)}",
+            f"更新接口: {self._yn(report.update_plugin)}",
+            f"重载接口: {self._yn(report.reload_plugin)}",
+            f"定时任务: {self._yn(report.cron_add_basic_job)}",
+        ]
+        lines.extend(f"备注: {item}" for item in report.details)
+        yield event.plain_result("\n".join(lines))
+
+    @aup_group.command("catalog")
+    async def aup_catalog(self, event: AstrMessageEvent):
+        items = await self.catalog.scan()
+        lines = [f"插件目录（{len(items)} 项）"]
+        for item in items:
+            status = "可规划" if item.eligible else "阻断:" + ",".join(item.reasons)
+            lines.append(
+                f"- {item.plugin_id} {item.current_version or '<unknown>'} [{status}]"
+            )
+        yield event.plain_result("\n".join(lines))
+
+    async def _candidates(self, selected: tuple[str, ...]) -> dict[str, Candidate]:
+        items = {item.plugin_id: item for item in await self.catalog.scan()}
+        snapshots = {
+            (item.name or item.root_dir_name or ""): item
+            for item in await self.adapter.snapshot_plugins()
+        }
+        candidates = {}
+        for plugin_id in selected:
+            item = items.get(plugin_id)
+            if item and item.source_kind == "github" and item.source_url:
+                candidates[plugin_id] = await self.registry.github_latest(
+                    plugin_id, item.current_version, item.source_url
+                )
+            elif item and item.source_kind == "market" and item.source_url:
+                record = snapshots.get(plugin_id)
+                candidates[plugin_id] = self.registry.market_candidate(
+                    plugin_id,
+                    item.current_version,
+                    item.source_url,
+                    dict(record.install_source or {}) if record else {},
+                )
+        return candidates
+
+    @aup_group.command("plan")
+    async def aup_plan(
+        self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
+    ):
+        """冻结计划：plugins 为逗号分隔的显式插件 ID。"""
+        try:
+            selected = self._parse_ids(plugins)
+            rule = self.scheduler.load()
+            catalog = await self.catalog.scan()
+            plan = self.planner.create(
+                catalog,
+                await self._candidates(selected),
+                selected=selected,
+                astrbot_version=self._astrbot_version(),
+                policy=Policy(policy),
+                rule_revision=rule.revision,
+                minimum_release_age_hours=rule.minimum_release_age_hours,
+            )
+            self.store.write(f"plan-{plan.plan_id}.json", plan.to_dict())
+            yield event.plain_result(
+                f"计划已冻结: {plan.plan_id}\n哈希: {plan.plan_hash}\n项目: {len(plan.items)}\n有效至: {plan.expires_at}"
+            )
+        except (ValueError, PlanError, RegistryError) as exc:
+            yield event.plain_result(f"计划失败: {redact(exc)}")
+
+    @aup_group.command("run")
+    async def aup_run(self, event: AstrMessageEvent, plan_id: str):
+        """执行已冻结计划；同一计划不可重放。"""
+        try:
+            plan = self._load_plan(plan_id)
+            rule = self.scheduler.load()
+            run = await self.coordinator.execute(
+                plan,
+                astrbot_version=self._astrbot_version(),
+                rule_revision=rule.revision,
+            )
+            self.transaction.cleanup(
+                keep_success=max(1, int(self._get("backup_keep_success", 3))),
+                failed_days=max(0, int(self._get("backup_failed_days", 7))),
+                capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
+                * 1024**2,
+            )
+            yield event.plain_result(self._run_summary(run))
+        except Exception as exc:
+            yield event.plain_result(
+                f"执行失败: {type(exc).__name__}: {redact(exc)}"
+            )
+
+    @aup_group.command("rule")
+    async def aup_rule(
+        self,
+        event: AstrMessageEvent,
+        action: str = "show",
+        plugins: str = "",
+        local_time: str = "04:30",
+        timezone_name: str = "Asia/Shanghai",
+        policy: str = "check_only",
+    ):
+        try:
+            current = self.scheduler.load()
+            if action == "show":
+                next_run = self.scheduler.next_run(current)
+                yield event.plain_result(
+                    f"规则 revision={current.revision} enabled={current.enabled} plugins={','.join(current.plugin_ids) or '-'} next={next_run or '-'}"
+                )
+                return
+            if action not in {"enable", "disable"}:
+                raise ValueError("action 仅支持 show/enable/disable")
+            enabled = action == "enable"
+            if enabled and not self.auto_update_enabled:
+                raise ValueError("配置 auto_update_enabled=false，拒绝启用写入规则")
+            updated = UpdateRule(
+                enabled=enabled,
+                plugin_ids=self._parse_ids(plugins) if enabled else current.plugin_ids,
+                local_time=local_time,
+                timezone=timezone_name,
+                policy=Policy(policy).value,
+                revision=current.revision,
+            )
+            saved = self.scheduler.save(updated, expected_revision=current.revision)
+            await self.scheduler.rebuild()
+            yield event.plain_result(
+                f"规则已保存 revision={saved.revision} next={self.scheduler.next_run(saved) or '-'}"
+            )
+        except (ValueError, RuleConflictError) as exc:
+            yield event.plain_result(f"规则失败: {exc}")
+
+    @aup_group.command("dryrun")
+    async def aup_dryrun(
+        self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
+    ):
+        """预演候选与资格，不保存计划且不修改插件。"""
+        try:
+            selected = self._parse_ids(plugins)
+            rule = self.scheduler.load()
+            plan = self.planner.create(
+                await self.catalog.scan(),
+                await self._candidates(selected),
+                selected=selected,
+                astrbot_version=self._astrbot_version(),
+                policy=Policy(policy),
+                rule_revision=rule.revision,
+                minimum_release_age_hours=rule.minimum_release_age_hours,
+            )
+            lines = [f"预演通过（{len(plan.items)} 项，不会修改文件）"]
+            lines.extend(
+                f"- {item.plugin_id}: {item.from_version} -> {item.to_version}"
+                for item in plan.items
+            )
+            yield event.plain_result("\n".join(lines))
+        except (ValueError, PlanError, RegistryError) as exc:
+            yield event.plain_result(f"预演失败: {redact(exc)}")
+
+    @aup_group.command("rollback")
+    async def aup_rollback(self, event: AstrMessageEvent, tx_id: str):
+        """人工回滚一个仍满足版本前置条件的已提交事务。"""
+        try:
+            result = await self.coordinator.manual_rollback(tx_id)
+            yield event.plain_result(
+                f"人工回滚 {result.get('original_tx_id', tx_id)}: {result['state']}"
+            )
+        except Exception as exc:
+            yield event.plain_result(
+                f"人工回滚失败: {type(exc).__name__}: {redact(exc)}"
+            )
+
+    @aup_group.command("cancel")
+    async def aup_cancel(self, event: AstrMessageEvent):
+        """在当前插件事务结束后停止批次后续项目。"""
+        self.coordinator.cancel()
+        yield event.plain_result("已请求在当前插件事务边界停止批次。")
+
+    @aup_group.command("status")
+    async def aup_status(self, event: AstrMessageEvent):
+        runs = sorted(
+            self.store.root.glob("run-*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not runs:
+            yield event.plain_result("暂无执行记录。")
+            return
+        yield event.plain_result(self._run_summary(self.store.read(runs[0].name, {})))
+
+    async def _scheduled_run(self, rule: UpdateRule) -> None:
+        if self.coordinator.busy:
+            self.store.append_audit(
+                {
+                    "event": "scheduled_check",
+                    "revision": rule.revision,
+                    "result": "SKIPPED_BUSY",
+                }
+            )
+            return
+        if not self.auto_update_enabled or rule.policy == Policy.CHECK_ONLY.value:
+            self.store.append_audit(
+                {
+                    "event": "scheduled_check",
+                    "revision": rule.revision,
+                    "result": "CHECK_ONLY",
+                }
+            )
+            return
+        catalog = await self.catalog.scan()
+        candidates = await self._candidates(rule.plugin_ids)
+        plan = self.planner.create(
+            catalog,
+            candidates,
+            selected=rule.plugin_ids,
+            astrbot_version=self._astrbot_version(),
+            policy=Policy(rule.policy),
+            rule_revision=rule.revision,
+            prerelease=rule.prerelease,
+            minimum_release_age_hours=rule.minimum_release_age_hours,
+        )
+        await self.coordinator.execute(
+            plan,
+            astrbot_version=self._astrbot_version(),
+            rule_revision=rule.revision,
+            on_failure=FailurePolicy(rule.on_failure),
+            trigger="schedule",
+        )
+        self.transaction.cleanup(
+            keep_success=max(1, int(self._get("backup_keep_success", 3))),
+            failed_days=max(0, int(self._get("backup_failed_days", 7))),
+            capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
+            * 1024**2,
+        )
+
+    def _astrbot_version(self) -> str:
+        value = getattr(self.context, "version", None) or getattr(
+            self.context, "astrbot_version", None
+        )
+        if not value:
+            raise RuntimeError("ASTRBOT_VERSION_UNAVAILABLE")
+        return str(value)
+
+    @staticmethod
+    def _parse_ids(value: str) -> tuple[str, ...]:
+        ids = tuple(
+            dict.fromkeys(item.strip() for item in value.split(",") if item.strip())
+        )
+        if not ids or any(
+            len(item) > 128
+            or any(
+                char
+                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                for char in item
+            )
+            for item in ids
+        ):
+            raise ValueError("插件 ID 必须是非空逗号分隔的字母、数字、下划线或连字符")
+        return ids
+
+    def _load_plan(self, plan_id: str) -> UpdatePlan:
+        if (
+            not plan_id
+            or len(plan_id) > 64
+            or any(char not in "0123456789abcdef-" for char in plan_id.lower())
+        ):
+            raise ValueError("非法计划 ID")
+        raw = self.store.read(f"plan-{plan_id}.json", None)
+        if raw is None:
+            raise ValueError("计划不存在")
+        return UpdatePlan.from_dict(raw)
+
+    @staticmethod
+    def _run_summary(run: dict) -> str:
+        results = run.get("results", [])
+        return f"批次 {run.get('run_id', '<unknown>')}：" + (
+            ", ".join(
+                f"{item.get('plugin_id')}={item.get('state')}" for item in results
+            )
+            or "尚无结果"
+        )
+
+    @staticmethod
+    def _yn(value: bool) -> str:
+        return "可用" if value else "不可用"
+
+    async def terminate(self) -> None:
+        global _current_instance
+        self.coordinator.cancel()
+        await self.scheduler.close()
+        await self.registry.close()
+        self.adapter = None  # type: ignore[assignment]
+        self._terminated = True
+        if _current_instance is self:
+            _current_instance = None
+        logger.info("[auto-updater] terminated")
