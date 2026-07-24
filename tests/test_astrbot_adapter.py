@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from astrbot_plugin_auto_updater.core.adapters.astrbot import AstrBotAdapter
+from astrbot_plugin_update_manager.core.adapters.astrbot import AstrBotAdapter
 
 
 class FakeManager:
@@ -101,7 +101,7 @@ def test_mutation_rejects_self_reserved_and_unknown_source(monkeypatch):
     with pytest.raises(ValueError, match="SELF_UPDATE"):
         asyncio.run(
             adapter.update_plugin(
-                "astrbot_plugin_auto_updater",
+                "astrbot_plugin_update_manager",
                 source_kind="github",
                 source_url="https://github.com/a/b",
             )

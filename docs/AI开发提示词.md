@@ -4,7 +4,7 @@
 
 ## 1. 开工前强制阅读
 
-你将开发 AstrBot 插件 `astrbot_plugin_auto_updater`。开始任何设计或编码前，必须按顺序完整阅读并遵循：
+你将开发 AstrBot 插件 `astrbot_plugin_update_manager`。开始任何设计或编码前，必须按顺序完整阅读并遵循：
 
 1. 公共现行规范：[`../../CONVENTIONS.md`](../../CONVENTIONS.md)；这是唯一现行系列规范。
 2. 详细开发规划：[`开发规划.html`](开发规划.html)。
@@ -14,7 +14,7 @@
 
 ## 2. 固定项目身份
 
-- 插件目录名、`metadata.yaml.name`、`@register` 唯一识别名：`astrbot_plugin_auto_updater`。
+- 插件目录名、`metadata.yaml.name`、`@register` 唯一识别名：`astrbot_plugin_update_manager`。
 - 拟定系列展示名：`凝心溯溪-更`（“更”取更新之意）；正式使用前检查公共规范中的名称分配，若已冲突则暂停并请求确认，不得自行改内名。
 - `display_name`：`凝心溯溪-更`。
 - `desc` 与 `short_desc` 以“凝心溯溪系列更新模块：”开头，保持工程文档语气。
@@ -34,7 +34,7 @@
 进入实现阶段后，在插件根目录逐步形成：
 
 ```text
-astrbot_plugin_auto_updater/
+astrbot_plugin_update_manager/
 ├─ main.py
 ├─ metadata.yaml
 ├─ _conf_schema.json

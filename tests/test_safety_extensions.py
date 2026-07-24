@@ -6,13 +6,13 @@ from datetime import timedelta
 
 import pytest
 
-from astrbot_plugin_auto_updater.core.adapters.registry import (
+from astrbot_plugin_update_manager.core.adapters.registry import (
     CandidateRegistry,
     RegistryError,
 )
-from astrbot_plugin_auto_updater.core.adapters.storage import AtomicJsonStore
-from astrbot_plugin_auto_updater.core.health import HealthResult
-from astrbot_plugin_auto_updater.core.models import (
+from astrbot_plugin_update_manager.core.adapters.storage import AtomicJsonStore
+from astrbot_plugin_update_manager.core.health import HealthResult
+from astrbot_plugin_update_manager.core.models import (
     Candidate,
     CatalogItem,
     PlanItem,
@@ -21,9 +21,9 @@ from astrbot_plugin_auto_updater.core.models import (
     UpdateRule,
     utc_now,
 )
-from astrbot_plugin_auto_updater.core.planner import PlanError, UpdatePlanner
-from astrbot_plugin_auto_updater.core.scheduler import RuleValidationError, ScheduleService
-from astrbot_plugin_auto_updater.core.transaction import PluginTransaction, TransactionError
+from astrbot_plugin_update_manager.core.planner import PlanError, UpdatePlanner
+from astrbot_plugin_update_manager.core.scheduler import RuleValidationError, ScheduleService
+from astrbot_plugin_update_manager.core.transaction import PluginTransaction, TransactionError
 
 
 def catalog_item() -> CatalogItem:

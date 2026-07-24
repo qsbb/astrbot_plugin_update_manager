@@ -4,21 +4,21 @@ import asyncio
 
 import pytest
 
-from astrbot_plugin_auto_updater.core.adapters.storage import AtomicJsonStore
-from astrbot_plugin_auto_updater.core.coordinator import (
+from astrbot_plugin_update_manager.core.adapters.storage import AtomicJsonStore
+from astrbot_plugin_update_manager.core.coordinator import (
     PlanAlreadyExecutedError,
     UpdateCoordinator,
 )
-from astrbot_plugin_auto_updater.core.health import HealthResult
-from astrbot_plugin_auto_updater.core.models import (
+from astrbot_plugin_update_manager.core.health import HealthResult
+from astrbot_plugin_update_manager.core.models import (
     CatalogItem,
     PlanItem,
     TxState,
     UpdatePlan,
     stable_hash,
 )
-from astrbot_plugin_auto_updater.core.planner import UpdatePlanner
-from astrbot_plugin_auto_updater.core.transaction import (
+from astrbot_plugin_update_manager.core.planner import UpdatePlanner
+from astrbot_plugin_update_manager.core.transaction import (
     PluginTransaction,
     TransactionError,
 )

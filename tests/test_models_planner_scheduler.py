@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from astrbot_plugin_auto_updater.core.adapters.astrbot import PluginSnapshot
-from astrbot_plugin_auto_updater.core.adapters.storage import (
+from astrbot_plugin_update_manager.core.adapters.astrbot import PluginSnapshot
+from astrbot_plugin_update_manager.core.adapters.storage import (
     AtomicJsonStore,
     FileLeaseLock,
     contained,
     redact,
 )
-from astrbot_plugin_auto_updater.core.catalog import PluginCatalog
-from astrbot_plugin_auto_updater.core.models import (
+from astrbot_plugin_update_manager.core.catalog import PluginCatalog
+from astrbot_plugin_update_manager.core.models import (
     Candidate,
     Policy,
     UpdateRule,
@@ -22,12 +22,12 @@ from astrbot_plugin_auto_updater.core.models import (
     parse_version,
     policy_allows,
 )
-from astrbot_plugin_auto_updater.core.planner import (
+from astrbot_plugin_update_manager.core.planner import (
     PlanError,
     PlanStaleError,
     UpdatePlanner,
 )
-from astrbot_plugin_auto_updater.core.scheduler import (
+from astrbot_plugin_update_manager.core.scheduler import (
     RuleConflictError,
     RuleValidationError,
     ScheduleService,
@@ -69,7 +69,7 @@ def test_catalog_explains_security_blocks():
     adapter = Adapter(
         [
             snap(),
-            snap("astrbot_plugin_auto_updater"),
+            snap("astrbot_plugin_update_manager"),
             snap("bad", version="wat", source={"install_method": "upload"}),
             snap("reserved", reserved=True),
         ]
@@ -77,7 +77,7 @@ def test_catalog_explains_security_blocks():
     items = asyncio.run(PluginCatalog(adapter).scan())
     by_id = {i.plugin_id: i for i in items}
     assert by_id["demo"].eligible
-    assert "SELF_UPDATE_BLOCKED" in by_id["astrbot_plugin_auto_updater"].reasons
+    assert "SELF_UPDATE_BLOCKED" in by_id["astrbot_plugin_update_manager"].reasons
     assert {"VERSION_UNPARSEABLE", "SOURCE_REQUIRED"} <= set(by_id["bad"].reasons)
     assert "RESERVED_PLUGIN" in by_id["reserved"].reasons
 

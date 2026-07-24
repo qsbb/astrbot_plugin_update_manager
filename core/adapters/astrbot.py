@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 PLUGIN_INSTALL_SOURCES_KEY = "plugin_install_sources"
-SELF_PLUGIN_NAME = "astrbot_plugin_auto_updater"
+SELF_PLUGIN_NAME = "astrbot_plugin_update_manager"
 
 
 class AdapterUnavailableError(RuntimeError):

@@ -91,7 +91,7 @@ class PluginTransaction:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
         )
         manifest, digest = tree_manifest(temporary)
-        (temporary / ".auto-updater-manifest.json").write_text(
+        (temporary / ".update-manager-manifest.json").write_text(
             json.dumps(
                 {
                     "plugin_id": item.plugin_id,
@@ -110,7 +110,7 @@ class PluginTransaction:
     async def rollback(self, item: PlanItem, backup: Path, digest: str) -> None:
         if not contained(backup, self.backup_root) or backup.is_symlink():
             raise TransactionError("BACKUP_PATH_ESCAPE")
-        manifest_path = backup / ".auto-updater-manifest.json"
+        manifest_path = backup / ".update-manager-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         _files, actual = tree_manifest_without_metadata(backup)
         if (
@@ -128,7 +128,7 @@ class PluginTransaction:
         shutil.copytree(
             backup,
             destination,
-            ignore=shutil.ignore_patterns(".auto-updater-manifest.json"),
+            ignore=shutil.ignore_patterns(".update-manager-manifest.json"),
         )
         await self.adapter.reload_plugin(item.plugin_id)
         result = await self.health.check(
@@ -311,7 +311,7 @@ class PluginTransaction:
 def tree_manifest_without_metadata(root: Path):
     files = []
     for path in sorted(root.rglob("*")):
-        if path.name == ".auto-updater-manifest.json":
+        if path.name == ".update-manager-manifest.json":
             continue
         if path.is_symlink():
             raise TransactionError("SYMLINK_BACKUP_BLOCKED")

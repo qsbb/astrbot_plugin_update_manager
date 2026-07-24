@@ -12,7 +12,7 @@ from typing import Any
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-SELF_PLUGIN_NAME = "astrbot_plugin_auto_updater"
+SELF_PLUGIN_NAME = "astrbot_plugin_update_manager"
 
 
 def utc_now() -> datetime:

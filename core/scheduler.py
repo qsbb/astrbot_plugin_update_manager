@@ -20,7 +20,7 @@ class RuleValidationError(ValueError):
 
 
 class ScheduleService:
-    JOB_ID = "astrbot_plugin_auto_updater_daily"
+    JOB_ID = "astrbot_plugin_update_manager_daily"
 
     def __init__(self, cron_manager, store, handler) -> None:
         self.cron = cron_manager

@@ -21,9 +21,9 @@ from .core.planner import PlanError, UpdatePlanner
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
 
-PLUGIN_NAME = "astrbot_plugin_auto_updater"
-__version__ = "0.4.0"
-_current_instance: "AutoUpdaterPlugin | None" = None
+PLUGIN_NAME = "astrbot_plugin_update_manager"
+__version__ = "0.5.0"
+_current_instance: "UpdateManagerPlugin | None" = None
 
 
 @register(
@@ -32,7 +32,7 @@ _current_instance: "AutoUpdaterPlugin | None" = None
     "凝心溯溪-更，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
-class AutoUpdaterPlugin(Star):
+class UpdateManagerPlugin(Star):
     def __init__(self, context: Context, config: Any = None) -> None:
         super().__init__(context)
         global _current_instance
@@ -77,7 +77,7 @@ class AutoUpdaterPlugin(Star):
         )
         interrupted = self.coordinator.recover_interrupted()
         logger.info(
-            "[auto-updater] v%s loaded; recovered=%d; automatic=%s",
+            "[update-manager] v%s loaded; recovered=%d; automatic=%s",
             __version__,
             interrupted,
             self.auto_update_enabled,
@@ -142,7 +142,13 @@ class AutoUpdaterPlugin(Star):
                 * 1024**2,
             )
         except Exception as exc:
-            logger.error("[auto-updater] initialize failed: %s", type(exc).__name__)
+            logger.error("[update-manager] initialize failed: %s", type(exc).__name__)
+
+    def _disabled_notice(self) -> str | None:
+        """插件被配置为禁用时，返回统一提示；否则返回 None。"""
+        if self.enabled:
+            return None
+        return "凝心溯溪-更 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command_group("aup")
@@ -151,6 +157,10 @@ class AutoUpdaterPlugin(Star):
 
     @aup_group.command("probe")
     async def aup_probe(self, event: AstrMessageEvent):
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         report = self.adapter.probe_capabilities()
         lines = [
             "凝心溯溪-更 / 能力探针",
@@ -166,6 +176,10 @@ class AutoUpdaterPlugin(Star):
 
     @aup_group.command("catalog")
     async def aup_catalog(self, event: AstrMessageEvent):
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         items = await self.catalog.scan()
         lines = [f"插件目录（{len(items)} 项）"]
         for item in items:
@@ -203,6 +217,10 @@ class AutoUpdaterPlugin(Star):
         self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
     ):
         """冻结计划：plugins 为逗号分隔的显式插件 ID。"""
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         try:
             selected = self._parse_ids(plugins)
             rule = self.scheduler.load()
@@ -226,6 +244,10 @@ class AutoUpdaterPlugin(Star):
     @aup_group.command("run")
     async def aup_run(self, event: AstrMessageEvent, plan_id: str):
         """执行已冻结计划；同一计划不可重放。"""
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         try:
             plan = self._load_plan(plan_id)
             rule = self.scheduler.load()
@@ -256,6 +278,10 @@ class AutoUpdaterPlugin(Star):
         timezone_name: str = "Asia/Shanghai",
         policy: str = "check_only",
     ):
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         try:
             current = self.scheduler.load()
             if action == "show":
@@ -290,6 +316,10 @@ class AutoUpdaterPlugin(Star):
         self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
     ):
         """预演候选与资格，不保存计划且不修改插件。"""
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         try:
             selected = self._parse_ids(plugins)
             rule = self.scheduler.load()
@@ -314,6 +344,10 @@ class AutoUpdaterPlugin(Star):
     @aup_group.command("rollback")
     async def aup_rollback(self, event: AstrMessageEvent, tx_id: str):
         """人工回滚一个仍满足版本前置条件的已提交事务。"""
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         try:
             result = await self.coordinator.manual_rollback(tx_id)
             yield event.plain_result(
@@ -327,11 +361,19 @@ class AutoUpdaterPlugin(Star):
     @aup_group.command("cancel")
     async def aup_cancel(self, event: AstrMessageEvent):
         """在当前插件事务结束后停止批次后续项目。"""
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         self.coordinator.cancel()
         yield event.plain_result("已请求在当前插件事务边界停止批次。")
 
     @aup_group.command("status")
     async def aup_status(self, event: AstrMessageEvent):
+        notice = self._disabled_notice()
+        if notice:
+            yield event.plain_result(notice)
+            return
         runs = sorted(
             self.store.root.glob("run-*.json"),
             key=lambda p: p.stat().st_mtime,
@@ -447,4 +489,4 @@ class AutoUpdaterPlugin(Star):
         self._terminated = True
         if _current_instance is self:
             _current_instance = None
-        logger.info("[auto-updater] terminated")
+        logger.info("[update-manager] terminated")
