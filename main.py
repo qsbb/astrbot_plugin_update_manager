@@ -150,11 +150,11 @@ class UpdateManagerPlugin(Star):
             return None
         return "凝心溯溪-焕 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command_group("aup")
     def aup_group(self) -> None:
         """自动更新管理员命令。"""
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("probe")
     async def aup_probe(self, event: AstrMessageEvent):
         notice = self._disabled_notice()
@@ -174,6 +174,7 @@ class UpdateManagerPlugin(Star):
         lines.extend(f"备注: {item}" for item in report.details)
         yield event.plain_result("\n".join(lines))
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("catalog")
     async def aup_catalog(self, event: AstrMessageEvent):
         notice = self._disabled_notice()
@@ -212,6 +213,7 @@ class UpdateManagerPlugin(Star):
                 )
         return candidates
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("plan")
     async def aup_plan(
         self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
@@ -241,6 +243,7 @@ class UpdateManagerPlugin(Star):
         except (ValueError, PlanError, RegistryError) as exc:
             yield event.plain_result(f"计划失败: {redact(exc)}")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("run")
     async def aup_run(self, event: AstrMessageEvent, plan_id: str):
         """执行已冻结计划；同一计划不可重放。"""
@@ -268,6 +271,7 @@ class UpdateManagerPlugin(Star):
                 f"执行失败: {type(exc).__name__}: {redact(exc)}"
             )
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("rule")
     async def aup_rule(
         self,
@@ -311,6 +315,7 @@ class UpdateManagerPlugin(Star):
         except (ValueError, RuleConflictError) as exc:
             yield event.plain_result(f"规则失败: {exc}")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("dryrun")
     async def aup_dryrun(
         self, event: AstrMessageEvent, plugins: str, policy: str = "stable"
@@ -341,6 +346,7 @@ class UpdateManagerPlugin(Star):
         except (ValueError, PlanError, RegistryError) as exc:
             yield event.plain_result(f"预演失败: {redact(exc)}")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("rollback")
     async def aup_rollback(self, event: AstrMessageEvent, tx_id: str):
         """人工回滚一个仍满足版本前置条件的已提交事务。"""
@@ -358,6 +364,7 @@ class UpdateManagerPlugin(Star):
                 f"人工回滚失败: {type(exc).__name__}: {redact(exc)}"
             )
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("cancel")
     async def aup_cancel(self, event: AstrMessageEvent):
         """在当前插件事务结束后停止批次后续项目。"""
@@ -368,6 +375,7 @@ class UpdateManagerPlugin(Star):
         self.coordinator.cancel()
         yield event.plain_result("已请求在当前插件事务边界停止批次。")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("status")
     async def aup_status(self, event: AstrMessageEvent):
         notice = self._disabled_notice()

@@ -16,14 +16,31 @@ class Logger:
         return lambda *args, **kwargs: None
 
 
+class RegisteringCommandable:
+    """模拟 AstrBot 指令组装饰器返回的不可调用注册对象。"""
+
+    def command(self, _name):
+        return lambda child: child
+
+
 class CommandGroupDecorator:
     def __call__(self, func):
-        func.command = lambda _name: lambda child: child
-        return func
+        # AstrBot 注册原函数后返回 RegisteringCommandable；该对象没有 __name__。
+        _ = func.__name__
+        return RegisteringCommandable()
 
 
 def passthrough_decorator(*args, **kwargs):
     return lambda func: func
+
+
+def permission_decorator(*args, **kwargs):
+    def decorate(func):
+        # 真实 AstrBot 权限装饰器注册处理函数时会读取 __name__。
+        _ = func.__name__
+        return func
+
+    return decorate
 
 
 def install_astrbot_api_stubs(monkeypatch):
@@ -39,7 +56,7 @@ def install_astrbot_api_stubs(monkeypatch):
     event.AstrMessageEvent = object
     event.filter = SimpleNamespace(
         PermissionType=SimpleNamespace(ADMIN="admin"),
-        permission_type=passthrough_decorator,
+        permission_type=permission_decorator,
         command_group=lambda _name: CommandGroupDecorator(),
     )
     star.Context = object
