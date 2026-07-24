@@ -1,4 +1,4 @@
-"""凝心溯溪-更：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
+"""凝心溯溪-焕：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.5.0"
+__version__ = "0.1.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
 @register(
     PLUGIN_NAME,
     "Justice-ocr",
-    "凝心溯溪-更，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
+    "凝心溯溪-焕，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
 class UpdateManagerPlugin(Star):
@@ -148,7 +148,7 @@ class UpdateManagerPlugin(Star):
         """插件被配置为禁用时，返回统一提示；否则返回 None。"""
         if self.enabled:
             return None
-        return "凝心溯溪-更 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
+        return "凝心溯溪-焕 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command_group("aup")
@@ -163,7 +163,7 @@ class UpdateManagerPlugin(Star):
             return
         report = self.adapter.probe_capabilities()
         lines = [
-            "凝心溯溪-更 / 能力探针",
+            "凝心溯溪-焕 / 能力探针",
             f"PluginManager: {self._yn(report.plugin_manager)}",
             f"插件目录: {self._yn(report.list_plugins)}",
             f"安装来源: {self._yn(report.install_sources)}",

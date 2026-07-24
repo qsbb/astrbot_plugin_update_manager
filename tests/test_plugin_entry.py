@@ -77,7 +77,7 @@ def test_entry_identity_defaults_and_data_location(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     assert module.PLUGIN_NAME == "astrbot_plugin_update_manager"
-    assert module.__version__ == "0.5.0"
+    assert module.__version__ == "0.1.0"
     assert plugin.enabled is True and plugin.auto_update_enabled is False
     assert plugin.store.root == (tmp_path / module.PLUGIN_NAME).resolve()
 

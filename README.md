@@ -1,4 +1,4 @@
-# 凝心溯溪-更（astrbot_plugin_update_manager）
+# 凝心溯溪-焕（astrbot_plugin_update_manager）
 
 凝心溯溪系列更新模块：安全、串行、可回滚的 AstrBot 插件更新管理器。发现可信来源候选，冻结不可变计划，通过 AstrBot 核心串行更新，并提供备份、健康检查、自动回滚、审计、持久化每日规则与清理能力。
 
