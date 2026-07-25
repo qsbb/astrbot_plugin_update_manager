@@ -240,6 +240,9 @@ def test_rule_page_get_and_post_preserve_fields_and_rebuild(monkeypatch, tmp_pat
     )
     plugin.catalog.scan = lambda: asyncio.sleep(0, result=(_rule_item(),))
     initial = unwrap(asyncio.run(plugin._pages_get_rule()))
+    assert initial["catalog"] == [
+        {"plugin_id": "demo", "display_name": "Demo", "version": "1.0.0"}
+    ]
     assert initial["rule"]["policy"] == "check_only"
     assert initial["policy_note"] == "CHECK_ONLY_WILL_NOT_UPDATE"
     calls = []
@@ -330,7 +333,7 @@ def test_pages_catalog_payload(monkeypatch, tmp_path):
     assert payload["diagnostics"]["runtime_count"] == 1
     assert payload["items"][0] == {
         "plugin_id": "demo",
-        "name": "Demo",
+        "display_name": "Demo",
         "version": "1.0.0",
         "activated": True,
         "loaded": True,
@@ -716,7 +719,7 @@ async def _catalog_result():
     return (
         SimpleNamespace(
             plugin_id="demo",
-            name="Demo",
+            display_name="Demo",
             current_version="1.0.0",
             activated=True,
             loaded=True,

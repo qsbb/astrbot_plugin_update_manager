@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from .adapters.astrbot import PluginSnapshot
+from .adapters.astrbot import PluginSnapshot, resolve_display_name
 from .models import CatalogItem, SELF_PLUGIN_NAME, parse_version, stable_hash
 
 _ALLOWED_SOURCE_KINDS = {"market", "github"}
@@ -76,7 +76,9 @@ class PluginCatalog:
                 CatalogItem(
                     plugin_id=plugin_id,
                     root_dir_name=snap.root_dir_name or "",
-                    display_name=snap.display_name or plugin_id,
+                    display_name=resolve_display_name(
+                        (snap.display_name,), plugin_id or snap.root_dir_name or ""
+                    ),
                     current_version=snap.version,
                     source_kind=source_kind,
                     source_url=source_url,

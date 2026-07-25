@@ -92,6 +92,8 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert "敏感 token 仅显示是否已配置" in html
     assert "Sensitive tokens are write-only" in js
     assert 'item.loaded ? t("loaded") : t("notLoaded")' in js
+    assert "item.display_name || item.plugin_id" in js
+    assert "<code>${escapeHtml(item.plugin_id)}</code>" in js
     assert "未加载插件不可更新" in html
     assert "unloaded plugins cannot be updated" in js
     assert "data.diagnostics?.messages" in js

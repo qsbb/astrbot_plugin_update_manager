@@ -76,11 +76,14 @@ def star(name="demo", *, root_dir_name=None, reserved=False, activated=True):
     )
 
 
-def write_metadata(root, name="discovered", *, version="1.2.3"):
+def write_metadata(
+    root, name="discovered", *, version="1.2.3", display_name=None
+):
     plugin = root / name
     plugin.mkdir()
+    display_name = display_name or f"{name} name"
     (plugin / "metadata.yaml").write_text(
-        f"name: {name}\ndisplay_name: {name} name\nversion: {version}\n"
+        f"name: {name}\ndisplay_name: {display_name}\nversion: {version}\n"
         "repo: https://github.com/acme/discovered\n",
         encoding="utf-8",
     )
@@ -221,6 +224,31 @@ def test_snapshot_deduplicates_by_root_before_plugin_id(monkeypatch, tmp_path):
     ]
     assert snapshots[0].version == "1.2.3"
     assert adapter.last_discovery_report.discovered_count == 0
+
+
+def test_snapshot_merge_preserves_runtime_id_and_prefers_metadata_display_name(
+    monkeypatch, tmp_path
+):
+    install_shared_preferences(monkeypatch, {})
+    write_metadata(
+        tmp_path,
+        "runtime_root",
+        display_name="凝心溯溪-主动学习",
+    )
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    runtime = star("active_learner", root_dir_name="runtime_root")
+    runtime.display_name = "active_learner"
+
+    snapshots = asyncio.run(AstrBotAdapter(FakeContext([runtime], manager)).snapshot_plugins())
+
+    assert len(snapshots) == 1
+    assert snapshots[0].name == "active_learner"
+    assert snapshots[0].root_dir_name == "runtime_root"
+    assert snapshots[0].display_name == "凝心溯溪-主动学习"
+    catalog = asyncio.run(PluginCatalog(AstrBotAdapter(FakeContext([runtime], manager))).scan())
+    assert catalog[0].plugin_id == "active_learner"
+    assert catalog[0].display_name == "凝心溯溪-主动学习"
 
 
 def test_snapshot_repairs_invalid_runtime_version_from_metadata(monkeypatch, tmp_path):

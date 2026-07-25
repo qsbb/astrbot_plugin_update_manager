@@ -19,6 +19,17 @@ class AdapterUnavailableError(RuntimeError):
     pass
 
 
+def resolve_display_name(
+    candidates: Iterable[Any], plugin_id: str, *, fallback: bool = True
+) -> str:
+    """按优先级取第一个真正的展示名，并过滤复读的插件标识符。"""
+    for candidate in candidates:
+        name = str(candidate or "").strip()
+        if name and name != plugin_id:
+            return name
+    return plugin_id if fallback else ""
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityReport:
     plugin_manager: bool
@@ -313,7 +324,11 @@ class AstrBotAdapter:
                     PluginSnapshot(
                         name=name or root_name,
                         root_dir_name=root_name,
-                        display_name=str(metadata.get("display_name") or name or root_name),
+                        display_name=resolve_display_name(
+                            (metadata.get("display_name"),),
+                            name or root_name,
+                            fallback=False,
+                        ),
                         version=version,
                         repo=repo,
                         reserved=reserved,
@@ -346,10 +361,17 @@ class AstrBotAdapter:
         version = runtime.version.strip()
         if not cls._valid_version(version) and cls._valid_version(discovered.version):
             version = discovered.version
+        # 运行时已加载的身份是权威的：覆盖它会让后续按 root/name 去重失配，
+        # 从而把同一个插件在目录页里显示成两行。
+        plugin_id = runtime.name or discovered.name
         return PluginSnapshot(
-            name=runtime.name or discovered.name,
-            root_dir_name=discovered.root_dir_name or runtime.root_dir_name,
-            display_name=runtime.display_name or discovered.display_name,
+            name=plugin_id,
+            root_dir_name=runtime.root_dir_name or discovered.root_dir_name,
+            display_name=resolve_display_name(
+                (discovered.display_name, runtime.display_name),
+                plugin_id,
+                fallback=False,
+            ),
             version=version,
             repo=runtime.repo or discovered.repo,
             reserved=runtime.reserved,
@@ -419,7 +441,11 @@ class AstrBotAdapter:
                 PluginSnapshot(
                     name=name,
                     root_dir_name=root,
-                    display_name=str(getattr(star, "display_name", "") or ""),
+                    display_name=resolve_display_name(
+                        (getattr(star, "display_name", ""),),
+                        name or root or "",
+                        fallback=False,
+                    ),
                     version=str(getattr(star, "version", "") or ""),
                     repo=str(getattr(star, "repo", "") or ""),
                     reserved=bool(getattr(star, "reserved", False)),

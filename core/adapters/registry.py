@@ -3,18 +3,37 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import time
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import aiohttp
+import yaml
+from packaging.version import InvalidVersion, Version
 
 from ..models import Candidate
 
 
 class RegistryError(RuntimeError):
     pass
+
+
+#: metadata.yaml 是版本权威来源；仅当权威源"确实缺失或不可信"时才允许回退到
+#: Release/Tag。网络类错误（超时、连接失败、限流）不在此列——那种情况下宁可
+#: 让检查失败，也不要用可能陈旧的标签冒充最新版。
+_METADATA_FALLBACK_ERRORS = frozenset(
+    {
+        "REGISTRY_HTTP_404",
+        "REGISTRY_JSON_INVALID",
+        "GITHUB_REPOSITORY_SCHEMA_INVALID",
+        "GITHUB_METADATA_SCHEMA_INVALID",
+        "GITHUB_METADATA_ID_MISMATCH",
+        "GITHUB_METADATA_VERSION_INVALID",
+    }
+)
 
 
 def normalize_optional_setting(value: Any) -> str | None:
@@ -139,6 +158,77 @@ class CandidateRegistry:
             },
         )
 
+    @staticmethod
+    def _github_metadata_version(payload: Any, plugin_id: str) -> str:
+        if not isinstance(payload, dict):
+            raise RegistryError("GITHUB_METADATA_SCHEMA_INVALID")
+        encoded = payload.get("content")
+        if not isinstance(encoded, str) or payload.get("encoding") != "base64":
+            raise RegistryError("GITHUB_METADATA_SCHEMA_INVALID")
+        try:
+            compact = "".join(encoded.split())
+            metadata = yaml.safe_load(base64.b64decode(compact, validate=True))
+        except (ValueError, binascii.Error, yaml.YAMLError) as exc:
+            raise RegistryError("GITHUB_METADATA_SCHEMA_INVALID") from exc
+        if not isinstance(metadata, dict) or str(metadata.get("name") or "") != plugin_id:
+            raise RegistryError("GITHUB_METADATA_ID_MISMATCH")
+        version = str(metadata.get("version") or "").strip().removeprefix("v")
+        try:
+            Version(version)
+        except InvalidVersion as exc:
+            raise RegistryError("GITHUB_METADATA_VERSION_INVALID") from exc
+        return version
+
+    @staticmethod
+    def _parse_version(value: Any) -> Version | None:
+        try:
+            return Version(str(value).strip().removeprefix("v"))
+        except (InvalidVersion, AttributeError):
+            return None
+
+    @classmethod
+    def _semver_sorted_tags(cls, payload: Any) -> list[tuple[Version, dict[str, Any]]]:
+        """按语义化版本降序返回标签，而不是依赖 GitHub 的创建时间顺序。"""
+        if not isinstance(payload, list):
+            raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
+        ranked = [
+            (version, entry)
+            for entry in payload
+            if isinstance(entry, dict)
+            and (version := cls._parse_version(entry.get("name"))) is not None
+        ]
+        if not ranked:
+            raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
+        return sorted(ranked, key=lambda item: item[0], reverse=True)
+
+    @staticmethod
+    def _tag_details(entry: dict[str, Any] | None) -> tuple[str, str, str]:
+        if not isinstance(entry, dict):
+            return "", "", ""
+        commit = entry.get("commit")
+        return (
+            str(entry.get("name") or "").strip(),
+            str(commit.get("sha") or "").strip() if isinstance(commit, dict) else "",
+            str(entry.get("zipball_url") or "").strip(),
+        )
+
+    async def _tags(self, repo: str, *, force_refresh: bool) -> Any:
+        return await self.fetch_json(
+            f"https://api.github.com/repos/{repo}/tags?per_page=100",
+            force_refresh=force_refresh,
+        )
+
+    async def _default_branch(self, repo: str, *, force_refresh: bool) -> str:
+        payload = await self.fetch_json(
+            f"https://api.github.com/repos/{repo}", force_refresh=force_refresh
+        )
+        if not isinstance(payload, dict):
+            raise RegistryError("GITHUB_REPOSITORY_SCHEMA_INVALID")
+        branch = payload.get("default_branch")
+        if not isinstance(branch, str) or not branch.strip():
+            raise RegistryError("GITHUB_REPOSITORY_SCHEMA_INVALID")
+        return branch.strip()
+
     async def github_latest(
         self,
         plugin_id: str,
@@ -162,58 +252,155 @@ class CandidateRegistry:
         ):
             raise RegistryError("SOURCE_REQUIRED")
         repo = "/".join(parts)
-        release_url = f"https://api.github.com/repos/{repo}/releases/latest"
         try:
-            payload = await self.fetch_json(
-                release_url, force_refresh=force_refresh
+            default_branch = await self._default_branch(
+                repo, force_refresh=force_refresh
             )
+            metadata_url = (
+                f"https://api.github.com/repos/{repo}/contents/metadata.yaml"
+                f"?ref={quote(default_branch, safe='')}"
+            )
+            metadata_payload = await self.fetch_json(
+                metadata_url, force_refresh=force_refresh
+            )
+            target = self._github_metadata_version(metadata_payload, plugin_id)
         except RegistryError as exc:
-            if str(exc) != "REGISTRY_HTTP_404":
+            if str(exc) not in _METADATA_FALLBACK_ERRORS:
                 raise
-            tags_url = f"https://api.github.com/repos/{repo}/tags?per_page=1"
-            tags = await self.fetch_json(tags_url, force_refresh=force_refresh)
-            if not isinstance(tags, list) or not tags or not isinstance(tags[0], dict):
-                raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
-            tag = tags[0]
-            tag_name = str(tag.get("name") or "").strip()
-            commit_data = tag.get("commit")
-            commit = (
-                str(commit_data.get("sha") or "").strip()
-                if isinstance(commit_data, dict)
-                else ""
-            )
-            zipball = str(tag.get("zipball_url") or "").strip()
-            if not tag_name:
-                raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
-            return Candidate(
+            return await self._release_or_tag_candidate(
                 plugin_id,
                 current_version,
-                tag_name.removeprefix("v"),
                 source_url,
-                "github",
-                tag=tag_name,
-                commit=commit or None,
-                archive_url=zipball or None,
-                evidence={
-                    "api": "github_latest_tag",
-                    "observed_at": datetime.now(timezone.utc).isoformat(),
-                },
+                repo,
+                fallback_reason=str(exc),
+                force_refresh=force_refresh,
             )
-        if not isinstance(payload, dict):
-            raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
-        target = str(payload.get("tag_name") or "").removeprefix("v")
-        published = payload.get("published_at")
+        return await self._metadata_candidate(
+            plugin_id,
+            current_version,
+            source_url,
+            repo,
+            target,
+            force_refresh=force_refresh,
+        )
+
+    async def _metadata_candidate(
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        repo: str,
+        target: str,
+        *,
+        force_refresh: bool,
+    ) -> Candidate:
+        """metadata.yaml 已给出权威版本，仅补齐归档/提交/发布时间等证据。"""
+        wanted = self._parse_version(target)
+        tag_name = commit = archive_url = ""
+        published_at: str | None = None
+        try:
+            release = await self.fetch_json(
+                f"https://api.github.com/repos/{repo}/releases/latest",
+                force_refresh=force_refresh,
+            )
+        except RegistryError:
+            release = None
+        if isinstance(release, dict) and self._parse_version(
+            release.get("tag_name")
+        ) == wanted:
+            tag_name = str(release.get("tag_name") or "").strip()
+            archive_url = str(release.get("zipball_url") or "").strip()
+            published = release.get("published_at")
+            published_at = str(published) if published else None
+        else:
+            try:
+                ranked = self._semver_sorted_tags(
+                    await self._tags(repo, force_refresh=force_refresh)
+                )
+            except RegistryError:
+                ranked = []
+            matched = next(
+                (entry for version, entry in ranked if version == wanted), None
+            )
+            tag_name, commit, archive_url = self._tag_details(matched)
         return Candidate(
             plugin_id,
             current_version,
             target,
             source_url,
             "github",
-            tag=str(payload.get("tag_name") or ""),
+            tag=tag_name or None,
+            commit=commit or None,
+            published_at=published_at,
+            archive_url=archive_url or None,
+            evidence={
+                "api": "github_default_branch_metadata",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "version_source": "metadata.yaml",
+                "matching_tag": bool(tag_name),
+            },
+        )
+
+    async def _release_or_tag_candidate(
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        repo: str,
+        *,
+        fallback_reason: str,
+        force_refresh: bool,
+    ) -> Candidate:
+        """权威源缺失时的回退：先 Release，再按语义化版本排序的标签。"""
+        observed_at = datetime.now(timezone.utc).isoformat()
+        try:
+            payload = await self.fetch_json(
+                f"https://api.github.com/repos/{repo}/releases/latest",
+                force_refresh=force_refresh,
+            )
+        except RegistryError as exc:
+            if str(exc) != "REGISTRY_HTTP_404":
+                raise
+            version, entry = self._semver_sorted_tags(
+                await self._tags(repo, force_refresh=force_refresh)
+            )[0]
+            tag_name, commit, archive_url = self._tag_details(entry)
+            return Candidate(
+                plugin_id,
+                current_version,
+                str(version),
+                source_url,
+                "github",
+                tag=tag_name or None,
+                commit=commit or None,
+                archive_url=archive_url or None,
+                evidence={
+                    "api": "github_latest_tag",
+                    "observed_at": observed_at,
+                    "version_source": "tag_semver_max",
+                    "metadata_fallback_reason": fallback_reason,
+                },
+            )
+        if not isinstance(payload, dict):
+            raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
+        tag_name = str(payload.get("tag_name") or "").strip()
+        version = self._parse_version(tag_name)
+        if version is None:
+            raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
+        published = payload.get("published_at")
+        return Candidate(
+            plugin_id,
+            current_version,
+            str(version),
+            source_url,
+            "github",
+            tag=tag_name,
             published_at=str(published) if published else None,
             archive_url=str(payload.get("zipball_url") or "") or None,
             evidence={
                 "api": "github_latest_release",
-                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "observed_at": observed_at,
+                "version_source": "release_tag_name",
+                "metadata_fallback_reason": fallback_reason,
             },
         )

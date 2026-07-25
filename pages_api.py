@@ -294,7 +294,7 @@ class PagesAPIMixin:
         selectable = [
             {
                 "plugin_id": item.plugin_id,
-                "name": getattr(item, "display_name", getattr(item, "name", item.plugin_id)),
+                "display_name": item.display_name or item.plugin_id,
                 "version": item.current_version,
             }
             for item in catalog
@@ -527,9 +527,7 @@ class PagesAPIMixin:
                 "items": [
                     {
                         "plugin_id": item.plugin_id,
-                        "name": getattr(
-                            item, "display_name", getattr(item, "name", item.plugin_id)
-                        ),
+                        "display_name": item.display_name or item.plugin_id,
                         "version": item.current_version,
                         "activated": item.activated,
                         "loaded": item.loaded,

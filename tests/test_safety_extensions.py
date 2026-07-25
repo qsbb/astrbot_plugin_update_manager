@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import replace
 from datetime import timedelta
 
@@ -182,8 +183,58 @@ def test_registry_force_refresh_preserves_etag_and_304_reuses_cache(monkeypatch)
     assert registry._cache["https://api.example/releases/latest"][2] is payload
 
 
+def test_github_latest_prefers_default_branch_metadata_over_invalid_newer_tags(
+    monkeypatch,
+):
+    metadata = base64.b64encode(
+        b"name: active_learner\nversion: 1.2.1.0\n"
+    ).decode("ascii")
+    client = RegistryClient(
+        RegistryResponse(200, {"default_branch": "main"}),
+        RegistryResponse(200, {"encoding": "base64", "content": metadata}),
+        RegistryResponse(200, {"tag_name": "v2.6.7.9"}),
+        RegistryResponse(
+            200,
+            [
+                {
+                    "name": "v2.6.7.8",
+                    "zipball_url": "https://api.github.com/repos/acme/demo/zipball/v2.6.7.8",
+                    "commit": {"sha": "invalid-tag"},
+                }
+            ],
+        ),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest(
+            "active_learner", "1.2.0.0", "https://github.com/acme/demo"
+        )
+    )
+
+    assert candidate.target_version == "1.2.1.0"
+    assert candidate.tag is None
+    assert candidate.archive_url is None
+    assert candidate.evidence == {
+        "api": "github_default_branch_metadata",
+        "observed_at": candidate.evidence["observed_at"],
+        "version_source": "metadata.yaml",
+        "matching_tag": False,
+    }
+    assert [call[0] for call in client.calls[:2]] == [
+        "https://api.github.com/repos/acme/demo",
+        "https://api.github.com/repos/acme/demo/contents/metadata.yaml?ref=main",
+    ]
+
+
 def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
     client = RegistryClient(
+        RegistryResponse(200, {"default_branch": "main"}),
+        RegistryResponse(404),
         RegistryResponse(404),
         RegistryResponse(
             200,
@@ -211,14 +262,21 @@ def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
     assert candidate.archive_url.endswith("/zipball/v1.4.0")
     assert candidate.evidence["api"] == "github_latest_tag"
     assert [call[0] for call in client.calls] == [
+        "https://api.github.com/repos/acme/demo",
+        "https://api.github.com/repos/acme/demo/contents/metadata.yaml?ref=main",
         "https://api.github.com/repos/acme/demo/releases/latest",
-        "https://api.github.com/repos/acme/demo/tags?per_page=1",
+        "https://api.github.com/repos/acme/demo/tags?per_page=100",
     ]
 
 
 @pytest.mark.parametrize("payload", [None, {}, [], ["v1"], [{}]])
 def test_github_latest_rejects_invalid_tag_schema(monkeypatch, payload):
-    client = RegistryClient(RegistryResponse(404), RegistryResponse(200, payload))
+    client = RegistryClient(
+        RegistryResponse(200, {"default_branch": "main"}),
+        RegistryResponse(404),
+        RegistryResponse(404),
+        RegistryResponse(200, payload),
+    )
     registry = CandidateRegistry()
 
     async def get_client():
@@ -232,7 +290,11 @@ def test_github_latest_rejects_invalid_tag_schema(monkeypatch, payload):
 
 
 def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
-    client = RegistryClient(RegistryResponse(401))
+    client = RegistryClient(
+        RegistryResponse(200, {"default_branch": "main"}),
+        RegistryResponse(404),
+        RegistryResponse(401),
+    )
     registry = CandidateRegistry()
 
     async def get_client():
@@ -243,7 +305,7 @@ def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
         asyncio.run(
             registry.github_latest("demo", "1.0", "https://github.com/acme/demo")
         )
-    assert len(client.calls) == 1
+    assert len(client.calls) == 3
 
 
 def test_rule_rejects_unknown_policy_and_failure_mode(tmp_path):
