@@ -13,6 +13,7 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
+from .core.adapters.registry import normalize_optional_setting
 from .core.adapters.storage import redact
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
@@ -480,10 +481,8 @@ class PagesAPIMixin:
             total=int(self._get("network_timeout_seconds", 15))
         )
         self.registry.cache_ttl = int(self._get("cache_ttl_seconds", 300))
-        proxy = self._get("proxy", "")
-        token = self._get("github_token", "")
-        self.registry.proxy = str(proxy) if proxy else None
-        self.registry.token = str(token) if token else None
+        self.registry.proxy = normalize_optional_setting(self._get("proxy", ""))
+        self.registry.token = normalize_optional_setting(self._get("github_token", ""))
         self.transaction.health.stability_seconds = max(
             0.0, float(self._get("health_stability_seconds", 2.0))
         )

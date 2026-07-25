@@ -225,6 +225,16 @@ def test_optional_network_config_none_stays_unconfigured(monkeypatch, tmp_path):
     assert plugin.registry.token is None
 
 
+def test_optional_network_config_string_null_stays_unconfigured(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"proxy": "None", "github_token": "null"}
+    )
+
+    assert plugin.registry.proxy is None
+    assert plugin.registry.token is None
+
+
 def test_disabled_config_gates_all_commands(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {"enabled": False})

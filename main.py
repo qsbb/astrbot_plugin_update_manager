@@ -11,7 +11,11 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from .core.adapters.astrbot import AstrBotAdapter
-from .core.adapters.registry import CandidateRegistry, RegistryError
+from .core.adapters.registry import (
+    CandidateRegistry,
+    RegistryError,
+    normalize_optional_setting,
+)
 from .core.adapters.storage import AtomicJsonStore, redact
 from .core.catalog import PluginCatalog
 from .core.coordinator import UpdateCoordinator
@@ -61,8 +65,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self.registry = CandidateRegistry(
             timeout_seconds=int(self._get("network_timeout_seconds", 15)),
             cache_ttl_seconds=int(self._get("cache_ttl_seconds", 300)),
-            proxy=self._get("proxy", ""),
-            github_token=self._get("github_token", ""),
+            proxy=normalize_optional_setting(self._get("proxy", "")),
+            github_token=normalize_optional_setting(self._get("github_token", "")),
         )
         health = HealthChecker(
             self.adapter,

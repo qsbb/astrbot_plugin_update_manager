@@ -71,9 +71,14 @@ class AstrBotAdapter:
 
     @staticmethod
     def _discover_plugin_manager(context: Any) -> Any | None:
-        return getattr(context, "plugin_manager", None) or getattr(
-            context, "_star_manager", None
-        )
+        # AstrBot 4.x exposes the manager as Context._star_manager.  Some
+        # integrations expose the public alias instead, so accept both without
+        # depending on a private field name alone.
+        for attribute in ("plugin_manager", "star_manager", "_star_manager"):
+            manager = getattr(context, attribute, None)
+            if manager is not None:
+                return manager
+        return None
 
     @property
     def plugin_manager(self) -> Any:
@@ -119,12 +124,23 @@ class AstrBotAdapter:
         )
 
     @staticmethod
-    def _can_read_install_sources() -> bool:
+    def _shared_preferences() -> Any | None:
+        """Return AstrBot's SharedPreferences instance across 4.x layouts."""
         try:
-            from astrbot.core.utils import shared_preferences as sp  # type: ignore
+            from astrbot.core import sp  # type: ignore
         except (ImportError, AttributeError):
-            return False
-        return callable(getattr(sp, "global_get", None))
+            sp = None
+        if callable(getattr(sp, "global_get", None)):
+            return sp
+        try:
+            from astrbot.core.utils import shared_preferences as module  # type: ignore
+        except (ImportError, AttributeError):
+            return None
+        return module if callable(getattr(module, "global_get", None)) else None
+
+    @classmethod
+    def _can_read_install_sources(cls) -> bool:
+        return cls._shared_preferences() is not None
 
     def _get_all_stars(self) -> tuple[Any, ...]:
         getter = self._getter()
@@ -133,9 +149,8 @@ class AstrBotAdapter:
         return tuple(getter())
 
     async def read_install_sources(self) -> dict[str, dict[str, Any]]:
-        try:
-            from astrbot.core.utils import shared_preferences as sp  # type: ignore
-        except (ImportError, AttributeError):
+        sp = self._shared_preferences()
+        if sp is None:
             return {}
         getter = getattr(sp, "global_get", None)
         if not callable(getter):

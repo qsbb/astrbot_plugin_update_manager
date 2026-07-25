@@ -17,6 +17,16 @@ class RegistryError(RuntimeError):
     pass
 
 
+def normalize_optional_setting(value: Any) -> str | None:
+    """Normalize optional values returned by AstrBot's config wrappers."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"none", "null"}:
+        return None
+    return normalized
+
+
 class CandidateRegistry:
     def __init__(
         self,
@@ -28,8 +38,8 @@ class CandidateRegistry:
     ) -> None:
         self.timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.cache_ttl = cache_ttl_seconds
-        self.proxy = proxy or None
-        self.token = github_token or None
+        self.proxy = normalize_optional_setting(proxy)
+        self.token = normalize_optional_setting(github_token)
         self._session: aiohttp.ClientSession | None = None
         self._cache: dict[str, tuple[float, str | None, Any]] = {}
 

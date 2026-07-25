@@ -51,6 +51,7 @@ def install_shared_preferences(monkeypatch, records):
         return records
 
     shared.global_get = global_get
+    core.sp = SimpleNamespace(global_get=global_get)
     utils.shared_preferences = shared
     core.utils = utils
     astrbot.core = core
@@ -101,6 +102,31 @@ def test_probe_detects_contract(monkeypatch):
     report = AstrBotAdapter(FakeContext([star()], FakeManager())).probe_capabilities()
     assert report.plugin_manager and report.list_plugins and report.install_sources
     assert report.reload_plugin and report.update_plugin and report.cron_add_basic_job
+
+
+def test_adapter_reads_real_astrbot_core_sp_layout(monkeypatch):
+    install_shared_preferences(
+        monkeypatch,
+        {"demo": {"install_method": "github", "repo": "https://github.com/a/b"}},
+    )
+    # The real AstrBot 4.x singleton is astrbot.core.sp; the module itself only
+    # defines SharedPreferences and has no module-level global_get function.
+    del sys.modules["astrbot.core.utils.shared_preferences"].global_get
+    adapter = AstrBotAdapter(FakeContext([star()]))
+
+    snapshots = asyncio.run(adapter.snapshot_plugins())
+
+    assert adapter.probe_capabilities().install_sources is True
+    assert snapshots[0].install_source == {
+        "install_method": "github",
+        "repo": "https://github.com/a/b",
+    }
+
+
+def test_adapter_accepts_public_star_manager_alias():
+    manager = FakeManager()
+    adapter = AstrBotAdapter(SimpleNamespace(star_manager=manager, get_all_stars=lambda: []))
+    assert adapter.plugin_manager is manager
 
 
 def test_snapshot_preserves_source_reserved_and_disabled(monkeypatch):
