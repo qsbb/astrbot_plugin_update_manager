@@ -42,7 +42,14 @@ class Adapter:
         return tuple(self.snapshots)
 
 
-def snap(name="demo", version="1.2.3", source=None, reserved=False, activated=True):
+def snap(
+    name="demo",
+    version="1.2.3",
+    source=None,
+    reserved=False,
+    activated=True,
+    loaded=True,
+):
     return PluginSnapshot(
         name,
         name,
@@ -51,6 +58,8 @@ def snap(name="demo", version="1.2.3", source=None, reserved=False, activated=Tr
         "https://github.com/acme/demo",
         reserved,
         activated,
+        loaded,
+        True,
         source or {"install_method": "github", "repo": "https://github.com/acme/demo"},
     )
 
@@ -72,6 +81,7 @@ def test_catalog_explains_security_blocks():
             snap("astrbot_plugin_update_manager"),
             snap("bad", version="wat", source={"install_method": "upload"}),
             snap("reserved", reserved=True),
+            snap("unloaded", loaded=False),
         ]
     )
     items = asyncio.run(PluginCatalog(adapter).scan())
@@ -80,6 +90,12 @@ def test_catalog_explains_security_blocks():
     assert "SELF_UPDATE_BLOCKED" in by_id["astrbot_plugin_update_manager"].reasons
     assert {"VERSION_UNPARSEABLE", "SOURCE_REQUIRED"} <= set(by_id["bad"].reasons)
     assert "RESERVED_PLUGIN" in by_id["reserved"].reasons
+    assert by_id["unloaded"].loaded is False
+    assert by_id["unloaded"].activated is True  # catalog preserves observed state
+    assert by_id["unloaded"].source_kind == "github"
+    assert by_id["unloaded"].source_url == "https://github.com/acme/demo"
+    assert "PLUGIN_NOT_LOADED" in by_id["unloaded"].reasons
+    assert by_id["unloaded"].eligible is False
 
 
 def test_catalog_rejects_github_lookalike_and_credentials():

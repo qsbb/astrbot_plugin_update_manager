@@ -183,18 +183,45 @@ def test_pages_catalog_payload(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     plugin.catalog.scan = lambda: _catalog_result()
+    plugin.adapter.last_discovery_report = SimpleNamespace(
+        runtime_count=1, discovered_count=0, roots_checked=1, diagnostics=()
+    )
     payload = unwrap(asyncio.run(plugin._pages_catalog()))
     assert payload["success"] is True
+    assert payload["diagnostics"]["runtime_count"] == 1
     assert payload["items"][0] == {
         "plugin_id": "demo",
         "name": "Demo",
         "version": "1.0.0",
         "activated": True,
+        "loaded": True,
         "eligible": False,
         "reasons": ["SOURCE_UNKNOWN"],
         "source_kind": None,
         "source_url": None,
     }
+
+
+def test_pages_catalog_reports_empty_discovery_diagnostics(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    async def empty_catalog():
+        return ()
+
+    plugin.catalog.scan = empty_catalog
+    plugin.adapter.last_discovery_report = SimpleNamespace(
+        runtime_count=0,
+        discovered_count=0,
+        roots_checked=0,
+        diagnostics=("DISCOVERY_ROOT_UNAVAILABLE",),
+    )
+    payload = unwrap(asyncio.run(plugin._pages_catalog()))
+    assert payload["items"] == []
+    assert payload["diagnostics"]["messages"] == [
+        "DISCOVERY_ROOT_UNAVAILABLE",
+        "DISCOVERY_UNAVAILABLE",
+    ]
 
 
 async def _catalog_result():
@@ -204,6 +231,7 @@ async def _catalog_result():
             name="Demo",
             current_version="1.0.0",
             activated=True,
+            loaded=True,
             eligible=False,
             reasons=("SOURCE_UNKNOWN",),
             source_kind=None,

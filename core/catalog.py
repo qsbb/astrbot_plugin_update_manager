@@ -12,10 +12,19 @@ _ALLOWED_SOURCE_KINDS = {"market", "github"}
 
 def normalize_source(snapshot: PluginSnapshot) -> tuple[str | None, str | None]:
     source = snapshot.install_source or {}
-    kind = (
-        str(source.get("install_method") or source.get("source") or "").lower().strip()
-    )
-    url = str(source.get("repo") or source.get("url") or snapshot.repo or "").strip()
+    kind = str(
+        source.get("install_method")
+        or source.get("source")
+        or source.get("source_kind")
+        or ""
+    ).lower().strip()
+    url = str(
+        source.get("repo")
+        or source.get("url")
+        or source.get("source_url")
+        or snapshot.repo
+        or ""
+    ).strip()
     if kind == "github" and url:
         try:
             parsed = urlsplit(url.removesuffix(".git").rstrip("/"))
@@ -40,8 +49,10 @@ class PluginCatalog:
             plugin_id = snap.name or snap.root_dir_name or ""
             source_kind, source_url = normalize_source(snap)
             reasons: list[str] = []
-            if not plugin_id or not snap.root_dir_name:
+            if not plugin_id or not snap.root_dir_name or not snap.metadata_complete:
                 reasons.append("IDENTITY_REQUIRED")
+            if not snap.loaded:
+                reasons.append("PLUGIN_NOT_LOADED")
             if plugin_id == SELF_PLUGIN_NAME:
                 reasons.append("SELF_UPDATE_BLOCKED")
             if snap.reserved:
@@ -58,6 +69,8 @@ class PluginCatalog:
                 "source_url": source_url,
                 "reserved": snap.reserved,
                 "activated": snap.activated,
+                "loaded": snap.loaded,
+                "metadata_complete": snap.metadata_complete,
             }
             items.append(
                 CatalogItem(
@@ -69,6 +82,7 @@ class PluginCatalog:
                     source_url=source_url,
                     reserved=snap.reserved,
                     activated=snap.activated,
+                    loaded=snap.loaded,
                     eligible=not reasons,
                     reasons=tuple(reasons),
                     fingerprint=stable_hash(evidence),

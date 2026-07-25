@@ -144,6 +144,7 @@ class Catalog:
                 False,
                 False,
                 True,
+                True,
                 (),
                 "fp",
             ),

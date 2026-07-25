@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+import yaml
 
 PLUGIN_INSTALL_SOURCES_KEY = "plugin_install_sources"
 SELF_PLUGIN_NAME = "astrbot_plugin_update_manager"
@@ -41,13 +44,24 @@ class PluginSnapshot:
     repo: str
     reserved: bool
     activated: bool
+    loaded: bool
+    metadata_complete: bool
     install_source: Mapping[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryReport:
+    runtime_count: int
+    discovered_count: int
+    roots_checked: int
+    diagnostics: tuple[str, ...] = ()
 
 
 class AstrBotAdapter:
     def __init__(self, context: Any, *, plugin_manager: Any | None = None) -> None:
         self.context = context
         self._plugin_manager = plugin_manager or self._discover_plugin_manager(context)
+        self.last_discovery_report = DiscoveryReport(0, 0, 0, ("NOT_SCANNED",))
 
     @staticmethod
     def _discover_plugin_manager(context: Any) -> Any | None:
@@ -128,25 +142,236 @@ class AstrBotAdapter:
             if isinstance(value, dict)
         }
 
+    @staticmethod
+    def _contained(path: Path, root: Path) -> bool:
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return False
+        return True
+
+    def _discovery_roots(self) -> tuple[tuple[Path, bool], ...]:
+        manager = self._plugin_manager
+        if manager is None:
+            return ()
+        roots = []
+        for attribute, reserved in (
+            ("plugin_store_path", False),
+            ("plugin_path", False),
+            ("reserved_plugin_path", True),
+        ):
+            raw = getattr(manager, attribute, None)
+            if not isinstance(raw, (str, Path)) or not str(raw).strip():
+                continue
+            root = Path(raw).expanduser().resolve()
+            if root not in {item[0] for item in roots}:
+                roots.append((root, reserved))
+        return tuple(roots)
+
+    @staticmethod
+    def _read_metadata(path: Path) -> Mapping[str, Any] | None:
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            return None
+        return data if isinstance(data, Mapping) else None
+
+    @staticmethod
+    def _module_records(records: Any) -> Iterable[Any]:
+        if isinstance(records, Mapping):
+            if any(key in records for key in ("module_path", "path", "pname")):
+                return (records,)
+            return records.values()
+        if isinstance(records, Iterable) and not isinstance(records, (str, bytes, Path)):
+            return records
+        return (records,)
+
+    def _module_plugin_dir(self, record: Any, root: Path) -> Path | None:
+        if isinstance(record, Mapping):
+            raw_name = record.get("pname") or record.get("root_dir_name")
+            raw_path = record.get("module_path") or record.get("path")
+        elif isinstance(record, (tuple, list)):
+            raw_name = record[0] if record and isinstance(record[0], str) else None
+            raw_path = next(
+                (
+                    value
+                    for value in reversed(record)
+                    if isinstance(value, Path)
+                    or (isinstance(value, str) and ("/" in value or "\\" in value))
+                ),
+                None,
+            )
+        else:
+            raw_name = getattr(record, "pname", None) or getattr(
+                record, "root_dir_name", None
+            )
+            raw_path = (
+                getattr(record, "module_path", None)
+                or getattr(record, "path", None)
+                or getattr(record, "__file__", None)
+            )
+            if raw_path is None and isinstance(record, (str, Path)):
+                raw_path = record
+        if isinstance(raw_name, str) and raw_name.strip():
+            named_dir = (root / raw_name.strip()).resolve()
+            if self._contained(named_dir, root):
+                return named_dir
+        if not isinstance(raw_path, (str, Path)):
+            return None
+        module_path = Path(raw_path).expanduser().resolve()
+        plugin_dir = module_path if module_path.is_dir() else module_path.parent
+        return plugin_dir if self._contained(plugin_dir, root) else None
+
+    def _discoverable_directories(
+        self, root: Path, diagnostics: list[str]
+    ) -> tuple[Path, ...]:
+        candidates = []
+        getter = getattr(self._plugin_manager, "_get_plugin_modules", None)
+        if callable(getter):
+            try:
+                records = getter()
+                candidates.extend(
+                    plugin_dir
+                    for record in self._module_records(records)
+                    if (plugin_dir := self._module_plugin_dir(record, root)) is not None
+                )
+            except Exception:
+                diagnostics.append("DISCOVERY_MODULES_UNAVAILABLE")
+        try:
+            candidates.extend(root.iterdir())
+        except OSError:
+            diagnostics.append("DISCOVERY_ROOT_UNREADABLE")
+        return tuple(dict.fromkeys(candidates))
+
+    def _discover_snapshots(
+        self, sources: Mapping[str, Mapping[str, Any]]
+    ) -> tuple[PluginSnapshot, ...]:
+        result = []
+        diagnostics: list[str] = []
+        roots = self._discovery_roots()
+        for root, reserved in roots:
+            if not root.is_dir():
+                diagnostics.append("DISCOVERY_ROOT_UNAVAILABLE")
+                continue
+            children = self._discoverable_directories(root, diagnostics)
+            for child in children:
+                try:
+                    resolved = child.resolve()
+                except OSError:
+                    diagnostics.append("DISCOVERY_PATH_UNRESOLVED")
+                    continue
+                if child.is_symlink() or not child.is_dir() or not self._contained(resolved, root):
+                    if child.is_symlink():
+                        diagnostics.append("DISCOVERY_PATH_BLOCKED")
+                    continue
+                root_name = child.name
+                metadata_path = resolved / "metadata.yaml"
+                if not metadata_path.is_file() or not self._contained(
+                    metadata_path.resolve(), root
+                ):
+                    continue
+                metadata = self._read_metadata(metadata_path)
+                if metadata is None:
+                    diagnostics.append("METADATA_UNREADABLE")
+                    continue
+                name = str(metadata.get("name") or "").strip()
+                version = str(metadata.get("version") or "").strip()
+                repo = str(metadata.get("repo") or metadata.get("source_url") or "").strip()
+                install_source = dict(sources.get(root_name) or sources.get(name) or {})
+                for key in ("install_method", "source", "source_kind", "url", "source_url"):
+                    if key in metadata and metadata[key] is not None:
+                        install_source.setdefault(key, metadata[key])
+                if repo:
+                    install_source.setdefault("repo", repo)
+                complete = bool(name and version)
+                result.append(
+                    PluginSnapshot(
+                        name=name or root_name,
+                        root_dir_name=root_name,
+                        display_name=str(metadata.get("display_name") or name or root_name),
+                        version=version,
+                        repo=repo,
+                        reserved=reserved,
+                        activated=False,
+                        loaded=False,
+                        metadata_complete=complete,
+                        install_source=install_source or None,
+                    )
+                )
+        self.last_discovery_report = DiscoveryReport(
+            runtime_count=0,
+            discovered_count=len(result),
+            roots_checked=len(roots),
+            diagnostics=tuple(sorted(set(diagnostics))),
+        )
+        return tuple(result)
+
+    @staticmethod
+    def _merge_snapshots(
+        runtime: Iterable[PluginSnapshot], discovered: Iterable[PluginSnapshot]
+    ) -> tuple[PluginSnapshot, ...]:
+        merged: list[PluginSnapshot] = []
+        for candidate in (*runtime, *discovered):
+            duplicate = next(
+                (
+                    item
+                    for item in merged
+                    if (
+                        candidate.root_dir_name
+                        and item.root_dir_name == candidate.root_dir_name
+                    )
+                ),
+                None,
+            )
+            if duplicate is None and candidate.name:
+                duplicate = next(
+                    (item for item in merged if item.name == candidate.name), None
+                )
+            if duplicate is None:
+                merged.append(candidate)
+        return tuple(merged)
+
     async def snapshot_plugins(self) -> tuple[PluginSnapshot, ...]:
         sources = await self.read_install_sources()
-        result = []
-        for star in self._get_all_stars():
+        runtime = []
+        runtime_diagnostics: list[str] = []
+        try:
+            stars = self._get_all_stars()
+        except AdapterUnavailableError:
+            stars = ()
+            runtime_diagnostics.append("RUNTIME_LIST_UNAVAILABLE")
+        except Exception as exc:
+            stars = ()
+            runtime_diagnostics.append(f"RUNTIME_LIST_FAILED:{type(exc).__name__}")
+        for star in stars:
             name = str(getattr(star, "name", "") or "").strip()
             root = str(getattr(star, "root_dir_name", "") or "").strip() or None
-            result.append(
+            runtime.append(
                 PluginSnapshot(
-                    name,
-                    root,
-                    str(getattr(star, "display_name", "") or ""),
-                    str(getattr(star, "version", "") or ""),
-                    str(getattr(star, "repo", "") or ""),
-                    bool(getattr(star, "reserved", False)),
-                    bool(getattr(star, "activated", False)),
-                    sources.get(root or "") or sources.get(name),
+                    name=name,
+                    root_dir_name=root,
+                    display_name=str(getattr(star, "display_name", "") or ""),
+                    version=str(getattr(star, "version", "") or ""),
+                    repo=str(getattr(star, "repo", "") or ""),
+                    reserved=bool(getattr(star, "reserved", False)),
+                    activated=bool(getattr(star, "activated", False)),
+                    loaded=True,
+                    metadata_complete=bool(name and root),
+                    install_source=sources.get(root or "") or sources.get(name),
                 )
             )
-        return tuple(result)
+        discovered = self._discover_snapshots(sources)
+        discovery_report = self.last_discovery_report
+        merged = self._merge_snapshots(runtime, discovered)
+        self.last_discovery_report = DiscoveryReport(
+            runtime_count=len(runtime),
+            discovered_count=sum(not item.loaded for item in merged),
+            roots_checked=discovery_report.roots_checked,
+            diagnostics=tuple(
+                sorted(set(discovery_report.diagnostics + tuple(runtime_diagnostics)))
+            ),
+        )
+        return merged
 
     async def get_plugin(self, plugin_id: str) -> PluginSnapshot | None:
         return next(
@@ -171,7 +396,7 @@ class AstrBotAdapter:
         if source_kind not in {"market", "github"} or not source_url:
             raise ValueError("SOURCE_REQUIRED")
         current = await self.get_plugin(plugin_id)
-        if current is None or current.reserved:
+        if current is None or current.reserved or not current.loaded:
             raise ValueError("PLUGIN_NOT_MANAGEABLE")
         method = getattr(self.plugin_manager, "update_plugin", None)
         if not callable(method):

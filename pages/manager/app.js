@@ -4,20 +4,22 @@ const messages = {
     refresh: "刷新", overview: "总览", config: "配置", catalog: "目录", loading: "加载中…",
     startupFailed: "页面启动失败",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
-    save: "保存", catalogTitle: "插件目录", catalogHint: "展示当前 AstrBot 可见插件及更新资格。",
+    save: "保存", catalogTitle: "插件目录", catalogHint: "优先展示已加载插件；运行时列表为空时展示已安装元数据，未加载插件不可更新。",
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
-    eligible: "可规划", blocked: "已阻断", empty: "暂无插件", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败"
+    eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
+    empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败"
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
     refresh: "Refresh", overview: "Overview", config: "Configuration", catalog: "Catalog", loading: "Loading…",
     startupFailed: "Page startup failed",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
-    save: "Save", catalogTitle: "Plugin catalog", catalogHint: "AstrBot plugins visible to the current runtime and update eligibility.",
+    save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Loaded plugins are preferred. Installed metadata is shown only when the runtime list is empty; unloaded plugins cannot be updated.",
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
-    eligible: "Eligible", blocked: "Blocked", empty: "No plugins", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed"
+    eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
+    empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed"
   }
 };
 
@@ -154,7 +156,8 @@ async function saveConfig(event) {
 async function loadCatalog() {
   const data = await apiGet("catalog");
   const items = data.items || [];
-  document.getElementById("catalog-list").innerHTML = items.length ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.plugin_id)}</strong><span>${escapeHtml(item.version || "—")} · ${item.activated ? "active" : "inactive"}</span></div><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span></article>`).join("") : `<p>${t("empty")}</p>`;
+  const diagnostics = data.diagnostics?.messages || [];
+  document.getElementById("catalog-list").innerHTML = items.length ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.plugin_id)}</strong><span>${escapeHtml(item.version || "—")} · ${item.loaded ? t("loaded") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></div><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span></article>`).join("") : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
 }
 
 async function refreshAll() {

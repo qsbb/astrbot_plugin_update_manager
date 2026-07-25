@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from astrbot_plugin_update_manager.core.adapters.astrbot import AstrBotAdapter
+from astrbot_plugin_update_manager.core.catalog import PluginCatalog
 
 
 class FakeManager:
@@ -62,16 +63,37 @@ def install_shared_preferences(monkeypatch, records):
         monkeypatch.setitem(sys.modules, name, module)
 
 
-def star(name="demo", *, reserved=False, activated=True):
+def star(name="demo", *, root_dir_name=None, reserved=False, activated=True):
     return SimpleNamespace(
         name=name,
-        root_dir_name=name,
+        root_dir_name=root_dir_name or name,
         display_name=name,
         version="1.2.3",
         repo="https://github.com/acme/demo",
         reserved=reserved,
         activated=activated,
     )
+
+
+def write_metadata(root, name="discovered", *, version="1.2.3"):
+    plugin = root / name
+    plugin.mkdir()
+    (plugin / "metadata.yaml").write_text(
+        f"name: {name}\ndisplay_name: {name} name\nversion: {version}\n"
+        "repo: https://github.com/acme/discovered\n",
+        encoding="utf-8",
+    )
+    return plugin
+
+
+def test_adapter_runtime_dependencies_are_declared():
+    requirements = Path(__file__).resolve().parents[1] / "requirements.txt"
+    declared = {
+        line.strip()
+        for line in requirements.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert "PyYAML>=6.0" in declared
 
 
 def test_probe_detects_contract(monkeypatch):
@@ -128,3 +150,130 @@ def test_update_and_reload_use_core_manager(monkeypatch):
     asyncio.run(adapter.reload_plugin("demo"))
     assert manager.updated == [("demo", "https://github.com/acme/demo")]
     assert manager.reloaded == ["demo"]
+
+
+def test_snapshot_merges_loaded_self_with_other_installed_plugins(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    write_metadata(tmp_path, "astrbot_plugin_update_manager", version="9.9.9")
+    write_metadata(tmp_path, "installed_only")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    adapter = AstrBotAdapter(
+        FakeContext([star("astrbot_plugin_update_manager")], manager)
+    )
+    snapshots = asyncio.run(adapter.snapshot_plugins())
+    assert [item.name for item in snapshots] == [
+        "astrbot_plugin_update_manager",
+        "installed_only",
+    ]
+    assert snapshots[0].loaded is True
+    assert snapshots[0].version == "1.2.3"
+    assert snapshots[1].loaded is False
+    assert snapshots[1].activated is False
+    catalog = {item.plugin_id: item for item in asyncio.run(PluginCatalog(adapter).scan())}
+    assert catalog["installed_only"].eligible is False
+    assert "PLUGIN_NOT_LOADED" in catalog["installed_only"].reasons
+    assert adapter.last_discovery_report.runtime_count == 1
+    assert adapter.last_discovery_report.discovered_count == 1
+    assert adapter.last_discovery_report.roots_checked == 1
+    assert adapter.last_discovery_report.diagnostics == ()
+
+
+def test_snapshot_deduplicates_by_root_before_plugin_id(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    write_metadata(tmp_path, "runtime_root", version="9.9.9")
+    write_metadata(tmp_path, "shared_id")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    adapter = AstrBotAdapter(
+        FakeContext([star("shared_id", root_dir_name="runtime_root")], manager)
+    )
+    snapshots = asyncio.run(adapter.snapshot_plugins())
+    assert [(item.name, item.root_dir_name, item.loaded) for item in snapshots] == [
+        ("shared_id", "runtime_root", True)
+    ]
+    assert adapter.last_discovery_report.discovered_count == 0
+
+
+def test_snapshot_falls_back_to_installed_metadata_when_runtime_empty(
+    monkeypatch, tmp_path
+):
+    install_shared_preferences(
+        monkeypatch,
+        {
+            "unloaded": {
+                "install_method": "github",
+                "repo": "https://github.com/acme/discovered",
+            }
+        },
+    )
+    write_metadata(tmp_path, "unloaded")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    adapter = AstrBotAdapter(FakeContext([], manager))
+    snapshots = asyncio.run(adapter.snapshot_plugins())
+    assert len(snapshots) == 1
+    assert snapshots[0].name == "unloaded"
+    assert snapshots[0].display_name == "unloaded name"
+    assert snapshots[0].version == "1.2.3"
+    assert snapshots[0].loaded is False
+    assert snapshots[0].activated is False
+    assert snapshots[0].install_source["install_method"] == "github"
+    assert adapter.last_discovery_report.discovered_count == 1
+
+
+def test_snapshot_fallback_supports_manager_modules_without_context_getter(
+    monkeypatch, tmp_path
+):
+    install_shared_preferences(monkeypatch, {})
+    plugin = write_metadata(tmp_path, "module_plugin")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    manager._get_plugin_modules = lambda: {
+        "module_plugin": {
+            "pname": "module_plugin",
+            "module": "main",
+            "module_path": plugin / "main",
+        }
+    }
+    context_without_getter = SimpleNamespace(_star_manager=manager)
+    adapter = AstrBotAdapter(context_without_getter)
+    snapshots = asyncio.run(adapter.snapshot_plugins())
+    assert [item.name for item in snapshots] == ["module_plugin"]
+    assert snapshots[0].loaded is False
+    assert "RUNTIME_LIST_UNAVAILABLE" in adapter.last_discovery_report.diagnostics
+
+
+def test_discovery_blocks_symlink_escape(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    write_metadata(outside, "escaped")
+    root = tmp_path / "plugins"
+    root.mkdir()
+    try:
+        (root / "escaped").symlink_to(outside / "escaped", target_is_directory=True)
+    except OSError:
+        pytest.skip("当前环境不允许创建目录符号链接")
+    manager = FakeManager()
+    manager.plugin_store_path = root
+    adapter = AstrBotAdapter(FakeContext([], manager))
+    assert asyncio.run(adapter.snapshot_plugins()) == ()
+    assert "DISCOVERY_PATH_BLOCKED" in adapter.last_discovery_report.diagnostics
+
+
+def test_update_rejects_discovered_but_unloaded_plugin(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    write_metadata(tmp_path, "unloaded")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    adapter = AstrBotAdapter(FakeContext([], manager))
+    with pytest.raises(ValueError, match="MANAGEABLE"):
+        asyncio.run(
+            adapter.update_plugin(
+                "unloaded",
+                source_kind="github",
+                source_url="https://github.com/acme/discovered",
+            )
+        )
+    assert manager.updated == []

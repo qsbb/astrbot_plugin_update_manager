@@ -90,6 +90,7 @@ class CatalogItem:
     source_url: str | None
     reserved: bool
     activated: bool
+    loaded: bool
     eligible: bool
     reasons: tuple[str, ...]
     fingerprint: str

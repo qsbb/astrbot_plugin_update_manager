@@ -37,6 +37,7 @@ def catalog_item() -> CatalogItem:
         False,
         False,
         True,
+        True,
         (),
         "fingerprint",
     )

@@ -264,15 +264,31 @@ class PagesAPIMixin:
 
     async def _pages_catalog(self):
         items = await self.catalog.scan()
+        report = self.adapter.last_discovery_report
+        diagnostics = list(report.diagnostics)
+        if not items:
+            if report.roots_checked == 0:
+                diagnostics.append("DISCOVERY_UNAVAILABLE")
+            else:
+                diagnostics.append("NO_PLUGIN_METADATA_FOUND")
         return json_response(
             {
                 "success": True,
+                "diagnostics": {
+                    "runtime_count": report.runtime_count,
+                    "discovered_count": report.discovered_count,
+                    "roots_checked": report.roots_checked,
+                    "messages": sorted(set(diagnostics)),
+                },
                 "items": [
                     {
                         "plugin_id": item.plugin_id,
-                        "name": item.name,
+                        "name": getattr(
+                            item, "display_name", getattr(item, "name", item.plugin_id)
+                        ),
                         "version": item.current_version,
                         "activated": item.activated,
+                        "loaded": item.loaded,
                         "eligible": item.eligible,
                         "reasons": list(item.reasons),
                         "source_kind": item.source_kind,
