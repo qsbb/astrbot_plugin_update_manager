@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
 from .core.adapters.storage import redact
@@ -44,6 +48,12 @@ class PagesAPIMixin:
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
             ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
+            (
+                "recommendations/check-latest",
+                self._pages_check_recommendations,
+                ["POST"],
+                "强制检查可信系列最新版本",
+            ),
             ("install", self._pages_install, ["POST"], "安装可信系列插件"),
             ("update", self._pages_update, ["POST"], "更新可信系列插件"),
             ("enable", self._pages_enable, ["POST"], "启用可信系列插件"),
@@ -267,8 +277,8 @@ class PagesAPIMixin:
             total=int(self._get("network_timeout_seconds", 15))
         )
         self.registry.cache_ttl = int(self._get("cache_ttl_seconds", 300))
-        self.registry.proxy = str(self._get("proxy", ""))
-        self.registry.github_token = str(self._get("github_token", ""))
+        self.registry.proxy = str(self._get("proxy", "")) or None
+        self.registry.token = str(self._get("github_token", "")) or None
         self.transaction.health.stability_seconds = max(
             0.0, float(self._get("health_stability_seconds", 2.0))
         )
@@ -345,46 +355,138 @@ class PagesAPIMixin:
             {"success": False, "error": code, "detail": redact(code)}, status=status
         )
 
-    async def _pages_recommendations(self):
+    @staticmethod
+    def _version_state(current: str, latest: str) -> tuple[bool, str]:
+        if not current:
+            return False, "not_installed"
+        try:
+            current_version, latest_version = Version(current), Version(latest)
+        except InvalidVersion:
+            return False, "unknown"
+        if latest_version > current_version:
+            return True, "update_available"
+        if latest_version == current_version:
+            return False, "up_to_date"
+        return False, "local_newer"
+
+    async def _recommendation_payload(self, *, force_refresh: bool) -> dict[str, Any]:
         snapshots = await self.adapter.snapshot_plugins()
-        installed = {}
-        for item in snapshots:
-            for identity in (item.name, item.root_dir_name):
-                if identity:
-                    installed[identity] = item
+        installed = {
+            identity: item
+            for item in snapshots
+            for identity in (item.name, item.root_dir_name)
+            if identity
+        }
         capabilities = self.adapter.probe_capabilities()
-        return json_response(
-            {
-                "success": True,
-                "items": [
-                    {
-                        "key": trusted.key,
-                        "plugin_id": trusted.plugin_id,
-                        "name": trusted.display_name,
-                        "repo_url": trusted.repo_url,
-                        "description_zh": trusted.description_zh,
-                        "installed": (snapshot := installed.get(trusted.plugin_id)) is not None,
-                        "version": snapshot.version if snapshot else "",
-                        "loaded": snapshot.loaded if snapshot else False,
-                        "activated": snapshot.activated if snapshot else False,
-                        "actions": {
-                            "install": snapshot is None and capabilities.install_plugin,
-                            "update": snapshot is not None and snapshot.loaded and trusted.plugin_id != PLUGIN_ID and capabilities.update_plugin,
-                            "enable": snapshot is not None and snapshot.loaded and not snapshot.activated and capabilities.turn_on_plugin,
-                            "disable": snapshot is not None and snapshot.loaded and snapshot.activated and trusted.plugin_id != PLUGIN_ID and capabilities.turn_off_plugin,
-                        },
-                    }
-                    for trusted in TRUSTED_SERIES
-                ],
+
+        async def inspect_latest(trusted):
+            snapshot = installed.get(trusted.plugin_id)
+            checked_at = datetime.now(timezone.utc).isoformat()
+            try:
+                candidate = await self.registry.github_latest(
+                    trusted.plugin_id,
+                    snapshot.version if snapshot else "",
+                    trusted.repo_url,
+                    force_refresh=force_refresh,
+                )
+                latest_version = candidate.target_version
+                update_available, version_status = self._version_state(
+                    snapshot.version if snapshot else "", latest_version
+                )
+                error = None
+            except Exception as exc:
+                latest_version = ""
+                update_available, version_status = False, "check_failed"
+                error = str(exc) or type(exc).__name__
+            return trusted, snapshot, {
+                "latest_version": latest_version,
+                "update_available": update_available,
+                "version_status": version_status,
+                "checked_at": checked_at,
+                "error": error,
             }
+
+        checked = await asyncio.gather(
+            *(inspect_latest(trusted) for trusted in TRUSTED_SERIES)
         )
+        items = []
+        for trusted, snapshot, version_check in checked:
+            items.append(
+                {
+                    "key": trusted.key,
+                    "plugin_id": trusted.plugin_id,
+                    "name": trusted.display_name,
+                    "repo_url": trusted.repo_url,
+                    "description_zh": trusted.description_zh,
+                    "installed": snapshot is not None,
+                    "version": snapshot.version if snapshot else "",
+                    "loaded": snapshot.loaded if snapshot else False,
+                    "activated": snapshot.activated if snapshot else False,
+                    **version_check,
+                    "actions": {
+                        "install": snapshot is None and capabilities.install_plugin,
+                        "update": bool(
+                            snapshot
+                            and snapshot.loaded
+                            and version_check["update_available"]
+                            and trusted.plugin_id != PLUGIN_ID
+                            and capabilities.update_plugin
+                        ),
+                        "enable": bool(
+                            snapshot
+                            and snapshot.loaded
+                            and not snapshot.activated
+                            and capabilities.turn_on_plugin
+                        ),
+                        "disable": bool(
+                            snapshot
+                            and snapshot.loaded
+                            and snapshot.activated
+                            and trusted.plugin_id != PLUGIN_ID
+                            and capabilities.turn_off_plugin
+                        ),
+                    },
+                }
+            )
+        return {"success": True, "items": items}
+
+    async def _pages_recommendations(self):
+        return json_response(await self._recommendation_payload(force_refresh=False))
+
+    async def _pages_check_recommendations(self):
+        return json_response(await self._recommendation_payload(force_refresh=True))
+
+    @staticmethod
+    def _lifecycle(operation: str, snapshot) -> dict[str, Any]:
+        return {
+            "operation": operation,
+            "managed_by": "astrbot_plugin_manager",
+            "direct_load": operation == "install",
+            "internal_hot_reload": operation in {"update", "enable"},
+            "extra_reload": False,
+            "extra_reload_performed": False,
+            "snapshot_verified": True,
+            "snapshot": {
+                "version": snapshot.version,
+                "loaded": snapshot.loaded,
+                "activated": snapshot.activated,
+            },
+        }
 
     async def _pages_install(self):
         try:
             plugin_id = await self._trusted_plugin_id()
             item = TRUSTED_BY_ID[plugin_id]
             snapshot = await self.adapter.install_plugin(plugin_id, repo_url=item.repo_url)
-            return json_response({"success": True, "plugin_id": plugin_id, "installed": True, "version": snapshot.version})
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": plugin_id,
+                    "installed": True,
+                    "version": snapshot.version,
+                    "lifecycle": self._lifecycle("install", snapshot),
+                }
+            )
         except Exception as exc:
             return self._mutation_error(exc)
 
@@ -394,8 +496,18 @@ class PagesAPIMixin:
             if plugin_id == PLUGIN_ID:
                 raise ValueError("SELF_UPDATE_BLOCKED")
             item = TRUSTED_BY_ID[plugin_id]
-            await self.adapter.update_plugin(plugin_id, source_kind="github", source_url=item.repo_url)
-            return json_response({"success": True, "plugin_id": plugin_id, "updated": True})
+            snapshot = await self.adapter.update_plugin(
+                plugin_id, source_kind="github", source_url=item.repo_url
+            )
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": plugin_id,
+                    "updated": True,
+                    "version": snapshot.version,
+                    "lifecycle": self._lifecycle("update", snapshot),
+                }
+            )
         except Exception as exc:
             return self._mutation_error(exc)
 
@@ -405,7 +517,15 @@ class PagesAPIMixin:
             if plugin_id == PLUGIN_ID and not enabled:
                 raise ValueError("SELF_DISABLE_BLOCKED")
             snapshot = await self.adapter.set_plugin_enabled(plugin_id, enabled)
-            return json_response({"success": True, "plugin_id": plugin_id, "activated": snapshot.activated})
+            operation = "enable" if enabled else "disable"
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": plugin_id,
+                    "activated": snapshot.activated,
+                    "lifecycle": self._lifecycle(operation, snapshot),
+                }
+            )
         except Exception as exc:
             return self._mutation_error(exc)
 

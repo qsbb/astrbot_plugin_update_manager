@@ -42,9 +42,15 @@ class CandidateRegistry:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def fetch_json(self, url: str) -> dict[str, Any]:
+    async def fetch_json(
+        self, url: str, *, force_refresh: bool = False
+    ) -> dict[str, Any]:
         cached = self._cache.get(url)
-        if cached and time.monotonic() - cached[0] < self.cache_ttl:
+        if (
+            not force_refresh
+            and cached
+            and time.monotonic() - cached[0] < self.cache_ttl
+        ):
             return cached[2]
         headers = {"Accept": "application/vnd.github+json"}
         if self.token:
@@ -119,7 +125,12 @@ class CandidateRegistry:
         )
 
     async def github_latest(
-        self, plugin_id: str, current_version: str, source_url: str
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        *,
+        force_refresh: bool = False,
     ) -> Candidate:
         try:
             parsed = urlsplit(source_url)
@@ -137,7 +148,8 @@ class CandidateRegistry:
             raise RegistryError("SOURCE_REQUIRED")
         repo = "/".join(parts)
         payload = await self.fetch_json(
-            f"https://api.github.com/repos/{repo}/releases/latest"
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            force_refresh=force_refresh,
         )
         target = str(payload.get("tag_name") or "").removeprefix("v")
         published = payload.get("published_at")

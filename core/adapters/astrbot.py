@@ -454,7 +454,7 @@ class AstrBotAdapter:
                 result = await result
             self._validate_result(result, "install_plugin")
             installed = await self.get_plugin(plugin_id)
-            if installed is None:
+            if installed is None or not installed.loaded:
                 raise RuntimeError("INSTALL_RESULT_NOT_FOUND")
             return installed
 
@@ -465,7 +465,7 @@ class AstrBotAdapter:
         source_kind: str,
         source_url: str,
         archive_url: str | None = None,
-    ) -> None:
+    ) -> PluginSnapshot:
         if plugin_id == SELF_PLUGIN_NAME:
             raise ValueError("SELF_UPDATE_BLOCKED")
         if source_kind not in {"market", "github"} or not source_url:
@@ -487,8 +487,9 @@ class AstrBotAdapter:
                     raise ValueError("ARCHIVE_URL_REQUIRED")
             await self._invoke("update_plugin", plugin_id, **extra)
             updated = await self.get_plugin(plugin_id)
-            if updated is None:
+            if updated is None or not updated.loaded:
                 raise RuntimeError("UPDATE_RESULT_NOT_FOUND")
+            return updated
 
     async def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> PluginSnapshot:
         if plugin_id == SELF_PLUGIN_NAME and not enabled:

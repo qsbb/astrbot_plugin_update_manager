@@ -95,6 +95,77 @@ def test_market_candidate_uses_only_recorded_evidence():
     assert candidate.digest == "abc"
 
 
+class RegistryResponse:
+    def __init__(self, status, payload=None, headers=None):
+        self.status = status
+        self.payload = payload
+        self.headers = headers or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    def raise_for_status(self):
+        return None
+
+    async def json(self, *, content_type=None):
+        return self.payload
+
+
+class RegistryClient:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
+
+
+def test_registry_reuses_fresh_ttl_cache_without_network(monkeypatch):
+    payload = {"tag_name": "v1.2.3"}
+    client = RegistryClient(RegistryResponse(200, payload, {"ETag": '"release-1"'}))
+    registry = CandidateRegistry(cache_ttl_seconds=300)
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    first = asyncio.run(registry.fetch_json("https://api.example/releases/latest"))
+    second = asyncio.run(registry.fetch_json("https://api.example/releases/latest"))
+
+    assert first is payload
+    assert second is payload
+    assert len(client.calls) == 1
+
+
+def test_registry_force_refresh_preserves_etag_and_304_reuses_cache(monkeypatch):
+    payload = {"tag_name": "v1.2.3"}
+    client = RegistryClient(
+        RegistryResponse(200, payload, {"ETag": '"release-1"'}),
+        RegistryResponse(304),
+    )
+    registry = CandidateRegistry(cache_ttl_seconds=300)
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    cached = asyncio.run(registry.fetch_json("https://api.example/releases/latest"))
+    refreshed = asyncio.run(
+        registry.fetch_json(
+            "https://api.example/releases/latest", force_refresh=True
+        )
+    )
+
+    assert len(client.calls) == 2
+    assert client.calls[1][1]["headers"]["If-None-Match"] == '"release-1"'
+    assert refreshed is cached
+    assert registry._cache["https://api.example/releases/latest"][2] is payload
+
+
 def test_rule_rejects_unknown_policy_and_failure_mode(tmp_path):
     service = ScheduleService(None, AtomicJsonStore(tmp_path), lambda rule: None)
     with pytest.raises(RuleValidationError, match="INVALID_POLICY"):

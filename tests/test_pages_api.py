@@ -28,6 +28,7 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/recommendations/check-latest", ("POST",)),
         (f"/{module.PLUGIN_NAME}/install", ("POST",)),
         (f"/{module.PLUGIN_NAME}/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/enable", ("POST",)),
@@ -93,7 +94,7 @@ def test_pages_save_config_validates_and_preserves_empty_token(monkeypatch, tmp_
     assert payload["success"] is True
     assert plugin.enabled is False
     assert plugin.planner.ttl_seconds == 1200
-    assert plugin.registry.github_token == "secret"
+    assert plugin.registry.token == "secret"
     persisted = plugin.store.read("manager-config.json", {})
     assert persisted["enabled"] is False
     assert "github_token" not in persisted
@@ -266,6 +267,85 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     assert core["installed"] is True
     assert core["actions"]["update"] is False
     assert core["actions"]["disable"] is False
+    assert all(
+        {"latest_version", "update_available", "version_status", "checked_at", "error"}
+        <= item.keys()
+        for item in payload["items"]
+    )
+
+
+def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    active = 0
+    peak = 0
+    force_values = []
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        nonlocal active, peak
+        force_values.append(force_refresh)
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        if plugin_id == "astrbot_plugin_identity_guardian":
+            raise RuntimeError("RATE_LIMITED")
+        return SimpleNamespace(target_version="9.9.9")
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    assert payload["success"] is True
+    assert len(payload["items"]) == 5
+    assert peak > 1
+    assert force_values == [True] * 5
+    failed = next(
+        item
+        for item in payload["items"]
+        if item["plugin_id"] == "astrbot_plugin_identity_guardian"
+    )
+    assert failed["version_status"] == "check_failed"
+    assert failed["error"] == "RATE_LIMITED"
+    assert all(item["checked_at"] for item in payload["items"])
+
+
+def test_update_action_requires_newer_version(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    async def snapshots():
+        return (
+            SimpleNamespace(
+                name="astrbot_plugin_voice_hub",
+                root_dir_name="astrbot_plugin_voice_hub",
+                version="1.0.0",
+                loaded=True,
+                activated=True,
+            ),
+        )
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        target = "1.0.1" if plugin_id == "astrbot_plugin_voice_hub" else "1.0.0"
+        return SimpleNamespace(target_version=target)
+
+    plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    capabilities = SimpleNamespace(
+        install_plugin=True,
+        update_plugin=True,
+        turn_on_plugin=True,
+        turn_off_plugin=True,
+    )
+    monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    voice = next(
+        item for item in payload["items"] if item["plugin_id"] == "astrbot_plugin_voice_hub"
+    )
+    assert voice["latest_version"] == "1.0.1"
+    assert voice["update_available"] is True
+    assert voice["version_status"] == "update_available"
+    assert voice["actions"]["update"] is True
 
 
 def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch, tmp_path):
@@ -281,21 +361,42 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
 
     async def install(plugin_id, *, repo_url):
         calls.append(("install", plugin_id, repo_url))
-        return SimpleNamespace(version="0.6.2")
+        return SimpleNamespace(version="0.6.2", loaded=True, activated=True)
+
+    async def update(plugin_id, *, source_kind, source_url):
+        calls.append(("update", plugin_id, source_kind, source_url))
+        return SimpleNamespace(version="0.6.3", loaded=True, activated=True)
 
     async def enable(plugin_id, enabled):
         calls.append(("enabled", plugin_id, enabled))
-        return SimpleNamespace(activated=enabled)
+        return SimpleNamespace(version="0.6.2", loaded=True, activated=enabled)
 
     monkeypatch.setattr(plugin, "_request_json", request_voice_confirmed)
     monkeypatch.setattr(plugin.adapter, "install_plugin", install)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
     monkeypatch.setattr(plugin.adapter, "set_plugin_enabled", enable)
-    assert unwrap(asyncio.run(plugin._pages_install()))["installed"] is True
-    assert unwrap(asyncio.run(plugin._pages_disable()))["activated"] is False
+    installed = unwrap(asyncio.run(plugin._pages_install()))
+    assert installed["installed"] is True
+    assert installed["lifecycle"]["snapshot_verified"] is True
+    assert installed["lifecycle"]["direct_load"] is True
+    assert installed["lifecycle"]["internal_hot_reload"] is False
+    assert installed["lifecycle"]["extra_reload"] is False
+    assert installed["lifecycle"]["extra_reload_performed"] is False
+    updated = unwrap(asyncio.run(plugin._pages_update()))
+    assert updated["lifecycle"]["direct_load"] is False
+    assert updated["lifecycle"]["internal_hot_reload"] is True
+    assert updated["lifecycle"]["extra_reload"] is False
+    disabled = unwrap(asyncio.run(plugin._pages_disable()))
+    assert disabled["activated"] is False
+    assert disabled["lifecycle"]["snapshot"]["activated"] is False
+    assert disabled["lifecycle"]["internal_hot_reload"] is False
     assert calls[0][2] == "https://github.com/qsbb/astrbot_plugin_voice_hub"
 
     monkeypatch.setattr(plugin, "_request_json", request_voice_direct)
-    assert unwrap(asyncio.run(plugin._pages_enable()))["activated"] is True
+    enabled = unwrap(asyncio.run(plugin._pages_enable()))
+    assert enabled["activated"] is True
+    assert enabled["lifecycle"]["internal_hot_reload"] is True
+    assert enabled["lifecycle"]["extra_reload"] is False
 
     async def request_untrusted():
         return {"plugin_id": "evil", "confirm": True}

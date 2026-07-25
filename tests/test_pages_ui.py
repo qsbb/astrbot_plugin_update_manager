@@ -94,6 +94,32 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert "data.diagnostics?.messages" in js
 
 
+def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert 'id="check-latest"' in html
+    assert 'apiPost("recommendations/check-latest", {})' in js
+    assert "actions.update" in js
+    for status in (
+        "update_available",
+        "up_to_date",
+        "local_newer",
+        "not_installed",
+        "check_failed",
+        "unknown",
+    ):
+        assert status in js
+    assert "function versionStatusBadge(item)" in js
+    assert "escapeHtml(item.error)" in js
+    assert 'role="switch"' in js
+    assert 'aria-checked="${item.activated ? "true" : "false"}"' in js
+    assert "await loadRecommendations();" in js
+    assert ".lifecycle-switch input:focus-visible" in css
+    assert "官方安装会直接加载" in html
+    assert "不会额外重复重载" in html
+
+
 def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
@@ -102,7 +128,7 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     assert 'id="confirmation-dialog"' in html
     assert 'id="recommendation-status"' in html
     assert "requiresConfirmation && !await confirmRecommendationAction" in js
-    assert 'querySelectorAll("#recommendations-list button")' in js
+    assert 'input[role=\'switch\']' in js
     assert "item.disabled = true" in js
     assert "setRecommendationBusy(action, pluginName)" in js
     assert "clearRecommendationBusy()" in js
