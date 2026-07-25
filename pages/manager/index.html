@@ -41,6 +41,22 @@
         <div class="section-heading"><div><h2 data-i18n="configTitle">配置读取与保存</h2><p data-i18n="tokenHint">敏感 token 仅显示是否已配置，留空不会覆盖。</p></div><button type="submit" data-i18n="save">保存</button></div>
         <div id="config-fields" class="form-grid"></div>
       </form>
+      <form id="rule-form" class="card">
+        <div class="section-heading"><div><h2 data-i18n="ruleTitle">每日自动更新</h2><p id="rule-gate-hint"></p></div><button type="submit" data-i18n="saveRule">保存规则</button></div>
+        <div class="rule-grid">
+          <label class="switch gate-switch"><input id="rule-auto-update-enabled" type="checkbox" role="switch" /><span><strong data-i18n="autoUpdateGate">允许自动更新总闸</strong><small data-i18n="autoUpdateGateHint">关闭时任何每日规则都不会执行自动更新。</small></span></label>
+          <label class="switch"><input id="rule-enabled" type="checkbox" /><span data-i18n="ruleEnabled">启用每日规则</span></label>
+          <label><span data-i18n="ruleTime">运行时间</span><input id="rule-time" type="time" required /></label>
+          <label><span data-i18n="ruleTimezone">时区</span><input id="rule-timezone" type="text" required /></label>
+          <label><span data-i18n="rulePolicy">更新策略</span><select id="rule-policy"><option value="check_only" data-i18n="policyCheckOnly">仅检查（check_only）</option><option value="patch" data-i18n="policyPatch">仅补丁版本（patch）</option><option value="minor" data-i18n="policyMinor">允许次版本（minor）</option><option value="stable" data-i18n="policyStable">最新稳定版（stable）</option></select><small id="check-only-note" data-i18n="checkOnlyNote">check_only 仅检查并记录，绝不会更新插件。</small></label>
+          <label><span data-i18n="failurePolicy">失败策略</span><select id="rule-failure"><option value="rollback_continue" data-i18n="failureRollbackContinue">回滚后继续（rollback_continue）</option><option value="rollback_stop" data-i18n="failureRollbackStop">回滚并停止（rollback_stop）</option></select></label>
+          <label><span data-i18n="jitter">抖动（分钟）</span><input id="rule-jitter" type="number" min="0" max="120" required /></label>
+          <label><span data-i18n="minimumAge">最小发布年龄（小时）</span><input id="rule-minimum-age" type="number" min="0" max="8760" required /></label>
+          <label class="switch"><input id="rule-prerelease" type="checkbox" /><span data-i18n="prerelease">允许预发行版本</span></label>
+        </div>
+        <fieldset class="plugin-picker"><legend data-i18n="selectPlugins">选择插件</legend><div id="rule-plugins"></div></fieldset>
+        <p class="next-run"><span data-i18n="nextRun">下次运行</span>：<strong id="rule-next-run">—</strong></p>
+      </form>
     </section>
 
     <section id="catalog" class="panel">

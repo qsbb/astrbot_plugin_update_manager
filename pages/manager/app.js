@@ -13,7 +13,8 @@ const messages = {
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
     eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
-    empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败"
+    empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败",
+    ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）"
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
@@ -29,7 +30,8 @@ const messages = {
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
     eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
-    empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed"
+    empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed",
+    ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)"
   }
 };
 
@@ -56,6 +58,7 @@ const storedLocale = readStoredLocale();
 const state = {
   locale: Object.prototype.hasOwnProperty.call(messages, storedLocale) ? storedLocale : "zh-CN",
   config: null,
+  rule: null,
   recommendationBusy: null
 };
 const t = (key) => messages[state.locale][key] || key;
@@ -120,9 +123,11 @@ async function loadOverview() {
     [t("busy"), plugin.busy ? t("running") : t("idle")],
     [t("nextRun"), rule.next_run || "—"]
   ].map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
-  document.getElementById("capabilities").innerHTML = Object.entries(data.runtime?.capabilities || {}).map(([key, value]) =>
-    `<div><code>${escapeHtml(key)}</code><span class="pill ${value ? "ok" : "off"}">${value ? t("available") : t("unavailable")}</span></div>`
-  ).join("");
+  document.getElementById("capabilities").innerHTML = (data.runtime?.capabilities || []).map((item) => {
+    const label = item.label?.[state.locale] || item.code;
+    const comment = item.comment?.[state.locale] || "";
+    return `<div><span class="capability-copy"><strong>${escapeHtml(label)}</strong><code>${escapeHtml(item.code)}</code><small>${escapeHtml(comment)}</small></span><span class="pill ${item.available ? "ok" : "off"}">${item.available ? t("available") : t("unavailable")}</span></div>`;
+  }).join("");
 }
 
 function makeField(key, field, value) {
@@ -143,6 +148,65 @@ async function loadConfig() {
   const data = await apiGet("config");
   state.config = data;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+}
+
+async function loadRule() {
+  const data = await apiGet("rule");
+  state.rule = data;
+  const rule = data.rule || {};
+  document.getElementById("rule-auto-update-enabled").checked = Boolean(data.global?.auto_update_enabled);
+  document.getElementById("rule-enabled").checked = Boolean(rule.enabled);
+  document.getElementById("rule-time").value = rule.local_time || "04:30";
+  document.getElementById("rule-timezone").value = rule.timezone || "Asia/Shanghai";
+  document.getElementById("rule-policy").value = rule.policy || "check_only";
+  document.getElementById("rule-failure").value = rule.on_failure || "rollback_continue";
+  document.getElementById("rule-jitter").value = rule.jitter_minutes ?? 10;
+  document.getElementById("rule-minimum-age").value = rule.minimum_release_age_hours ?? 24;
+  document.getElementById("rule-prerelease").checked = Boolean(rule.prerelease);
+  document.getElementById("rule-next-run").textContent = data.next_run || "—";
+  document.getElementById("rule-gate-hint").textContent = !data.global?.enabled
+    ? t("pluginDisabled")
+    : data.global?.auto_update_enabled ? t("gateReady") : t("gateClosed");
+  document.getElementById("check-only-note").hidden = rule.policy !== "check_only";
+  const selected = new Set(rule.plugin_ids || []);
+  document.getElementById("rule-plugins").innerHTML = (data.catalog || []).map((item) => `<label class="plugin-option"><input type="checkbox" value="${escapeHtml(item.plugin_id)}" ${selected.has(item.plugin_id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code></span></label>`).join("") || `<span>${escapeHtml(t("empty"))}</span>`;
+}
+
+async function saveRule(event) {
+  event.preventDefault();
+  const autoUpdateEnabled = document.getElementById("rule-auto-update-enabled").checked;
+  const pluginIds = [...document.querySelectorAll("#rule-plugins input:checked")].map((input) => input.value);
+  const payload = {
+    expected_revision: state.rule?.rule?.revision,
+    enabled: document.getElementById("rule-enabled").checked,
+    plugin_ids: pluginIds,
+    local_time: document.getElementById("rule-time").value,
+    timezone: document.getElementById("rule-timezone").value,
+    policy: document.getElementById("rule-policy").value,
+    on_failure: document.getElementById("rule-failure").value,
+    jitter_minutes: Number.parseInt(document.getElementById("rule-jitter").value, 10),
+    minimum_release_age_hours: Number.parseInt(document.getElementById("rule-minimum-age").value, 10),
+    prerelease: document.getElementById("rule-prerelease").checked
+  };
+  try {
+    if (!autoUpdateEnabled) {
+      await apiPost("config", { auto_update_enabled: false });
+      await apiPost("rule", payload);
+    } else {
+      await apiPost("rule", payload);
+      await apiPost("config", { auto_update_enabled: true });
+    }
+    toast(t("ruleSaved"));
+  } catch (error) {
+    try {
+      await apiPost("config", { auto_update_enabled: false });
+    } catch (safetyError) {
+      console.error("Failed to close automatic-update master switch", safetyError);
+    }
+    toast(`${t("saveFailed")}: ${error.message}`, true);
+  } finally {
+    await Promise.all([loadConfig(), loadRule(), loadOverview()]);
+  }
 }
 
 async function saveConfig(event) {
@@ -271,7 +335,7 @@ async function runRecommendationAction(button) {
 }
 
 async function refreshAll() {
-  try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadCatalog()]); }
+  try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadCatalog()]); }
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
 }
 
@@ -292,6 +356,10 @@ function bindEvents() {
     document.getElementById(button.dataset.tab).classList.add("active");
   }));
   document.getElementById("config-form").addEventListener("submit", saveConfig);
+  document.getElementById("rule-form").addEventListener("submit", saveRule);
+  document.getElementById("rule-policy").addEventListener("change", (event) => {
+    document.getElementById("check-only-note").hidden = event.target.value !== "check_only";
+  });
   document.getElementById("recommendations-list").addEventListener("click", (event) => {
     const button = event.target.closest("[data-recommendation-action]");
     if (button) {

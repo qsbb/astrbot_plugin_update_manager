@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
 from .core.adapters.storage import redact
+from .core.models import UpdateRule
+from .core.scheduler import RuleConflictError, RuleValidationError
 from .core.trusted import TRUSTED_BY_ID, TRUSTED_SERIES
 
 try:
@@ -33,6 +36,31 @@ except ImportError:  # AstrBot < 4.26
 PLUGIN_ID = "astrbot_plugin_update_manager"
 SENSITIVE_KEYS = frozenset({"github_token"})
 READ_ONLY_KEYS = frozenset({"data_dir", "plugin_root"})
+RULE_WRITABLE_KEYS = frozenset(
+    {
+        "enabled",
+        "plugin_ids",
+        "local_time",
+        "timezone",
+        "jitter_minutes",
+        "policy",
+        "prerelease",
+        "minimum_release_age_hours",
+        "on_failure",
+        "misfire_grace_minutes",
+    }
+)
+CAPABILITY_META = {
+    "plugin_manager": ("插件管理器", "Plugin manager", "AstrBot 插件管理器实例", "AstrBot plugin manager instance"),
+    "list_plugins": ("插件列表", "Plugin catalog", "读取当前插件列表", "Read the current plugin list"),
+    "install_sources": ("安装来源", "Install sources", "识别插件安装来源", "Resolve plugin install sources"),
+    "install_plugin": ("安装插件", "Install plugin", "通过管理器安装插件", "Install plugins through the manager"),
+    "update_plugin": ("更新插件", "Update plugin", "通过管理器更新插件", "Update plugins through the manager"),
+    "turn_on_plugin": ("启用插件", "Enable plugin", "启用并热加载插件", "Enable and hot-load plugins"),
+    "turn_off_plugin": ("停用插件", "Disable plugin", "停用已加载插件", "Disable loaded plugins"),
+    "reload_plugin": ("重载插件", "Reload plugin", "重载插件运行时", "Reload plugin runtime"),
+    "cron": ("定时任务", "Cron scheduler", "注册每日规则任务", "Register the daily rule job"),
+}
 
 
 class PagesAPIMixin:
@@ -46,6 +74,8 @@ class PagesAPIMixin:
             ("overview", self._pages_overview, ["GET"], "更新管理器总览"),
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
+            ("rule", self._pages_get_rule, ["GET"], "读取每日自动更新规则"),
+            ("rule", self._pages_save_rule, ["POST"], "保存每日自动更新规则"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
             ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
             (
@@ -81,6 +111,29 @@ class PagesAPIMixin:
                 public[key] = self._get(key, field.get("default"))
         return public
 
+    @staticmethod
+    def _capability_payload(report) -> list[dict[str, Any]]:
+        values = {
+            "plugin_manager": report.plugin_manager,
+            "list_plugins": report.list_plugins,
+            "install_sources": report.install_sources,
+            "install_plugin": report.install_plugin,
+            "update_plugin": report.update_plugin,
+            "turn_on_plugin": report.turn_on_plugin,
+            "turn_off_plugin": report.turn_off_plugin,
+            "reload_plugin": report.reload_plugin,
+            "cron": report.cron_add_basic_job,
+        }
+        return [
+            {
+                "code": code,
+                "available": bool(values[code]),
+                "label": {"zh-CN": meta[0], "en-US": meta[1]},
+                "comment": {"zh-CN": meta[2], "en-US": meta[3]},
+            }
+            for code, meta in CAPABILITY_META.items()
+        ]
+
     async def _pages_overview(self):
         report = self.adapter.probe_capabilities()
         rule = self.scheduler.load()
@@ -100,17 +153,7 @@ class PagesAPIMixin:
                         getattr(self.context, "version", None)
                         or getattr(self.context, "astrbot_version", "")
                     ),
-                    "capabilities": {
-                        "plugin_manager": report.plugin_manager,
-                        "list_plugins": report.list_plugins,
-                        "install_sources": report.install_sources,
-                        "install_plugin": report.install_plugin,
-                        "update_plugin": report.update_plugin,
-                        "turn_on_plugin": report.turn_on_plugin,
-                        "turn_off_plugin": report.turn_off_plugin,
-                        "reload_plugin": report.reload_plugin,
-                        "cron": report.cron_add_basic_job,
-                    },
+                    "capabilities": self._capability_payload(report),
                 },
                 "rule": {
                     "enabled": rule.enabled,
@@ -241,6 +284,164 @@ class PagesAPIMixin:
                 "restart_required": False,
             }
         )
+
+    async def _rule_payload(self, rule: UpdateRule | None = None) -> dict[str, Any]:
+        current = rule or self.scheduler.load()
+        catalog = await self.catalog.scan()
+        selectable = [
+            {
+                "plugin_id": item.plugin_id,
+                "name": getattr(item, "display_name", getattr(item, "name", item.plugin_id)),
+                "version": item.current_version,
+            }
+            for item in catalog
+            if item.plugin_id != PLUGIN_ID and item.eligible and item.loaded
+        ]
+        next_run = self.scheduler.next_run(current)
+        return {
+            "success": True,
+            "rule": current.to_dict(),
+            "next_run": next_run.isoformat() if next_run else None,
+            "global": {
+                "enabled": self.enabled,
+                "auto_update_enabled": self.auto_update_enabled,
+                "effective": self.enabled
+                and self.auto_update_enabled
+                and current.enabled,
+            },
+            "catalog": selectable,
+            "policy_note": "CHECK_ONLY_WILL_NOT_UPDATE"
+            if current.policy == "check_only"
+            else None,
+        }
+
+    async def _pages_get_rule(self):
+        try:
+            return json_response(await self._rule_payload())
+        except (RuleValidationError, TypeError) as exc:
+            return json_response(
+                {
+                    "success": False,
+                    "error": "RULE_LOAD_FAILED",
+                    "detail": str(exc) or type(exc).__name__,
+                },
+                status=500,
+            )
+
+    @staticmethod
+    def _coerce_rule_changes(data: dict[str, Any]) -> dict[str, Any]:
+        changes: dict[str, Any] = {}
+        bool_keys = {"enabled", "prerelease"}
+        int_keys = {
+            "jitter_minutes",
+            "minimum_release_age_hours",
+            "misfire_grace_minutes",
+        }
+        string_keys = {"local_time", "timezone", "policy", "on_failure"}
+        for key, value in data.items():
+            if key == "expected_revision":
+                continue
+            if key in bool_keys:
+                if not isinstance(value, bool):
+                    raise RuleValidationError(f"INVALID_FIELD_TYPE:{key}")
+                changes[key] = value
+            elif key in int_keys:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise RuleValidationError(f"INVALID_FIELD_TYPE:{key}")
+                changes[key] = value
+            elif key in string_keys:
+                if not isinstance(value, str):
+                    raise RuleValidationError(f"INVALID_FIELD_TYPE:{key}")
+                changes[key] = value
+            elif key == "plugin_ids":
+                if not isinstance(value, list) or any(
+                    not isinstance(plugin_id, str) for plugin_id in value
+                ):
+                    raise RuleValidationError("INVALID_FIELD_TYPE:plugin_ids")
+                changes[key] = tuple(dict.fromkeys(value))
+        return changes
+
+    async def _pages_save_rule(self):
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        allowed = RULE_WRITABLE_KEYS | {"expected_revision"}
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            return json_response(
+                {
+                    "success": False,
+                    "error": "UNKNOWN_RULE_FIELDS",
+                    "fields": unknown,
+                },
+                status=400,
+            )
+        expected_revision = data.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            return json_response(
+                {"success": False, "error": "EXPECTED_REVISION_REQUIRED"}, status=400
+            )
+        try:
+            current = self.scheduler.load()
+            changes = self._coerce_rule_changes(data)
+            candidate = replace(current, **changes)
+            selected = set(candidate.plugin_ids)
+            catalog = {item.plugin_id: item for item in await self.catalog.scan()}
+            if PLUGIN_ID in selected:
+                raise RuleValidationError("SELF_RULE_TARGET_BLOCKED")
+            invalid = sorted(
+                plugin_id
+                for plugin_id in selected
+                if plugin_id not in catalog
+                or not catalog[plugin_id].eligible
+                or not catalog[plugin_id].loaded
+            )
+            if invalid:
+                raise RuleValidationError(
+                    "PLUGIN_NOT_CURRENTLY_ELIGIBLE_OR_LOADED:" + ",".join(invalid)
+                )
+            saved = self.scheduler.save(
+                candidate, expected_revision=expected_revision
+            )
+            if self.enabled and self.auto_update_enabled and saved.enabled:
+                await self.scheduler.rebuild()
+                schedule_action = "rebuilt"
+            else:
+                await self.scheduler.remove_job()
+                schedule_action = "removed"
+            payload = await self._rule_payload(saved)
+            payload["schedule_action"] = schedule_action
+            return json_response(payload)
+        except RuleConflictError as exc:
+            return json_response(
+                {
+                    "success": False,
+                    "error": "RULE_REVISION_CONFLICT",
+                    "detail": str(exc),
+                    "current_revision": self.scheduler.load().revision,
+                },
+                status=409,
+            )
+        except RuleValidationError as exc:
+            return json_response(
+                {
+                    "success": False,
+                    "error": str(exc).split(":", 1)[0],
+                    "detail": str(exc),
+                },
+                status=400,
+            )
+        except Exception as exc:
+            return json_response(
+                {
+                    "success": False,
+                    "error": "RULE_SAVE_OR_SCHEDULE_FAILED",
+                    "detail": str(exc) or type(exc).__name__,
+                },
+                status=500,
+            )
 
     @staticmethod
     def _coerce_page_value(key: str, value: Any, field: dict[str, Any]) -> Any:

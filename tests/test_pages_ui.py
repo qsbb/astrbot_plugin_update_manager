@@ -75,6 +75,8 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert 'apiGet("overview")' in js
     assert 'apiGet("config")' in js
+    assert 'apiGet("rule")' in js
+    assert 'apiPost("rule", payload)' in js
     assert 'apiGet("catalog")' in js
     assert 'apiGet("recommendations")' in js
     assert 'apiPost("config", payload)' in js
@@ -135,6 +137,78 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     assert ".recommendation-description" in css
     assert ".operation-status" in css
     assert "dialog::backdrop" in css
+
+
+def test_daily_rule_card_has_all_controls_and_check_only_warning():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    for element_id in (
+        "rule-form",
+        "rule-gate-hint",
+        "rule-auto-update-enabled",
+        "rule-enabled",
+        "rule-time",
+        "rule-timezone",
+        "rule-policy",
+        "rule-failure",
+        "rule-jitter",
+        "rule-minimum-age",
+        "rule-prerelease",
+        "rule-plugins",
+        "rule-next-run",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "check_only 仅检查并记录，绝不会更新插件" in html
+    assert "check_only checks and records only; it never updates plugins" in js
+    assert "expected_revision: state.rule?.rule?.revision" in js
+    assert 'document.getElementById("rule-form").addEventListener' in js
+
+
+def test_daily_rule_master_gate_uses_safe_save_order_and_refreshes_all_sources():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'id="rule-auto-update-enabled"' in html
+    assert 'role="switch"' in html
+    assert "Boolean(data.global?.auto_update_enabled)" in js
+    save_rule = js[js.index("async function saveRule") : js.index("async function saveConfig")]
+    disable_branch = save_rule[
+        save_rule.index("if (!autoUpdateEnabled)") : save_rule.index("} else {")
+    ]
+    enable_branch = save_rule[
+        save_rule.index("} else {") : save_rule.index("toast(t(\"ruleSaved\"))")
+    ]
+    assert disable_branch.index('apiPost("config", { auto_update_enabled: false })') < disable_branch.index(
+        'apiPost("rule", payload)'
+    )
+    assert enable_branch.index('apiPost("rule", payload)') < enable_branch.index(
+        'apiPost("config", { auto_update_enabled: true })'
+    )
+    assert 'apiPost("config", { auto_update_enabled: false })' in save_rule[save_rule.index("catch (error)") :]
+    assert "Promise.all([loadConfig(), loadRule(), loadOverview()])" in save_rule
+
+
+def test_rule_policy_and_failure_options_have_bilingual_labels_and_keep_values():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    expected = {
+        "check_only": "policyCheckOnly",
+        "patch": "policyPatch",
+        "minor": "policyMinor",
+        "stable": "policyStable",
+        "rollback_continue": "failureRollbackContinue",
+        "rollback_stop": "failureRollbackStop",
+    }
+    for value, label_key in expected.items():
+        assert f'value="{value}" data-i18n="{label_key}"' in html
+        assert f'{label_key}:' in js
+        assert value in js
+
+
+def test_capability_cards_use_bilingual_label_comment_and_keep_code():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "item.label?.[state.locale] || item.code" in js
+    assert "item.comment?.[state.locale]" in js
+    assert "escapeHtml(item.code)" in js
 
 
 def test_catalog_hint_describes_merged_runtime_and_metadata_catalog():

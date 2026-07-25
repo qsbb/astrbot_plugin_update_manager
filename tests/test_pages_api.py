@@ -26,6 +26,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/overview", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/rule", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations/check-latest", ("POST",)),
@@ -183,6 +185,122 @@ def test_pages_save_config_reports_persist_and_schedule_failures(monkeypatch, tm
     assert payload["error"] == "SCHEDULE_UPDATE_FAILED"
     assert payload["detail"] == "cron backend unavailable"
     assert payload["persisted"]["local"] is True
+
+
+def test_overview_capabilities_keep_code_and_bilingual_metadata(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    payload = unwrap(asyncio.run(plugin._pages_overview()))
+    capabilities = payload["runtime"]["capabilities"]
+    assert [item["code"] for item in capabilities] == [
+        "plugin_manager",
+        "list_plugins",
+        "install_sources",
+        "install_plugin",
+        "update_plugin",
+        "turn_on_plugin",
+        "turn_off_plugin",
+        "reload_plugin",
+        "cron",
+    ]
+    assert all(set(item["label"]) == {"zh-CN", "en-US"} for item in capabilities)
+    assert all(set(item["comment"]) == {"zh-CN", "en-US"} for item in capabilities)
+
+
+def _rule_item(plugin_id="demo", *, eligible=True, loaded=True):
+    return SimpleNamespace(
+        plugin_id=plugin_id,
+        name="Demo",
+        display_name="Demo",
+        current_version="1.0.0",
+        eligible=eligible,
+        loaded=loaded,
+    )
+
+
+def test_rule_page_get_and_post_preserve_fields_and_rebuild(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"enabled": True, "auto_update_enabled": True}
+    )
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(_rule_item(),))
+    initial = unwrap(asyncio.run(plugin._pages_get_rule()))
+    assert initial["rule"]["policy"] == "check_only"
+    assert initial["policy_note"] == "CHECK_ONLY_WILL_NOT_UPDATE"
+    calls = []
+
+    async def request_rule():
+        return {
+            "expected_revision": 0,
+            "enabled": True,
+            "plugin_ids": ["demo"],
+            "local_time": "05:15",
+        }
+
+    async def rebuild():
+        calls.append("rebuild")
+
+    monkeypatch.setattr(plugin, "_request_json", request_rule)
+    monkeypatch.setattr(plugin.scheduler, "rebuild", rebuild)
+    payload = unwrap(asyncio.run(plugin._pages_save_rule()))
+    assert payload["rule"]["revision"] == 1
+    assert payload["rule"]["local_time"] == "05:15"
+    assert payload["rule"]["timezone"] == "Asia/Shanghai"
+    assert payload["rule"]["jitter_minutes"] == 10
+    assert payload["schedule_action"] == "rebuilt"
+    assert calls == ["rebuild"]
+
+
+def test_rule_page_strict_whitelist_cas_catalog_and_global_gate(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin.catalog.scan = lambda: asyncio.sleep(
+        0, result=(_rule_item(), _rule_item("blocked", eligible=False))
+    )
+
+    async def unknown():
+        return {"expected_revision": 0, "surprise": True}
+
+    monkeypatch.setattr(plugin, "_request_json", unknown)
+    payload, status = asyncio.run(plugin._pages_save_rule())
+    assert status == 400 and payload["error"] == "UNKNOWN_RULE_FIELDS"
+
+    async def blocked():
+        return {"expected_revision": 0, "plugin_ids": ["blocked"]}
+
+    monkeypatch.setattr(plugin, "_request_json", blocked)
+    payload, status = asyncio.run(plugin._pages_save_rule())
+    assert status == 400
+    assert payload["error"] == "PLUGIN_NOT_CURRENTLY_ELIGIBLE_OR_LOADED"
+
+    async def self_target():
+        return {"expected_revision": 0, "plugin_ids": [module.PLUGIN_NAME]}
+
+    monkeypatch.setattr(plugin, "_request_json", self_target)
+    payload, status = asyncio.run(plugin._pages_save_rule())
+    assert status == 400 and payload["error"] == "SELF_RULE_TARGET_BLOCKED"
+
+    calls = []
+
+    async def disabled_rule():
+        return {"expected_revision": 0, "plugin_ids": ["demo"]}
+
+    async def remove():
+        calls.append("remove")
+
+    monkeypatch.setattr(plugin, "_request_json", disabled_rule)
+    monkeypatch.setattr(plugin.scheduler, "remove_job", remove)
+    payload = unwrap(asyncio.run(plugin._pages_save_rule()))
+    assert payload["schedule_action"] == "removed"
+    assert calls == ["remove"]
+
+    async def stale():
+        return {"expected_revision": 0, "local_time": "06:00"}
+
+    monkeypatch.setattr(plugin, "_request_json", stale)
+    payload, status = asyncio.run(plugin._pages_save_rule())
+    assert status == 409 and payload["error"] == "RULE_REVISION_CONFLICT"
+    assert payload["current_revision"] == 1
 
 
 def test_pages_catalog_payload(monkeypatch, tmp_path):
