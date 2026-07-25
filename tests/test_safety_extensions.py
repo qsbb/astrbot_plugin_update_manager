@@ -218,7 +218,8 @@ def test_github_latest_prefers_default_branch_metadata_over_invalid_newer_tags(
 
     assert candidate.target_version == "1.2.1.0"
     assert candidate.tag is None
-    assert candidate.archive_url is None
+    assert candidate.archive_url == "https://api.github.com/repos/acme/demo/zipball/main"
+    assert candidate.default_branch == "main"
     assert candidate.evidence == {
         "api": "github_default_branch_metadata",
         "observed_at": candidate.evidence["observed_at"],
@@ -229,6 +230,39 @@ def test_github_latest_prefers_default_branch_metadata_over_invalid_newer_tags(
         "https://api.github.com/repos/acme/demo",
         "https://api.github.com/repos/acme/demo/contents/metadata.yaml?ref=main",
     ]
+
+
+def test_github_latest_uses_master_default_branch_archive_without_matching_tag(
+    monkeypatch,
+):
+    metadata = base64.b64encode(b"name: identity_guardian\nversion: 2.0.0\n").decode(
+        "ascii"
+    )
+    client = RegistryClient(
+        RegistryResponse(200, {"default_branch": "master"}),
+        RegistryResponse(200, {"encoding": "base64", "content": metadata}),
+        RegistryResponse(404),
+        RegistryResponse(200, []),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest(
+            "identity_guardian",
+            "1.9.0",
+            "https://github.com/acme/identity_guardian",
+        )
+    )
+
+    assert candidate.default_branch == "master"
+    assert candidate.archive_url == (
+        "https://api.github.com/repos/acme/identity_guardian/zipball/master"
+    )
+    assert client.calls[1][0].endswith("/contents/metadata.yaml?ref=master")
 
 
 def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):

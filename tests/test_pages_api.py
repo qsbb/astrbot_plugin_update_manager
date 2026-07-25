@@ -642,9 +642,23 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
         calls.append(("install", plugin_id, repo_url))
         return SimpleNamespace(version="0.6.2", loaded=True, activated=True)
 
-    async def update(plugin_id, *, source_kind, source_url):
-        calls.append(("update", plugin_id, source_kind, source_url))
+    async def update(plugin_id, *, source_kind, source_url, archive_url=None):
+        calls.append(("update", plugin_id, source_kind, source_url, archive_url))
         return SimpleNamespace(version="0.6.3", loaded=True, activated=True)
+
+    async def get_plugin(plugin_id):
+        return SimpleNamespace(version="0.6.2")
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        assert plugin_id == "astrbot_plugin_voice_hub"
+        assert current_version == "0.6.2"
+        assert force_refresh is True
+        return SimpleNamespace(
+            archive_url=(
+                "https://api.github.com/repos/qsbb/"
+                "astrbot_plugin_voice_hub/zipball/master"
+            )
+        )
 
     async def enable(plugin_id, enabled):
         calls.append(("enabled", plugin_id, enabled))
@@ -652,8 +666,10 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
 
     monkeypatch.setattr(plugin, "_request_json", request_voice_confirmed)
     monkeypatch.setattr(plugin.adapter, "install_plugin", install)
+    monkeypatch.setattr(plugin.adapter, "get_plugin", get_plugin)
     monkeypatch.setattr(plugin.adapter, "update_plugin", update)
     monkeypatch.setattr(plugin.adapter, "set_plugin_enabled", enable)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
     installed = unwrap(asyncio.run(plugin._pages_install()))
     assert installed["installed"] is True
     assert installed["lifecycle"]["snapshot_verified"] is True
@@ -665,6 +681,13 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
     assert updated["lifecycle"]["direct_load"] is False
     assert updated["lifecycle"]["internal_hot_reload"] is True
     assert updated["lifecycle"]["extra_reload"] is False
+    assert calls[1] == (
+        "update",
+        "astrbot_plugin_voice_hub",
+        "github",
+        "https://github.com/qsbb/astrbot_plugin_voice_hub",
+        "https://api.github.com/repos/qsbb/astrbot_plugin_voice_hub/zipball/master",
+    )
     disabled = unwrap(asyncio.run(plugin._pages_disable()))
     assert disabled["activated"] is False
     assert disabled["lifecycle"]["snapshot"]["activated"] is False

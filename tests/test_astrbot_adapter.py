@@ -391,6 +391,37 @@ def test_update_passes_only_real_archive_to_download_url(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("archive_parameter", ["archive_url", "kwargs"])
+def test_update_supports_archive_parameter_signature_variants(
+    monkeypatch, archive_parameter
+):
+    install_shared_preferences(monkeypatch, {})
+
+    class CompatibleManager(FakeManager):
+        if archive_parameter == "archive_url":
+
+            async def update_plugin(self, name, archive_url):
+                self.updated.append((name, archive_url))
+
+        else:
+
+            async def update_plugin(self, name, **kwargs):
+                self.updated.append((name, kwargs.get("download_url")))
+
+    manager = CompatibleManager()
+    adapter = AstrBotAdapter(FakeContext([star()], manager))
+    archive_url = "https://api.github.com/repos/acme/demo/zipball/master"
+    asyncio.run(
+        adapter.update_plugin(
+            "demo",
+            source_kind="github",
+            source_url="https://github.com/acme/demo",
+            archive_url=archive_url,
+        )
+    )
+    assert manager.updated == [("demo", archive_url)]
+
+
 def test_install_enable_disable_use_416_contract_and_block_self(monkeypatch):
     install_shared_preferences(monkeypatch, {})
     ctx = FakeContext([])

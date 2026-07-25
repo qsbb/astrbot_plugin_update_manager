@@ -677,15 +677,21 @@ class PagesAPIMixin:
                 update_available, version_status = self._version_state(
                     snapshot.version if snapshot else "", latest_version
                 )
+                download_url = getattr(candidate, "archive_url", None) or ""
+                default_branch = getattr(candidate, "default_branch", None) or ""
                 error = None
             except Exception as exc:
                 latest_version = ""
                 update_available, version_status = False, "check_failed"
+                download_url = ""
+                default_branch = ""
                 error = str(exc) or type(exc).__name__
             return trusted, snapshot, {
                 "latest_version": latest_version,
                 "update_available": update_available,
                 "version_status": version_status,
+                "download_url": download_url,
+                "default_branch": default_branch,
                 "checked_at": checked_at,
                 "error": error,
             }
@@ -794,8 +800,18 @@ class PagesAPIMixin:
             if plugin_id == PLUGIN_ID:
                 raise ValueError("SELF_UPDATE_BLOCKED")
             item = TRUSTED_BY_ID[plugin_id]
+            current = await self.adapter.get_plugin(plugin_id)
+            candidate = await self.registry.github_latest(
+                plugin_id,
+                current.version if current else "",
+                item.repo_url,
+                force_refresh=True,
+            )
             snapshot = await self.adapter.update_plugin(
-                plugin_id, source_kind="github", source_url=item.repo_url
+                plugin_id,
+                source_kind="github",
+                source_url=item.repo_url,
+                archive_url=candidate.archive_url,
             )
             return json_response(
                 {

@@ -252,10 +252,8 @@ class CandidateRegistry:
         ):
             raise RegistryError("SOURCE_REQUIRED")
         repo = "/".join(parts)
+        default_branch = await self._default_branch(repo, force_refresh=force_refresh)
         try:
-            default_branch = await self._default_branch(
-                repo, force_refresh=force_refresh
-            )
             metadata_url = (
                 f"https://api.github.com/repos/{repo}/contents/metadata.yaml"
                 f"?ref={quote(default_branch, safe='')}"
@@ -272,6 +270,7 @@ class CandidateRegistry:
                 current_version,
                 source_url,
                 repo,
+                default_branch=default_branch,
                 fallback_reason=str(exc),
                 force_refresh=force_refresh,
             )
@@ -281,6 +280,7 @@ class CandidateRegistry:
             source_url,
             repo,
             target,
+            default_branch,
             force_refresh=force_refresh,
         )
 
@@ -291,6 +291,7 @@ class CandidateRegistry:
         source_url: str,
         repo: str,
         target: str,
+        default_branch: str,
         *,
         force_refresh: bool,
     ) -> Candidate:
@@ -323,6 +324,11 @@ class CandidateRegistry:
                 (entry for version, entry in ranked if version == wanted), None
             )
             tag_name, commit, archive_url = self._tag_details(matched)
+        if not archive_url:
+            archive_url = (
+                f"https://api.github.com/repos/{repo}/zipball/"
+                f"{quote(default_branch, safe='')}"
+            )
         return Candidate(
             plugin_id,
             current_version,
@@ -332,7 +338,8 @@ class CandidateRegistry:
             tag=tag_name or None,
             commit=commit or None,
             published_at=published_at,
-            archive_url=archive_url or None,
+            archive_url=archive_url,
+            default_branch=default_branch,
             evidence={
                 "api": "github_default_branch_metadata",
                 "observed_at": datetime.now(timezone.utc).isoformat(),
@@ -348,6 +355,7 @@ class CandidateRegistry:
         source_url: str,
         repo: str,
         *,
+        default_branch: str,
         fallback_reason: str,
         force_refresh: bool,
     ) -> Candidate:
@@ -365,6 +373,10 @@ class CandidateRegistry:
                 await self._tags(repo, force_refresh=force_refresh)
             )[0]
             tag_name, commit, archive_url = self._tag_details(entry)
+            archive_url = archive_url or (
+                f"https://api.github.com/repos/{repo}/zipball/"
+                f"{quote(default_branch, safe='')}"
+            )
             return Candidate(
                 plugin_id,
                 current_version,
@@ -373,7 +385,8 @@ class CandidateRegistry:
                 "github",
                 tag=tag_name or None,
                 commit=commit or None,
-                archive_url=archive_url or None,
+                archive_url=archive_url,
+                default_branch=default_branch,
                 evidence={
                     "api": "github_latest_tag",
                     "observed_at": observed_at,
@@ -388,6 +401,10 @@ class CandidateRegistry:
         if version is None:
             raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
         published = payload.get("published_at")
+        archive_url = str(payload.get("zipball_url") or "").strip() or (
+            f"https://api.github.com/repos/{repo}/zipball/"
+            f"{quote(default_branch, safe='')}"
+        )
         return Candidate(
             plugin_id,
             current_version,
@@ -396,7 +413,8 @@ class CandidateRegistry:
             "github",
             tag=tag_name,
             published_at=str(published) if published else None,
-            archive_url=str(payload.get("zipball_url") or "") or None,
+            archive_url=archive_url,
+            default_branch=default_branch,
             evidence={
                 "api": "github_latest_release",
                 "observed_at": observed_at,

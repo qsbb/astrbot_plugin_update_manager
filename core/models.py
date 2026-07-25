@@ -77,6 +77,7 @@ class Candidate:
     commit: str | None = None
     published_at: str | None = None
     archive_url: str | None = None
+    default_branch: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
 
 

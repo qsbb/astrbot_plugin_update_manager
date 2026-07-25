@@ -508,7 +508,17 @@ class AstrBotAdapter:
             raise AdapterUnavailableError(f"{operation} 不可用")
         kwargs = self._identity_kwargs(method, plugin_id)
         parameters = self._parameters(method)
-        kwargs.update({key: value for key, value in extra.items() if key in parameters})
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        kwargs.update(
+            {
+                key: value
+                for key, value in extra.items()
+                if key in parameters or accepts_kwargs
+            }
+        )
         result = method(**kwargs)
         if inspect.isawaitable(result):
             result = await result
@@ -566,11 +576,20 @@ class AstrBotAdapter:
                 raise AdapterUnavailableError("update_plugin 不可用")
             parameters = self._parameters(method)
             extra: dict[str, Any] = {}
-            if "download_url" in parameters:
-                parameter = parameters["download_url"]
+            archive_key = next(
+                (key for key in ("download_url", "archive_url") if key in parameters),
+                None,
+            )
+            accepts_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            if archive_key or accepts_kwargs:
+                archive_key = archive_key or "download_url"
+                parameter = parameters.get(archive_key)
                 if archive_url:
-                    extra["download_url"] = archive_url
-                elif parameter.default is inspect.Parameter.empty:
+                    extra[archive_key] = archive_url
+                elif parameter and parameter.default is inspect.Parameter.empty:
                     raise ValueError("ARCHIVE_URL_REQUIRED")
             await self._invoke("update_plugin", plugin_id, **extra)
             updated = await self.get_plugin(plugin_id)
