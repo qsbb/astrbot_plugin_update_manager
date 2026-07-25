@@ -7,6 +7,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .core.adapters.astrbot import AdapterUnavailableError
+from .core.adapters.storage import redact
+from .core.trusted import TRUSTED_BY_ID, TRUSTED_SERIES
+
 try:
     from astrbot.api.web import json_response, request
 except ImportError:  # AstrBot < 4.26
@@ -39,6 +43,11 @@ class PagesAPIMixin:
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
+            ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
+            ("install", self._pages_install, ["POST"], "安装可信系列插件"),
+            ("update", self._pages_update, ["POST"], "更新可信系列插件"),
+            ("enable", self._pages_enable, ["POST"], "启用可信系列插件"),
+            ("disable", self._pages_disable, ["POST"], "停用可信系列插件"),
         )
         try:
             for name, handler, methods, description in routes:
@@ -85,7 +94,10 @@ class PagesAPIMixin:
                         "plugin_manager": report.plugin_manager,
                         "list_plugins": report.list_plugins,
                         "install_sources": report.install_sources,
+                        "install_plugin": report.install_plugin,
                         "update_plugin": report.update_plugin,
+                        "turn_on_plugin": report.turn_on_plugin,
+                        "turn_off_plugin": report.turn_off_plugin,
                         "reload_plugin": report.reload_plugin,
                         "cron": report.cron_add_basic_job,
                     },
@@ -298,3 +310,107 @@ class PagesAPIMixin:
                 ],
             }
         )
+
+    async def _trusted_plugin_id(self, *, require_confirmation: bool = True) -> str:
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        expected_keys = {"plugin_id", "confirm"} if require_confirmation else {"plugin_id"}
+        if set(data) != expected_keys:
+            raise ValueError(
+                "CONFIRMATION_REQUIRED" if require_confirmation else "INVALID_JSON_PAYLOAD"
+            )
+        if require_confirmation and data.get("confirm") is not True:
+            raise ValueError("CONFIRMATION_REQUIRED")
+        plugin_id = data.get("plugin_id")
+        if not isinstance(plugin_id, str) or plugin_id not in TRUSTED_BY_ID:
+            raise ValueError("PLUGIN_NOT_TRUSTED")
+        return plugin_id
+
+    @staticmethod
+    def _mutation_error(exc: Exception):
+        known = {
+            "INVALID_JSON_PAYLOAD": 400,
+            "CONFIRMATION_REQUIRED": 400,
+            "PLUGIN_NOT_TRUSTED": 403,
+            "SELF_UPDATE_BLOCKED": 403,
+            "SELF_DISABLE_BLOCKED": 403,
+            "PLUGIN_ALREADY_INSTALLED": 409,
+            "PLUGIN_NOT_MANAGEABLE": 409,
+            "ARCHIVE_URL_REQUIRED": 409,
+        }
+        code = str(exc) if str(exc) in known else type(exc).__name__.upper()
+        status = known.get(code, 503 if isinstance(exc, AdapterUnavailableError) else 500)
+        return json_response(
+            {"success": False, "error": code, "detail": redact(code)}, status=status
+        )
+
+    async def _pages_recommendations(self):
+        snapshots = await self.adapter.snapshot_plugins()
+        installed = {}
+        for item in snapshots:
+            for identity in (item.name, item.root_dir_name):
+                if identity:
+                    installed[identity] = item
+        capabilities = self.adapter.probe_capabilities()
+        return json_response(
+            {
+                "success": True,
+                "items": [
+                    {
+                        "key": trusted.key,
+                        "plugin_id": trusted.plugin_id,
+                        "name": trusted.display_name,
+                        "repo_url": trusted.repo_url,
+                        "description_zh": trusted.description_zh,
+                        "installed": (snapshot := installed.get(trusted.plugin_id)) is not None,
+                        "version": snapshot.version if snapshot else "",
+                        "loaded": snapshot.loaded if snapshot else False,
+                        "activated": snapshot.activated if snapshot else False,
+                        "actions": {
+                            "install": snapshot is None and capabilities.install_plugin,
+                            "update": snapshot is not None and snapshot.loaded and trusted.plugin_id != PLUGIN_ID and capabilities.update_plugin,
+                            "enable": snapshot is not None and snapshot.loaded and not snapshot.activated and capabilities.turn_on_plugin,
+                            "disable": snapshot is not None and snapshot.loaded and snapshot.activated and trusted.plugin_id != PLUGIN_ID and capabilities.turn_off_plugin,
+                        },
+                    }
+                    for trusted in TRUSTED_SERIES
+                ],
+            }
+        )
+
+    async def _pages_install(self):
+        try:
+            plugin_id = await self._trusted_plugin_id()
+            item = TRUSTED_BY_ID[plugin_id]
+            snapshot = await self.adapter.install_plugin(plugin_id, repo_url=item.repo_url)
+            return json_response({"success": True, "plugin_id": plugin_id, "installed": True, "version": snapshot.version})
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _pages_update(self):
+        try:
+            plugin_id = await self._trusted_plugin_id()
+            if plugin_id == PLUGIN_ID:
+                raise ValueError("SELF_UPDATE_BLOCKED")
+            item = TRUSTED_BY_ID[plugin_id]
+            await self.adapter.update_plugin(plugin_id, source_kind="github", source_url=item.repo_url)
+            return json_response({"success": True, "plugin_id": plugin_id, "updated": True})
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _set_recommended_enabled(self, enabled: bool):
+        try:
+            plugin_id = await self._trusted_plugin_id(require_confirmation=not enabled)
+            if plugin_id == PLUGIN_ID and not enabled:
+                raise ValueError("SELF_DISABLE_BLOCKED")
+            snapshot = await self.adapter.set_plugin_enabled(plugin_id, enabled)
+            return json_response({"success": True, "plugin_id": plugin_id, "activated": snapshot.activated})
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _pages_enable(self):
+        return await self._set_recommended_enabled(True)
+
+    async def _pages_disable(self):
+        return await self._set_recommended_enabled(False)

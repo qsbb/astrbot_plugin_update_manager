@@ -148,7 +148,8 @@ def test_update_and_reload_use_core_manager(monkeypatch):
         )
     )
     asyncio.run(adapter.reload_plugin("demo"))
-    assert manager.updated == [("demo", "https://github.com/acme/demo")]
+    # GitHub 仓库页不是归档下载地址，不能误传给 download_url。
+    assert manager.updated == [("demo", "")]
     assert manager.reloaded == ["demo"]
 
 
@@ -277,3 +278,60 @@ def test_update_rejects_discovered_but_unloaded_plugin(monkeypatch, tmp_path):
             )
         )
     assert manager.updated == []
+
+
+def test_update_passes_only_real_archive_to_download_url(monkeypatch):
+    install_shared_preferences(monkeypatch, {})
+    manager = FakeManager()
+    adapter = AstrBotAdapter(FakeContext([star()], manager))
+    asyncio.run(
+        adapter.update_plugin(
+            "demo",
+            source_kind="github",
+            source_url="https://github.com/acme/demo",
+            archive_url="https://api.github.com/repos/acme/demo/zipball/v1.2.4",
+        )
+    )
+    assert manager.updated == [
+        ("demo", "https://api.github.com/repos/acme/demo/zipball/v1.2.4")
+    ]
+
+
+def test_install_enable_disable_use_416_contract_and_block_self(monkeypatch):
+    install_shared_preferences(monkeypatch, {})
+    ctx = FakeContext([])
+
+    class LifecycleManager(FakeManager):
+        async def install_plugin(self, repo_url, proxy=""):
+            assert repo_url == "https://github.com/qsbb/astrbot_plugin_voice_hub"
+            ctx._stars.append(star("astrbot_plugin_voice_hub", activated=True))
+            return {"repo": repo_url}
+
+        async def turn_off_plugin(self, plugin_name):
+            next(item for item in ctx._stars if item.name == plugin_name).activated = False
+
+        async def turn_on_plugin(self, plugin_name):
+            next(item for item in ctx._stars if item.name == plugin_name).activated = True
+
+    manager = LifecycleManager()
+    ctx._star_manager = manager
+    adapter = AstrBotAdapter(ctx)
+    installed = asyncio.run(
+        adapter.install_plugin(
+            "astrbot_plugin_voice_hub",
+            repo_url="https://github.com/qsbb/astrbot_plugin_voice_hub",
+        )
+    )
+    assert installed.name == "astrbot_plugin_voice_hub"
+    assert asyncio.run(
+        adapter.set_plugin_enabled("astrbot_plugin_voice_hub", False)
+    ).activated is False
+    assert asyncio.run(
+        adapter.set_plugin_enabled("astrbot_plugin_voice_hub", True)
+    ).activated is True
+
+    ctx._stars.append(star("astrbot_plugin_update_manager", activated=True))
+    with pytest.raises(ValueError, match="SELF_DISABLE_BLOCKED"):
+        asyncio.run(
+            adapter.set_plugin_enabled("astrbot_plugin_update_manager", False)
+        )

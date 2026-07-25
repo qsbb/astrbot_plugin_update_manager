@@ -1,4 +1,4 @@
-# 凝心溯溪-焕（astrbot_plugin_update_manager）
+# 凝心溯溪-核（astrbot_plugin_update_manager）
 
 凝心溯溪系列更新模块：安全、串行、可回滚的 AstrBot 插件更新管理器。发现可信来源候选，冻结不可变计划，通过 AstrBot 核心串行更新，并提供备份、健康检查、自动回滚、审计、持久化每日规则与清理能力。
 
@@ -9,7 +9,8 @@
 - 经 AstrBot 核心串行更新，单事务加文件租约锁，杜绝并发。
 - 更新前自动备份，更新后健康稳定观察窗口，失败自动回滚。
 - 持久化每日规则、审计记录与备份清理策略（按数量、天数、容量）。
-- 提供 AstrBot Plugin Page 便捷设置页面，可查看总览、修改常用配置并浏览插件目录。
+- 提供 AstrBot Plugin Page 便捷设置页面，可查看总览、修改常用配置、浏览插件目录并管理固定可信系列推荐。
+- 固定可信系列清单仅包含 qsbb GitHub 仓库：知 `active_learner`、言 `conversation_flow`、序 `identity_guardian`、声 `voice_hub`、核 `update_manager`；核禁止自更新和自停用。
 - Plugin Page API 采用运行时能力探测；旧版 AstrBot 不支持页面能力时自动降级，不影响命令与调度功能。
 - `github_token` 等敏感配置按只写方式处理：只显示“是否已配置”，敏感 token 不回显到页面、接口响应或审计。
 - `enabled=false` 时统一门禁全部命令与调度。
@@ -39,8 +40,11 @@
 在支持 Plugin Page 的 AstrBot 版本中，可从插件详情进入“更新管理”页面：
 
 - **总览**：查看插件状态、AstrBot 版本、更新能力探测结果与每日规则。
+- **系列推荐**：查看知、言、序、声、核固定可信清单；按运行时能力显示“安装/已安装”“更新”“启用/停用”，操作完成后刷新推荐状态、总览和目录。
 - **设置**：修改常用配置并即时应用；配置仍会持久化到 AstrBot `data` 目录。
 - **插件目录**：查看已安装插件、当前版本、来源与自动更新资格。
+
+推荐操作通过 AstrBot 核心 `install_plugin`、`update_plugin`、`turn_on_plugin`、`turn_off_plugin` 执行，适配 AstrBot `4.16-4.x` 的签名差异并统一串行。请求仅接受固定清单中的插件 ID；核禁止自更新和自停用。仓库页面 URL 仅用于安装来源，绝不会误传为 `update_plugin.download_url`；只有已解析的归档 URL 才会传给该参数。
 
 为兼容旧版 AstrBot，插件会在运行时探测 Plugin Page 注册接口。若当前 AstrBot 不提供该接口，插件仅跳过页面与管理 API 注册，原有 `/aup` 命令、更新事务和调度能力继续按运行时可用能力工作，无需额外配置。
 
@@ -68,6 +72,8 @@
 
 ```
 python -m pytest astrbot_plugin_update_manager/tests -q
+python -m ruff check astrbot_plugin_update_manager
+node --check astrbot_plugin_update_manager/pages/manager/app.js
 ```
 
 ## 许可证

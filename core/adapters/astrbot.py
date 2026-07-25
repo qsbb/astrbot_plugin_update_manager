@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,10 @@ class CapabilityReport:
     reserved_state: bool
     activated_state: bool
     reload_plugin: bool
+    install_plugin: bool
     update_plugin: bool
+    turn_on_plugin: bool
+    turn_off_plugin: bool
     cron_manager: bool
     cron_add_basic_job: bool
     details: tuple[str, ...] = ()
@@ -61,6 +65,7 @@ class AstrBotAdapter:
     def __init__(self, context: Any, *, plugin_manager: Any | None = None) -> None:
         self.context = context
         self._plugin_manager = plugin_manager or self._discover_plugin_manager(context)
+        self._mutation_lock = asyncio.Lock()
         self.last_discovery_report = DiscoveryReport(0, 0, 0, ("NOT_SCANNED",))
 
     @staticmethod
@@ -103,7 +108,10 @@ class AstrBotAdapter:
             sample is None or hasattr(sample, "reserved"),
             sample is None or hasattr(sample, "activated"),
             callable(getattr(manager, "reload", None)),
+            callable(getattr(manager, "install_plugin", None)),
             callable(getattr(manager, "update_plugin", None)),
+            callable(getattr(manager, "turn_on_plugin", None)),
+            callable(getattr(manager, "turn_off_plugin", None)),
             cron is not None,
             callable(getattr(cron, "add_basic_job", None)),
             tuple(details),
@@ -383,6 +391,73 @@ class AstrBotAdapter:
             None,
         )
 
+    @staticmethod
+    def _validate_result(result: Any, operation: str) -> None:
+        if result is False:
+            raise RuntimeError(f"{operation.upper()}_FAILED")
+        if isinstance(result, tuple) and result and result[0] is False:
+            raise RuntimeError(f"{operation.upper()}_FAILED")
+        if isinstance(result, Mapping) and result.get("success") is False:
+            raise RuntimeError(f"{operation.upper()}_FAILED")
+
+    @staticmethod
+    def _parameters(method: Any) -> Mapping[str, inspect.Parameter]:
+        try:
+            return inspect.signature(method).parameters
+        except (TypeError, ValueError) as exc:
+            raise AdapterUnavailableError("无法探测插件管理接口签名") from exc
+
+    @classmethod
+    def _identity_kwargs(cls, method: Any, plugin_id: str) -> dict[str, Any]:
+        parameters = cls._parameters(method)
+        for key in ("plugin_name", "name", "plugin_id", "pname"):
+            if key in parameters:
+                return {key: plugin_id}
+        raise AdapterUnavailableError("插件管理接口缺少可识别的插件 ID 参数")
+
+    async def _invoke(self, operation: str, plugin_id: str, **extra: Any) -> Any:
+        method = getattr(self.plugin_manager, operation, None)
+        if not callable(method):
+            raise AdapterUnavailableError(f"{operation} 不可用")
+        kwargs = self._identity_kwargs(method, plugin_id)
+        parameters = self._parameters(method)
+        kwargs.update({key: value for key, value in extra.items() if key in parameters})
+        result = method(**kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        self._validate_result(result, operation)
+        return result
+
+    async def install_plugin(self, plugin_id: str, *, repo_url: str) -> PluginSnapshot:
+        if not repo_url:
+            raise ValueError("SOURCE_REQUIRED")
+        async with self._mutation_lock:
+            if await self.get_plugin(plugin_id) is not None:
+                raise ValueError("PLUGIN_ALREADY_INSTALLED")
+            method = getattr(self.plugin_manager, "install_plugin", None)
+            if not callable(method):
+                raise AdapterUnavailableError("install_plugin 不可用")
+            parameters = self._parameters(method)
+            source_key = next(
+                (
+                    key
+                    for key in ("repo_url", "source_url", "plugin_url", "url", "repo")
+                    if key in parameters
+                ),
+                None,
+            )
+            if source_key is None:
+                raise AdapterUnavailableError("install_plugin 不支持可信仓库 URL 参数")
+            kwargs = {source_key: repo_url}
+            result = method(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            self._validate_result(result, "install_plugin")
+            installed = await self.get_plugin(plugin_id)
+            if installed is None:
+                raise RuntimeError("INSTALL_RESULT_NOT_FOUND")
+            return installed
+
     async def update_plugin(
         self,
         plugin_id: str,
@@ -395,21 +470,39 @@ class AstrBotAdapter:
             raise ValueError("SELF_UPDATE_BLOCKED")
         if source_kind not in {"market", "github"} or not source_url:
             raise ValueError("SOURCE_REQUIRED")
-        current = await self.get_plugin(plugin_id)
-        if current is None or current.reserved or not current.loaded:
-            raise ValueError("PLUGIN_NOT_MANAGEABLE")
-        method = getattr(self.plugin_manager, "update_plugin", None)
-        if not callable(method):
-            raise AdapterUnavailableError("update_plugin 不可用")
-        kwargs = {"plugin_name": plugin_id}
-        parameters = inspect.signature(method).parameters
-        if "name" in parameters and "plugin_name" not in parameters:
-            kwargs = {"name": plugin_id}
-        if "download_url" in parameters:
-            kwargs["download_url"] = archive_url or source_url
-        result = method(**kwargs)
-        if inspect.isawaitable(result):
-            await result
+        async with self._mutation_lock:
+            current = await self.get_plugin(plugin_id)
+            if current is None or current.reserved or not current.loaded:
+                raise ValueError("PLUGIN_NOT_MANAGEABLE")
+            method = getattr(self.plugin_manager, "update_plugin", None)
+            if not callable(method):
+                raise AdapterUnavailableError("update_plugin 不可用")
+            parameters = self._parameters(method)
+            extra: dict[str, Any] = {}
+            if "download_url" in parameters:
+                parameter = parameters["download_url"]
+                if archive_url:
+                    extra["download_url"] = archive_url
+                elif parameter.default is inspect.Parameter.empty:
+                    raise ValueError("ARCHIVE_URL_REQUIRED")
+            await self._invoke("update_plugin", plugin_id, **extra)
+            updated = await self.get_plugin(plugin_id)
+            if updated is None:
+                raise RuntimeError("UPDATE_RESULT_NOT_FOUND")
+
+    async def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> PluginSnapshot:
+        if plugin_id == SELF_PLUGIN_NAME and not enabled:
+            raise ValueError("SELF_DISABLE_BLOCKED")
+        operation = "turn_on_plugin" if enabled else "turn_off_plugin"
+        async with self._mutation_lock:
+            current = await self.get_plugin(plugin_id)
+            if current is None or current.reserved or not current.loaded:
+                raise ValueError("PLUGIN_NOT_MANAGEABLE")
+            await self._invoke(operation, plugin_id)
+            updated = await self.get_plugin(plugin_id)
+            if updated is None or updated.activated is not enabled:
+                raise RuntimeError("ACTIVATION_RESULT_MISMATCH")
+            return updated
 
     async def reload_plugin(self, plugin_id: str) -> None:
         method = getattr(self.plugin_manager, "reload", None)

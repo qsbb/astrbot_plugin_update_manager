@@ -1,4 +1,4 @@
-"""凝心溯溪-焕：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
+"""凝心溯溪-核：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _current_instance: "UpdateManagerPlugin | None" = None
 @register(
     PLUGIN_NAME,
     "Justice-ocr",
-    "凝心溯溪-焕，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
+    "凝心溯溪-核，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
 class UpdateManagerPlugin(PagesAPIMixin, Star):
@@ -157,7 +157,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         """插件被配置为禁用时，返回统一提示；否则返回 None。"""
         if self.enabled:
             return None
-        return "凝心溯溪-焕 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
+        return "凝心溯溪-核 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
 
     @filter.command_group("aup")
     def aup_group(self) -> None:
@@ -172,11 +172,14 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             return
         report = self.adapter.probe_capabilities()
         lines = [
-            "凝心溯溪-焕 / 能力探针",
+            "凝心溯溪-核 / 能力探针",
             f"PluginManager: {self._yn(report.plugin_manager)}",
             f"插件目录: {self._yn(report.list_plugins)}",
             f"安装来源: {self._yn(report.install_sources)}",
+            f"安装接口: {self._yn(report.install_plugin)}",
             f"更新接口: {self._yn(report.update_plugin)}",
+            f"启用接口: {self._yn(report.turn_on_plugin)}",
+            f"停用接口: {self._yn(report.turn_off_plugin)}",
             f"重载接口: {self._yn(report.reload_plugin)}",
             f"定时任务: {self._yn(report.cron_add_basic_job)}",
         ]
