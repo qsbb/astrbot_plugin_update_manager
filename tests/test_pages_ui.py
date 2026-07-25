@@ -33,6 +33,7 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="overview"' in html
     assert 'data-tab="recommendations"' in html
     assert 'data-tab="config"' in html
+    assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
@@ -328,6 +329,65 @@ def test_recommendation_error_renders_retry_delay_and_token_hint():
     assert 'context.token_hint_required ? t("errorTokenHint") : ""' in js
     assert "errorRetryAfter" in js
     assert '"REGISTRY_RATE_LIMITED", "REGISTRY_HTTP_403", "REGISTRY_HTTP_429"' in js
+
+
+def test_mirror_tab_lists_candidates_with_latency_and_custom_entry():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    for element_id in ("mirrors", "mirror-list", "mirror-benchmark", "mirror-add-form", "mirror-add-input", "mirror-probe"):
+        assert f'id="{element_id}"' in html
+    assert "加速站只做前缀代理" in html
+    assert 'data-i18n-placeholder="mirrorAddPlaceholder"' in html
+    assert 'apiGet("mirrors")' in js
+    assert 'apiPost("mirrors/benchmark", {})' in js
+    assert 'apiPost("config", { github_mirror: mirror })' in js
+    assert 'apiPost("config", { github_mirror_candidates: candidates.join("\\n") })' in js
+    # 单选 + 延迟展示 + 自定义增删必须同时存在。
+    assert 'type="radio" name="mirror-choice"' in js
+    assert "function mirrorLatencyLabel(url)" in js
+    assert 'data-mirror-remove="${escapeHtml(url)}"' in js
+    assert "async function addCustomMirror(event)" in js
+    assert "async function removeCustomMirror(mirror)" in js
+    assert "function isValidMirror(value)" in js
+    assert 'url.protocol === "https:"' in js
+    assert ".mirror-list" in css
+    assert ".mirror-item" in css
+
+
+def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    mirror_block = js[js.index("function mirrorRow(url, selected, builtin)") : js.index("async function loadMirrors()")]
+    # 所有插值都必须过 escapeHtml，绝不能把加速站 URL 直接拼进 innerHTML。
+    for fragment in (
+        "${escapeHtml(url)}",
+        '${escapeHtml(t("mirrorRemove"))}',
+        '${escapeHtml(t("mirrorApply"))}',
+        "${escapeHtml(mirrorLatencyLabel(url))}",
+    ):
+        assert fragment in mirror_block
+    assert "${url}" not in mirror_block
+    zh_block = js[js.index('"zh-CN": {') : js.index('"en-US": {')]
+    en_block = js[js.index('"en-US": {') :]
+    mirror_keys = (
+        "mirrors:", "mirrorsTitle:", "mirrorsHint:", "mirrorDirect:", "mirrorBuiltin:", "mirrorCustom:",
+        "mirrorBenchmark:", "mirrorBenchmarking:", "mirrorBenchmarkDone:", "mirrorLatency:", "mirrorUnreachable:",
+        "mirrorUntested:", "mirrorApply:", "mirrorApplied:", "mirrorAddTitle:", "mirrorAddPlaceholder:", "mirrorAdd:",
+        "mirrorAdded:", "mirrorInvalid:", "mirrorDuplicate:", "mirrorRemove:", "mirrorRemoved:", "mirrorProbeHint:",
+    )
+    for key in mirror_keys:
+        assert key in zh_block, key
+        assert key in en_block, key
+    assert "GitHub mirror acceleration" in en_block
+    assert "镜像不可用会自动回退直连" in zh_block
+    # 测速期间必须禁用按钮并展示进行中文案，避免重复并发测速。
+    assert "if (state.mirrorBusy) return;" in js
+    assert 'state.mirrorBusy ? t("mirrorBenchmarking") : t("mirrorBenchmark")' in js
+    assert 'document.getElementById("mirror-benchmark").addEventListener("click", benchmarkMirrors)' in js
+    # 自定义输入框的占位文案同样跟随语言切换。
+    assert "[data-i18n-placeholder]" in js
+    assert "t(node.dataset.i18nPlaceholder)" in js
+    assert "loadMirrors()" in js[js.index("async function refreshAll()") : js.index("function showStartupError")]
 
 
 def test_manager_page_is_responsive_and_accessible():

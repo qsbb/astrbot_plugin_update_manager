@@ -24,6 +24,7 @@ from .core.catalog import PluginCatalog
 from .core.concurrency import bounded_gather
 from .core.coordinator import UpdateCoordinator
 from .core.health import HealthChecker
+from .core.mirrors import resolve_mirror
 from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
 from .core.planner import PlanError, UpdatePlanner
 from .core.scheduler import RuleConflictError, ScheduleService
@@ -76,6 +77,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             raw_timeout_seconds=float(
                 self._get("raw_timeout_seconds", DEFAULT_RAW_TIMEOUT_SECONDS)
             ),
+            mirror=resolve_mirror(self._get("github_mirror", "")),
         )
         health = HealthChecker(
             self.adapter,

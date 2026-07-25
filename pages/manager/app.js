@@ -1,7 +1,7 @@
 const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
-    refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", loading: "加载中…",
+    refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", loading: "加载中…",
     startupFailed: "页面启动失败",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
@@ -16,11 +16,14 @@ const messages = {
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
     eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
     empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败",
+    mirrorsTitle: "GitHub 镜像加速", mirrorsHint: "加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。", mirrorDirect: "直连 GitHub（不使用加速站）", mirrorBuiltin: "内置", mirrorCustom: "自定义",
+    mirrorBenchmark: "一键测速", mirrorBenchmarking: "正在测速…", mirrorBenchmarkDone: "测速完成", mirrorLatency: "延迟", mirrorUnreachable: "不可用", mirrorUntested: "未测速",
+    mirrorApply: "使用该加速站", mirrorApplied: "加速站已切换", mirrorAddTitle: "添加自定义加速站", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "添加", mirrorAdded: "自定义加速站已添加", mirrorInvalid: "加速站必须是合法的 https 前缀", mirrorDuplicate: "该加速站已在列表中", mirrorRemove: "移除", mirrorRemoved: "自定义加速站已移除", mirrorProbeHint: "测速探针",
     ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）"
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
-    refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", loading: "Loading…",
+    refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", loading: "Loading…",
     startupFailed: "Page startup failed",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
@@ -35,6 +38,9 @@ const messages = {
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
     eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
     empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed",
+    mirrorsTitle: "GitHub mirror acceleration", mirrorsHint: "Mirrors only proxy by prefix. An unavailable mirror falls back to a direct connection and never fails the check.", mirrorDirect: "Direct GitHub connection (no mirror)", mirrorBuiltin: "Built-in", mirrorCustom: "Custom",
+    mirrorBenchmark: "Run benchmark", mirrorBenchmarking: "Benchmarking…", mirrorBenchmarkDone: "Benchmark completed", mirrorLatency: "Latency", mirrorUnreachable: "Unavailable", mirrorUntested: "Not tested",
+    mirrorApply: "Use this mirror", mirrorApplied: "Mirror switched", mirrorAddTitle: "Add a custom mirror", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "Add", mirrorAdded: "Custom mirror added", mirrorInvalid: "A mirror must be a valid https prefix", mirrorDuplicate: "This mirror is already listed", mirrorRemove: "Remove", mirrorRemoved: "Custom mirror removed", mirrorProbeHint: "Benchmark probe",
     ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)"
   }
 };
@@ -63,6 +69,10 @@ const state = {
   locale: Object.prototype.hasOwnProperty.call(messages, storedLocale) ? storedLocale : "zh-CN",
   config: null,
   rule: null,
+  mirrors: null,
+  // 测速结果按加速站 URL 缓存，切换语言或重载列表都不用重新测速。
+  mirrorLatency: {},
+  mirrorBusy: false,
   recommendationBusy: null,
   // 版本检查互斥：自动检查与手动检查共享同一把锁，避免并发请求触发限流。
   versionCheckBusy: false,
@@ -134,6 +144,7 @@ function applyI18n() {
   document.documentElement.lang = state.locale;
   document.title = t("title");
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => { node.placeholder = t(node.dataset.i18nPlaceholder); });
   document.getElementById("locale").value = state.locale;
 }
 
@@ -250,6 +261,124 @@ async function saveConfig(event) {
     toast(t("saved"));
     await Promise.all([loadConfig(), loadOverview()]);
   } catch (error) { toast(`${t("saveFailed")}: ${error.message}`, true); }
+}
+
+function isValidMirror(value) {
+  // 与后端 normalize_mirror 保持同一条底线：必须 https、必须有主机、不带凭据。
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password && !url.search && !url.hash;
+  } catch (error) {
+    console.warn("Invalid mirror prefix", error);
+    return false;
+  }
+}
+
+function normalizeMirrorInput(value) {
+  return String(value ?? "").trim().replace(/\/+$/, "");
+}
+
+function mirrorLatencyLabel(url) {
+  const result = state.mirrorLatency[url];
+  if (!result) return t("mirrorUntested");
+  if (!result.available) return `${t("mirrorUnreachable")}${result.error ? ` · ${result.error}` : ""}`;
+  return `${t("mirrorLatency")} ${result.latency_ms} ms`;
+}
+
+function mirrorRow(url, selected, builtin) {
+  const result = state.mirrorLatency[url];
+  const tone = !result ? "" : result.available ? "ok" : "off";
+  const remove = builtin
+    ? ""
+    : `<button type="button" data-mirror-remove="${escapeHtml(url)}">${escapeHtml(t("mirrorRemove"))}</button>`;
+  return `<label class="mirror-item" title="${escapeHtml(t("mirrorApply"))}"><input type="radio" name="mirror-choice" value="${escapeHtml(url)}" ${selected ? "checked" : ""}/><span class="mirror-copy"><strong>${escapeHtml(url || t("mirrorDirect"))}</strong><small>${escapeHtml(builtin ? t("mirrorBuiltin") : t("mirrorCustom"))}</small></span><span class="mirror-meta"><span class="pill ${tone}">${escapeHtml(mirrorLatencyLabel(url))}</span>${remove}</span></label>`;
+}
+
+function renderMirrors() {
+  const data = state.mirrors;
+  if (!data) return;
+  const direct = `<label class="mirror-item"><input type="radio" name="mirror-choice" value="" ${data.direct ? "checked" : ""}/><span class="mirror-copy"><strong>${escapeHtml(t("mirrorDirect"))}</strong></span><span class="mirror-meta"></span></label>`;
+  document.getElementById("mirror-list").innerHTML = direct + (data.candidates || [])
+    .map((item) => mirrorRow(item.url, Boolean(item.selected), Boolean(item.builtin)))
+    .join("");
+  document.getElementById("mirror-probe").textContent = `${t("mirrorProbeHint")}: ${data.probe_url || ""}`;
+  const button = document.getElementById("mirror-benchmark");
+  button.disabled = state.mirrorBusy;
+  button.textContent = state.mirrorBusy ? t("mirrorBenchmarking") : t("mirrorBenchmark");
+}
+
+async function loadMirrors() {
+  state.mirrors = await apiGet("mirrors");
+  renderMirrors();
+}
+
+async function benchmarkMirrors() {
+  if (state.mirrorBusy) return;
+  state.mirrorBusy = true;
+  renderMirrors();
+  try {
+    const data = await apiPost("mirrors/benchmark", {});
+    for (const result of data.results || []) state.mirrorLatency[result.url] = result;
+    toast(t("mirrorBenchmarkDone"));
+  } catch (error) {
+    toast(`${t("loadFailed")}: ${error.message}`, true);
+  } finally {
+    state.mirrorBusy = false;
+    renderMirrors();
+  }
+}
+
+async function selectMirror(value) {
+  const mirror = normalizeMirrorInput(value);
+  if (mirror && !isValidMirror(mirror)) {
+    toast(t("mirrorInvalid"), true);
+    await loadMirrors();
+    return;
+  }
+  try {
+    await apiPost("config", { github_mirror: mirror });
+    toast(t("mirrorApplied"));
+  } catch (error) {
+    toast(`${t("saveFailed")}: ${error.message}`, true);
+  } finally {
+    await Promise.all([loadMirrors(), loadConfig()]);
+  }
+}
+
+async function saveMirrorCandidates(candidates, successKey) {
+  try {
+    await apiPost("config", { github_mirror_candidates: candidates.join("\n") });
+    toast(t(successKey));
+  } catch (error) {
+    toast(`${t("saveFailed")}: ${error.message}`, true);
+  } finally {
+    await Promise.all([loadMirrors(), loadConfig()]);
+  }
+}
+
+async function addCustomMirror(event) {
+  event.preventDefault();
+  const input = document.getElementById("mirror-add-input");
+  const mirror = normalizeMirrorInput(input.value);
+  if (!isValidMirror(mirror)) {
+    toast(t("mirrorInvalid"), true);
+    return;
+  }
+  const custom = state.mirrors?.custom || [];
+  const known = (state.mirrors?.candidates || []).map((item) => item.url);
+  if (known.includes(mirror)) {
+    toast(t("mirrorDuplicate"), true);
+    return;
+  }
+  input.value = "";
+  await saveMirrorCandidates([...custom, mirror], "mirrorAdded");
+}
+
+async function removeCustomMirror(mirror) {
+  const custom = (state.mirrors?.custom || []).filter((item) => item !== mirror);
+  // 移除正在使用的加速站时同步回到直连，避免配置指向一个已不存在的候选。
+  if (state.mirrors?.selected === mirror) await selectMirror("");
+  await saveMirrorCandidates(custom, "mirrorRemoved");
 }
 
 function catalogSwitch(item) {
@@ -505,7 +634,7 @@ async function runCatalogAction(input) {
 }
 
 async function refreshAll() {
-  try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadCatalog()]); }
+  try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadMirrors(), loadCatalog()]); }
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
 }
 
@@ -545,6 +674,19 @@ function bindEvents() {
   document.getElementById("catalog-list").addEventListener("change", (event) => {
     const input = event.target.closest("[data-catalog-action]");
     if (input) runCatalogAction(input);
+  });
+  document.getElementById("mirror-benchmark").addEventListener("click", benchmarkMirrors);
+  document.getElementById("mirror-add-form").addEventListener("submit", addCustomMirror);
+  document.getElementById("mirror-list").addEventListener("change", (event) => {
+    const input = event.target.closest("input[name='mirror-choice']");
+    if (input) selectMirror(input.value);
+  });
+  document.getElementById("mirror-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mirror-remove]");
+    if (button) {
+      event.preventDefault();
+      removeCustomMirror(button.dataset.mirrorRemove);
+    }
   });
   document.getElementById("check-latest").addEventListener("click", async () => {
     // 与自动检查共享同一把锁：任一方在跑时忽略新的手动点击。

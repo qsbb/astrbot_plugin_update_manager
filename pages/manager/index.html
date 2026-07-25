@@ -24,6 +24,7 @@
       <button class="active" data-tab="overview" data-i18n="overview">总览</button>
       <button data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
       <button data-tab="config" data-i18n="config">配置</button>
+      <button data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
       <button data-tab="catalog" data-i18n="catalog">目录</button>
     </nav>
 
@@ -58,6 +59,18 @@
         </div>
         <fieldset class="plugin-picker"><legend data-i18n="selectPlugins">选择插件</legend><div id="rule-plugins"></div></fieldset>
         <p class="next-run"><span data-i18n="nextRun">下次运行</span>：<strong id="rule-next-run">—</strong></p>
+      </form>
+    </section>
+
+    <section id="mirrors" class="panel">
+      <article class="card">
+        <div class="section-heading"><div><h2 data-i18n="mirrorsTitle">GitHub 镜像加速</h2><p data-i18n="mirrorsHint">加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。</p></div><button id="mirror-benchmark" type="button" data-i18n="mirrorBenchmark">一键测速</button></div>
+        <div id="mirror-list" class="mirror-list"><p data-i18n="loading">加载中…</p></div>
+        <p id="mirror-probe" class="mirror-probe"></p>
+      </article>
+      <form id="mirror-add-form" class="card">
+        <div class="section-heading"><div><h2 data-i18n="mirrorAddTitle">添加自定义加速站</h2></div><button type="submit" data-i18n="mirrorAdd">添加</button></div>
+        <label class="mirror-add"><span data-i18n="mirrorCustom">自定义</span><input id="mirror-add-input" type="url" inputmode="url" data-i18n-placeholder="mirrorAddPlaceholder" placeholder="https://your-mirror.example.com" required /></label>
       </form>
     </section>
 

@@ -26,6 +26,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/overview", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/mirrors", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/mirrors/benchmark", ("POST",)),
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
         (f"/{module.PLUGIN_NAME}/rule", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog", ("GET",)),
@@ -126,6 +128,156 @@ def test_pages_save_config_validates_and_preserves_empty_token(monkeypatch, tmp_
         "plugin_root": "RESTART_ONLY_FIELD",
         "unknown": "UNKNOWN_FIELD",
     }
+
+
+def test_pages_mirrors_lists_builtin_custom_and_selected(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path),
+        {
+            "github_mirror": "https://hk.gh-proxy.com/",
+            "github_mirror_candidates": "https://mine.example.com\nhttp://bad\nhttps://mine.example.com",
+        },
+    )
+    payload = unwrap(asyncio.run(plugin._pages_mirrors()))
+    assert payload["success"] is True
+    assert payload["selected"] == "https://hk.gh-proxy.com"
+    assert payload["direct"] is False
+    # 自定义列表去重且丢弃非 https 项。
+    assert payload["custom"] == ["https://mine.example.com"]
+    urls = [item["url"] for item in payload["candidates"]]
+    assert urls[:4] == [
+        "https://edgeone.gh-proxy.com",
+        "https://hk.gh-proxy.com",
+        "https://gh-proxy.com",
+        "https://gh.dpik.top",
+    ]
+    assert urls[-1] == "https://mine.example.com"
+    assert [item["url"] for item in payload["candidates"] if item["selected"]] == [
+        "https://hk.gh-proxy.com"
+    ]
+    assert all(item["builtin"] for item in payload["candidates"][:4])
+    assert payload["probe_url"].startswith("https://raw.githubusercontent.com/")
+    assert payload["benchmark_timeout_seconds"] == 5.0
+
+
+def test_pages_mirrors_keeps_unknown_selection_visible(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"github_mirror": "https://legacy.example.com"}
+    )
+    payload = unwrap(asyncio.run(plugin._pages_mirrors()))
+    selected = [item for item in payload["candidates"] if item["selected"]]
+    assert [item["url"] for item in selected] == ["https://legacy.example.com"]
+    assert selected[0]["builtin"] is False
+
+
+def test_pages_benchmark_mirrors_reports_latency_without_raising(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    probes = []
+
+    async def probe_latency(url, *, timeout_seconds):
+        probes.append((url, timeout_seconds))
+        if "gh-proxy.com" in url and url.startswith("https://gh-proxy.com/"):
+            return False, None, "TIMEOUT"
+        return True, 12.5, None
+
+    monkeypatch.setattr(plugin.registry, "probe_latency", probe_latency)
+
+    async def requested():
+        return {"mirrors": ["https://gh-proxy.com", "https://hk.gh-proxy.com", "ftp://nope"]}
+
+    monkeypatch.setattr(plugin, "_request_json", requested)
+    payload = unwrap(asyncio.run(plugin._pages_benchmark_mirrors()))
+    assert payload["success"] is True
+    # 非法项在解析阶段被丢弃，不会出现在结果里。
+    assert [item["url"] for item in payload["results"]] == [
+        "https://gh-proxy.com",
+        "https://hk.gh-proxy.com",
+    ]
+    assert payload["results"][0] == {
+        "url": "https://gh-proxy.com",
+        "available": False,
+        "latency_ms": None,
+        "error": "TIMEOUT",
+    }
+    assert payload["results"][1]["latency_ms"] == 12.5
+    # 探针必须走镜像前缀，并复用配置的测速超时。
+    assert probes[0][0] == (
+        "https://gh-proxy.com/https://raw.githubusercontent.com/octocat/Hello-World/master/README"
+    )
+    assert {timeout for _, timeout in probes} == {5.0}
+    assert payload["checked_at"]
+
+
+def test_pages_benchmark_mirrors_defaults_to_all_candidates_and_rejects_bad_type(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"github_mirror_candidates": "https://mine.example.com"}
+    )
+
+    async def probe_latency(url, *, timeout_seconds):
+        return True, 1.0, None
+
+    monkeypatch.setattr(plugin.registry, "probe_latency", probe_latency)
+
+    async def empty_body():
+        return {}
+
+    monkeypatch.setattr(plugin, "_request_json", empty_body)
+    payload = unwrap(asyncio.run(plugin._pages_benchmark_mirrors()))
+    assert [item["url"] for item in payload["results"]] == [
+        "https://edgeone.gh-proxy.com",
+        "https://hk.gh-proxy.com",
+        "https://gh-proxy.com",
+        "https://gh.dpik.top",
+        "https://mine.example.com",
+    ]
+
+    async def bad_type():
+        return {"mirrors": "https://mine.example.com"}
+
+    monkeypatch.setattr(plugin, "_request_json", bad_type)
+    payload, status = asyncio.run(plugin._pages_benchmark_mirrors())
+    assert status == 400
+    assert payload["error"] == "INVALID_FIELD_TYPE:mirrors"
+
+
+def test_pages_save_config_applies_mirror_and_rejects_insecure_prefix(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    assert plugin.registry.mirror is None
+
+    async def valid_mirror():
+        return {"github_mirror": "https://gh.dpik.top/"}
+
+    monkeypatch.setattr(plugin, "_request_json", valid_mirror)
+    payload = unwrap(asyncio.run(plugin._pages_save_config()))
+    assert payload["success"] is True
+    # 热应用：保存后无需重启即刻生效，并已去掉尾斜杠。
+    assert plugin.registry.mirror == "https://gh.dpik.top"
+    assert payload["restart_required"] is False
+
+    async def insecure_mirror():
+        return {"github_mirror": "http://gh.dpik.top"}
+
+    monkeypatch.setattr(plugin, "_request_json", insecure_mirror)
+    payload, status = asyncio.run(plugin._pages_save_config())
+    assert status == 400
+    assert payload["fields"] == {"github_mirror": "INVALID_VALUE"}
+    assert plugin.registry.mirror == "https://gh.dpik.top"
+
+    async def clear_mirror():
+        return {"github_mirror": ""}
+
+    monkeypatch.setattr(plugin, "_request_json", clear_mirror)
+    assert unwrap(asyncio.run(plugin._pages_save_config()))["success"] is True
+    assert plugin.registry.mirror is None
 
 
 def test_pages_save_config_rebuilds_or_removes_daily_schedule(monkeypatch, tmp_path):

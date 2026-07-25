@@ -9,8 +9,16 @@
 - `raw.githubusercontent.com` 版本探测使用独立短超时且不重试（实测该域单请求可达约 19 秒），超时立即回退 GitHub API，不再拖垮整批检查。
 - 缓存仓库默认分支（含 API 查得的结果，有效期 24 小时）：已知默认分支时只探测该分支，省掉注定 404 的第二次 raw 请求。
 - 单个插件版本检查新增墙钟上限，超时记为 `VERSION_CHECK_TIMEOUT` 并保留仓库上下文，其余插件照常返回版本，页面不再整体显示获取不到最新版。
+- 新增 GitHub 镜像加速：内置 `edgeone.gh-proxy.com`、`hk.gh-proxy.com`、`gh-proxy.com`、`gh.dpik.top` 四个加速站，按 `加速站/原始完整URL` 前缀拼接，仅代理 GitHub 家族域名。
+- raw 版本探测与 `archive_url` 兜底改为镜像优先、直连兜底：加速站报错或 404 都会立刻用直连重试同一分支，第三方加速站不可用不会升级成检查失败；Release/Tag 自带的 `zipball_url` 保持 GitHub 原值。
+- 便捷设置页面新增「镜像加速」tab：列出内置与自定义候选、单选启用、一键并发测速显示毫秒延迟与可用性、支持添加与移除自定义站点，zh-CN 与 en-US 同键覆盖。
+- 新增 `mirrors`(GET) 与 `mirrors/benchmark`(POST) 管理 API；测速复用 `bounded_gather` 并发、探针取 GitHub 小文件，单站失败只标记不可用，绝不抛栈。
 
 ### 配置
+- 新增 `github_mirror`（默认 `""`）：选中的 GitHub 加速站前缀，留空表示直连；保存时强制校验 https 前缀，非法值直接拒绝。
+- 新增 `github_mirror_candidates`（默认 `""`）：自定义加速站列表，换行或逗号分隔、去重、必须 https，非法项忽略。
+- 新增 `mirror_benchmark_timeout_seconds`（默认 `5.0`）：单个加速站测速超时，非法值回落默认值。
+- 镜像三项均支持页面热应用，改完立即生效，无需重启。
 - 新增 `raw_timeout_seconds`（默认 `8.0`）：raw 域版本探测的独立超时。
 - 新增 `version_check_concurrency`（默认 `5`）：版本检查并发上限，非法值回落到默认值。
 - 新增 `version_check_timeout_seconds`（默认 `25`）：单个插件版本检查的墙钟上限，`0` 表示不额外限制。

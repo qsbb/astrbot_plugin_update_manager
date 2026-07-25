@@ -15,6 +15,7 @@ import aiohttp
 import yaml
 from packaging.version import InvalidVersion, Version
 
+from ..mirrors import apply_mirror, resolve_mirror
 from ..models import Candidate
 
 #: 版本检查优先读取 raw 域，该域不计入 GitHub REST API 配额。
@@ -165,12 +166,15 @@ class CandidateRegistry:
         proxy: str | None = None,
         github_token: str | None = None,
         raw_timeout_seconds: float = DEFAULT_RAW_TIMEOUT_SECONDS,
+        mirror: str | None = None,
     ) -> None:
         self.timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.cache_ttl = cache_ttl_seconds
         self.raw_timeout_seconds = max(1.0, float(raw_timeout_seconds))
         self.proxy = normalize_optional_setting(proxy)
         self.token = normalize_optional_setting(github_token)
+        #: 选中的 GitHub 加速站；None 表示直连。镜像失败一律回退直连。
+        self.mirror = resolve_mirror(mirror)
         self._session: aiohttp.ClientSession | None = None
         self._cache: dict[str, tuple[float, str | None, Any]] = {}
         self._text_cache: dict[str, tuple[float, str | None, str]] = {}
@@ -300,6 +304,25 @@ class CandidateRegistry:
         if known is None:
             return DEFAULT_BRANCH_CANDIDATES
         return (known,)
+
+    # ------------------------------------------------------------------ 镜像
+
+    def _probe_urls(self, url: str) -> tuple[str, ...]:
+        """镜像优先、直连兜底的探测顺序；未配置镜像时只有直连一项。"""
+        mirrored = apply_mirror(url, self.mirror)
+        return (mirrored, url) if mirrored != url else (url,)
+
+    def _archive_fallback_url(self, repo: str, branch: str) -> str:
+        """构造 zipball 兜底地址；配置镜像时走加速站，便于下载提速。
+
+        Release/Tag 自带的 zipball_url 保持 GitHub 原值不变，避免把上游已给出的
+        权威下载地址替换成第三方域名。
+        """
+        return apply_mirror(
+            f"https://{GITHUB_API_HOST}/repos/{repo}/zipball/"
+            f"{quote(branch, safe='')}",
+            self.mirror,
+        )
 
     # ------------------------------------------------------------------ 读取
 
@@ -460,6 +483,35 @@ class CandidateRegistry:
                 raise RegistryError("REGISTRY_NETWORK_ERROR") from exc
         raise RegistryError("REGISTRY_UNAVAILABLE")
 
+    async def probe_latency(
+        self, url: str, *, timeout_seconds: float
+    ) -> tuple[bool, float | None, str | None]:
+        """测速探针：只关心"能否在预算内取到小文件"，返回 (可用, 毫秒, 错误码)。
+
+        测速是纯诊断动作，任何异常都收敛成错误码返回，绝不向上抛栈；也不写入
+        任何缓存，避免把探针响应混进版本检查的缓存里。
+        """
+        budget = max(0.5, float(timeout_seconds))
+        started = time.monotonic()
+        try:
+            client = await self._client()
+            async with client.get(
+                url,
+                headers={"Accept": "text/plain"},
+                proxy=self.proxy,
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=budget),
+            ) as response:
+                await response.read()
+                elapsed_ms = (time.monotonic() - started) * 1000
+                if response.status >= 400:
+                    return False, None, f"HTTP_{response.status}"
+                return True, round(elapsed_ms, 1), None
+        except asyncio.TimeoutError:
+            return False, None, "TIMEOUT"
+        except Exception as exc:  # 测速失败绝不能冒泡成页面 500
+            return False, None, type(exc).__name__.upper()
+
     @staticmethod
     def market_candidate(
         plugin_id: str,
@@ -567,6 +619,32 @@ class CandidateRegistry:
             force_refresh=force_refresh,
         )
 
+    async def _probe_raw_document(
+        self, url: str, *, force_refresh: bool
+    ) -> tuple[str | None, RegistryError | None]:
+        """按"镜像优先、直连兜底"读取一个 raw 文档。
+
+        返回 (文档内容, 最后一次错误)。只有当所有候选地址都失败时才返回错误；
+        镜像返回 404 也会继续用直连确认，避免加速站缓存缺失被当成"文件不存在"。
+        """
+        candidates = self._probe_urls(url)
+        last_error: RegistryError | None = None
+        for index, candidate in enumerate(candidates):
+            is_last = index == len(candidates) - 1
+            try:
+                document = await self.fetch_text(
+                    candidate,
+                    force_refresh=force_refresh,
+                    timeout_seconds=self.raw_timeout_seconds,
+                    attempts=1,
+                )
+            except RegistryError as exc:
+                last_error = exc
+                continue
+            if document is not None or is_last:
+                return document, None
+        return None, last_error
+
     async def _raw_metadata_version(
         self, repo: str, plugin_id: str, *, force_refresh: bool
     ) -> tuple[str | None, str | None, RegistryError | None]:
@@ -574,6 +652,9 @@ class CandidateRegistry:
 
         已知默认分支时只探测该分支；否则按 main/master 顺序探测。每次探测使用
         独立的短超时且不重试，超时即视为探测失败并交给 API 回退。
+
+        配置加速站时先走镜像；镜像报错或 404 都会立刻用直连地址重试同一分支——
+        第三方加速站不可用绝不能升级成"检查失败"。
 
         返回 (命中的分支, 权威版本, 权威源错误)。三者均为 None 表示候选分支
         都不存在该文件，调用方需要回退 API 查询真实默认分支。
@@ -583,16 +664,16 @@ class CandidateRegistry:
                 f"https://{GITHUB_RAW_HOST}/{repo}/"
                 f"{quote(branch, safe='')}/metadata.yaml"
             )
-            try:
-                document = await self.fetch_text(
-                    url,
-                    force_refresh=force_refresh,
-                    timeout_seconds=self.raw_timeout_seconds,
-                    attempts=1,
-                )
-            except RegistryError as exc:
+            document, probe_error = await self._probe_raw_document(
+                url, force_refresh=force_refresh
+            )
+            if probe_error is not None:
                 # 网络/限流类问题对其他分支同样成立，直接交给 API 回退判定。
-                return None, None, exc.with_context(repo=repo, default_branch=branch)
+                return (
+                    None,
+                    None,
+                    probe_error.with_context(repo=repo, default_branch=branch),
+                )
             if document is None:
                 continue
             try:
@@ -752,10 +833,7 @@ class CandidateRegistry:
             )
             tag_name, commit, archive_url = self._tag_details(matched)
         if not archive_url:
-            archive_url = (
-                f"https://api.github.com/repos/{repo}/zipball/"
-                f"{quote(default_branch, safe='')}"
-            )
+            archive_url = self._archive_fallback_url(repo, default_branch)
         return Candidate(
             plugin_id,
             current_version,
@@ -802,9 +880,8 @@ class CandidateRegistry:
                 await self._tags(repo, force_refresh=force_refresh)
             )[0]
             tag_name, commit, archive_url = self._tag_details(entry)
-            archive_url = archive_url or (
-                f"https://api.github.com/repos/{repo}/zipball/"
-                f"{quote(default_branch, safe='')}"
+            archive_url = archive_url or self._archive_fallback_url(
+                repo, default_branch
             )
             return Candidate(
                 plugin_id,
@@ -830,10 +907,9 @@ class CandidateRegistry:
         if version is None:
             raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
         published = payload.get("published_at")
-        archive_url = str(payload.get("zipball_url") or "").strip() or (
-            f"https://api.github.com/repos/{repo}/zipball/"
-            f"{quote(default_branch, safe='')}"
-        )
+        archive_url = str(
+            payload.get("zipball_url") or ""
+        ).strip() or self._archive_fallback_url(repo, default_branch)
         return Candidate(
             plugin_id,
             current_version,

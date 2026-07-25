@@ -27,6 +27,17 @@ from .core.concurrency import (
     bounded_gather,
     normalize_concurrency,
 )
+from .core.mirrors import (
+    BENCHMARK_PROBE_URL,
+    BUILTIN_MIRRORS,
+    DEFAULT_BENCHMARK_TIMEOUT_SECONDS,
+    apply_mirror,
+    available_mirrors,
+    normalize_benchmark_timeout,
+    normalize_mirror,
+    parse_mirror_candidates,
+    resolve_mirror,
+)
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
 from .core.trusted import TRUSTED_BY_ID, TRUSTED_SERIES
@@ -87,6 +98,13 @@ class PagesAPIMixin:
             ("overview", self._pages_overview, ["GET"], "更新管理器总览"),
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
+            ("mirrors", self._pages_mirrors, ["GET"], "查看 GitHub 加速站候选"),
+            (
+                "mirrors/benchmark",
+                self._pages_benchmark_mirrors,
+                ["POST"],
+                "并发测速 GitHub 加速站",
+            ),
             ("rule", self._pages_get_rule, ["GET"], "读取每日自动更新规则"),
             ("rule", self._pages_save_rule, ["POST"], "保存每日自动更新规则"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
@@ -300,6 +318,87 @@ class PagesAPIMixin:
             }
         )
 
+    # ------------------------------------------------------------ 镜像加速
+
+    def _mirror_benchmark_timeout(self) -> float:
+        """单站测速的墙钟预算；非法值回落到默认，避免页面长时间转圈。"""
+        return normalize_benchmark_timeout(
+            self._get(
+                "mirror_benchmark_timeout_seconds",
+                DEFAULT_BENCHMARK_TIMEOUT_SECONDS,
+            ),
+            default=DEFAULT_BENCHMARK_TIMEOUT_SECONDS,
+        )
+
+    def _mirror_payload(self) -> dict[str, Any]:
+        """镜像候选快照：内置站、自定义站、当前选中项与测速预算。"""
+        custom = parse_mirror_candidates(self._get("github_mirror_candidates", ""))
+        selected = resolve_mirror(self._get("github_mirror", ""))
+        candidates = available_mirrors(custom)
+        # 选中项可能来自历史配置且已不在候选里，仍要在列表中可见并保持勾选。
+        if selected and selected not in candidates:
+            candidates = candidates + (selected,)
+        return {
+            "success": True,
+            "selected": selected,
+            "direct": selected is None,
+            "builtin": list(BUILTIN_MIRRORS),
+            "custom": list(custom),
+            "candidates": [
+                {
+                    "url": url,
+                    "builtin": url in BUILTIN_MIRRORS,
+                    "selected": url == selected,
+                }
+                for url in candidates
+            ],
+            "probe_url": BENCHMARK_PROBE_URL,
+            "benchmark_timeout_seconds": self._mirror_benchmark_timeout(),
+        }
+
+    async def _pages_mirrors(self):
+        return json_response(self._mirror_payload())
+
+    async def _pages_benchmark_mirrors(self):
+        """并发测速候选加速站；单站失败只标记该站不可用，绝不抛栈。"""
+        data = await self._request_json()
+        requested = data.get("mirrors") if isinstance(data, dict) else None
+        if requested is None:
+            targets = tuple(item["url"] for item in self._mirror_payload()["candidates"])
+        elif isinstance(requested, list):
+            targets = parse_mirror_candidates(requested)
+        else:
+            return json_response(
+                {"success": False, "error": "INVALID_FIELD_TYPE:mirrors"}, status=400
+            )
+        timeout_seconds = self._mirror_benchmark_timeout()
+
+        async def measure(mirror: str) -> dict[str, Any]:
+            probe_url = apply_mirror(BENCHMARK_PROBE_URL, mirror)
+            available, latency_ms, error = await self.registry.probe_latency(
+                probe_url, timeout_seconds=timeout_seconds
+            )
+            return {
+                "url": mirror,
+                "available": available,
+                "latency_ms": latency_ms,
+                "error": error,
+            }
+
+        results = await bounded_gather(
+            [partial(measure, mirror) for mirror in targets],
+            limit=self._version_check_concurrency(),
+        )
+        return json_response(
+            {
+                "success": True,
+                "results": results,
+                "probe_url": BENCHMARK_PROBE_URL,
+                "benchmark_timeout_seconds": timeout_seconds,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
     async def _rule_payload(self, rule: UpdateRule | None = None) -> dict[str, Any]:
         current = rule or self.scheduler.load()
         catalog = await self.catalog.scan()
@@ -482,6 +581,12 @@ class PagesAPIMixin:
             options = field.get("options")
             if options and value not in options:
                 raise ValueError(key)
+            if key == "github_mirror" and value.strip():
+                # 选中的加速站必须是合法 https 前缀，保存即拒绝而不是静默回直连。
+                normalized = normalize_mirror(value)
+                if normalized is None:
+                    raise ValueError(key)
+                return normalized
             return value
         raise TypeError(key)
 
@@ -501,6 +606,8 @@ class PagesAPIMixin:
         )
         self.registry.proxy = normalize_optional_setting(self._get("proxy", ""))
         self.registry.token = normalize_optional_setting(self._get("github_token", ""))
+        # 镜像热应用：改完立即生效，非法或留空一律回到直连。
+        self.registry.mirror = resolve_mirror(self._get("github_mirror", ""))
         self.transaction.health.stability_seconds = max(
             0.0, float(self._get("health_stability_seconds", 2.0))
         )

@@ -5,6 +5,7 @@
 ## 特性
 
 - 可信来源候选发现，条件请求与缓存，支持代理与可选 GitHub token。
+- 可选 GitHub 镜像加速：内置 gh-proxy 系加速站并支持自定义，版本探测与归档兜底走镜像优先、直连兜底，镜像挂掉不会导致检查失败。
 - 冻结不可变计划（TTL 有效期内），避免执行与预览漂移。
 - 经 AstrBot 核心串行更新，单事务加文件租约锁，杜绝并发。
 - 更新前自动备份，更新后健康稳定观察窗口，失败自动回滚。
@@ -42,6 +43,7 @@
 - **总览**：查看插件状态、AstrBot 版本、更新能力探测结果与每日规则。
 - **系列推荐**：查看知、言、序、声、核固定可信清单；按运行时能力显示“安装/已安装”“更新”“启用/停用”，操作完成后刷新推荐状态、总览和目录。
 - **设置**：修改常用配置并即时应用；配置仍会持久化到 AstrBot `data` 目录。
+- **镜像加速**：列出内置与自定义 GitHub 加速站，单选启用、一键并发测速查看毫秒延迟、添加或移除自定义站点，保存即热应用。
 - **插件目录**：查看已安装插件、当前版本、来源与自动更新资格。
 
 推荐操作通过 AstrBot 核心 `install_plugin`、`update_plugin`、`turn_on_plugin`、`turn_off_plugin` 执行，适配 AstrBot `4.16-4.x` 的签名差异并统一串行。请求仅接受固定清单中的插件 ID；核禁止自更新和自停用。仓库页面 URL 仅用于安装来源，绝不会误传为 `update_plugin.download_url`；只有已解析的归档 URL 才会传给该参数。
@@ -60,6 +62,9 @@
 | `auto_update_enabled` | bool | false | 允许每日规则执行更新 |
 | `network_timeout_seconds` | int | 15 | 候选查询总超时 |
 | `cache_ttl_seconds` | int | 300 | 候选与条件请求缓存时长 |
+| `github_mirror` | string | "" | GitHub 加速站前缀（留空直连；镜像失败自动回退直连，不会导致检查失败） |
+| `github_mirror_candidates` | string | "" | 自定义加速站列表（换行或逗号分隔，必须 https，非法项忽略） |
+| `mirror_benchmark_timeout_seconds` | float | 5.0 | 单个加速站测速超时；仅用于诊断，超时判为不可用 |
 | `github_token` | string | "" | 可选 GitHub token（按秘密保存，仅显示是否已配置，不在页面、API 或审计中回显） |
 | `health_stability_seconds` | float | 2.0 | 更新重载后的健康稳定观察窗口 |
 | `backup_capacity_mb` | int | 2048 | 备份总容量上限，永不删除唯一恢复点 |
