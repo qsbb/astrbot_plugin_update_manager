@@ -28,13 +28,45 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert '<script src="/api/plugin/page/bridge-sdk.js"></script>' in html
+    assert '<script type="module" src="./app.js"></script>' in html
     assert html.index("bridge-sdk.js") < html.index("./app.js")
     assert 'data-tab="overview"' in html
     assert 'data-tab="config"' in html
     assert 'data-tab="catalog"' in html
+    assert 'id="startup-error"' in html
+    assert 'role="alert"' in html
     assert '"zh-CN"' in js and '"en-US"' in js
     assert "async function resolveBridge" in js
     assert "waitForAstrBotBridge" in js
+
+
+def test_manager_page_waits_for_bridge_before_binding_events():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    init_body = js[js.index("async function init()") : js.index("init().catch")]
+    assert "bridge = await resolveBridge();" in init_body
+    assert "await bridge.ready();" in init_body
+    assert "bindEvents();" in init_body
+    assert init_body.index("bridge = await resolveBridge();") < init_body.index(
+        "await bridge.ready();"
+    )
+    assert init_body.index("await bridge.ready();") < init_body.index("bindEvents();")
+    assert 'document.getElementById("refresh").addEventListener' in js
+    assert 'document.getElementById("config-form").addEventListener' in js
+
+
+def test_manager_page_handles_storage_and_startup_failures():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function readStoredLocale()" in js
+    assert "function storeLocale(locale)" in js
+    assert "window.localStorage.getItem" in js
+    assert "window.localStorage.setItem" in js
+    assert "catch (error)" in js
+    assert "function showStartupError(error)" in js
+    assert 'document.getElementById("startup-error")' in js
+    assert "init().catch(showStartupError);" in js
+    assert "Object.prototype.hasOwnProperty.call(messages, storedLocale)" in js
+    assert "Object.hasOwn(" not in js
+    assert 'const state = { locale: localStorage.getItem' not in js
 
 
 def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():

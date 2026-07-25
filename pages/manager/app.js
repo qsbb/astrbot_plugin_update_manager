@@ -2,6 +2,7 @@ const messages = {
   "zh-CN": {
     title: "凝心溯溪-焕 · 更新管理", heading: "凝心溯溪-焕", subtitle: "安全、串行、可回滚的插件更新控制台",
     refresh: "刷新", overview: "总览", config: "配置", catalog: "目录", loading: "加载中…",
+    startupFailed: "页面启动失败",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "展示当前 AstrBot 可见插件及更新资格。",
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
@@ -11,6 +12,7 @@ const messages = {
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
     refresh: "Refresh", overview: "Overview", config: "Configuration", catalog: "Catalog", loading: "Loading…",
+    startupFailed: "Page startup failed",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "AstrBot plugins visible to the current runtime and update eligibility.",
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
@@ -19,7 +21,30 @@ const messages = {
   }
 };
 
-const state = { locale: localStorage.getItem("update-manager-locale") || "zh-CN", config: null };
+let bridge = null;
+
+function readStoredLocale() {
+  try {
+    return window.localStorage.getItem("update-manager-locale");
+  } catch (error) {
+    console.warn("Unable to read update manager locale from localStorage", error);
+    return null;
+  }
+}
+
+function storeLocale(locale) {
+  try {
+    window.localStorage.setItem("update-manager-locale", locale);
+  } catch (error) {
+    console.warn("Unable to save update manager locale to localStorage", error);
+  }
+}
+
+const storedLocale = readStoredLocale();
+const state = {
+  locale: Object.prototype.hasOwnProperty.call(messages, storedLocale) ? storedLocale : "zh-CN",
+  config: null
+};
 const t = (key) => messages[state.locale][key] || key;
 
 async function resolveBridge(timeout = 3000) {
@@ -34,12 +59,12 @@ async function resolveBridge(timeout = 3000) {
 }
 
 async function apiGet(name) {
-  const bridge = await resolveBridge();
+  if (!bridge) throw new Error("Bridge is not initialized");
   return parseJsonResponse(await bridge.apiGet(name));
 }
 
 async function apiPost(name, payload) {
-  const bridge = await resolveBridge();
+  if (!bridge) throw new Error("Bridge is not initialized");
   return parseJsonResponse(await bridge.apiPost(name, payload));
 }
 
@@ -137,18 +162,39 @@ async function refreshAll() {
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
 }
 
-document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
-  document.querySelectorAll("[data-tab], .panel").forEach((node) => node.classList.remove("active"));
-  button.classList.add("active");
-  document.getElementById(button.dataset.tab).classList.add("active");
-}));
-document.getElementById("config-form").addEventListener("submit", saveConfig);
-document.getElementById("refresh").addEventListener("click", refreshAll);
-document.getElementById("locale").addEventListener("change", async (event) => {
-  state.locale = event.target.value;
-  localStorage.setItem("update-manager-locale", state.locale);
+function showStartupError(error) {
+  const message = `${t("startupFailed")}: ${error?.message || error}`;
+  const node = document.getElementById("startup-error");
+  if (node) {
+    node.textContent = message;
+    node.hidden = false;
+  }
+  toast(message, true);
+}
+
+function bindEvents() {
+  document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
+    document.querySelectorAll("[data-tab], .panel").forEach((node) => node.classList.remove("active"));
+    button.classList.add("active");
+    document.getElementById(button.dataset.tab).classList.add("active");
+  }));
+  document.getElementById("config-form").addEventListener("submit", saveConfig);
+  document.getElementById("refresh").addEventListener("click", refreshAll);
+  document.getElementById("locale").addEventListener("change", async (event) => {
+    state.locale = event.target.value;
+    storeLocale(state.locale);
+    applyI18n();
+    await refreshAll();
+  });
+}
+
+async function init() {
+  bridge = await resolveBridge();
+  if (typeof bridge.ready !== "function") throw new Error("Bridge ready() is unavailable");
+  await bridge.ready();
+  bindEvents();
   applyI18n();
   await refreshAll();
-});
-applyI18n();
-refreshAll();
+}
+
+init().catch(showStartupError);
