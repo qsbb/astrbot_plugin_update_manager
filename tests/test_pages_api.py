@@ -586,7 +586,50 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     )
     assert failed["version_status"] == "check_failed"
     assert failed["error"] == "RATE_LIMITED"
+    assert failed["error_detail"] == "RATE_LIMITED"
+    assert failed["error_context"] == {"repo": failed["repo_url"]}
     assert all(item["checked_at"] for item in payload["items"])
+
+
+def test_recommendation_failure_payload_keeps_safe_registry_context(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        raise pages_api.RegistryError(
+            "REGISTRY_HTTP_403",
+            http_status=403,
+            repo="qsbb/example",
+            default_branch="main",
+        )
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    failed = payload["items"][0]
+    assert failed["error"] == "REGISTRY_HTTP_403"
+    assert failed["error_detail"] == "REGISTRY_HTTP_403"
+    assert failed["error_context"] == {
+        "repo": "qsbb/example",
+        "default_branch": "main",
+        "http_status": 403,
+    }
+
+
+def test_recommendation_failure_detail_redacts_tokens(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        raise RuntimeError("request failed with Bearer ghp_super_secret")
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    serialized = json.dumps(payload, ensure_ascii=False)
+    failed = payload["items"][0]
+    assert failed["error"] == "RUNTIMEERROR"
+    assert failed["error_detail"] == "request failed with ***"
+    assert "ghp_super_secret" not in serialized
 
 
 def test_update_action_requires_newer_version(monkeypatch, tmp_path):

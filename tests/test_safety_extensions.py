@@ -335,11 +335,37 @@ def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
         return client
 
     monkeypatch.setattr(registry, "_client", get_client)
-    with pytest.raises(RegistryError, match="REGISTRY_HTTP_401"):
+    with pytest.raises(RegistryError, match="REGISTRY_HTTP_401") as captured:
         asyncio.run(
             registry.github_latest("demo", "1.0", "https://github.com/acme/demo")
         )
+    assert captured.value.to_dict() == {
+        "code": "REGISTRY_HTTP_401",
+        "context": {
+            "repo": "acme/demo",
+            "default_branch": "main",
+            "http_status": 401,
+        },
+    }
     assert len(client.calls) == 3
+
+
+def test_github_latest_default_branch_failure_keeps_repo_and_http_status(monkeypatch):
+    client = RegistryClient(RegistryResponse(401))
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError) as captured:
+        asyncio.run(
+            registry.github_latest("demo", "1.0", "https://github.com/acme/demo")
+        )
+    assert captured.value.to_dict() == {
+        "code": "REGISTRY_HTTP_401",
+        "context": {"repo": "acme/demo", "http_status": 401},
+    }
 
 
 def test_rule_rejects_unknown_policy_and_failure_mode(tmp_path):

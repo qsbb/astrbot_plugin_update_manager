@@ -129,7 +129,12 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     ):
         assert status in js
     assert "function versionStatusBadge(item)" in js
-    assert "escapeHtml(item.error)" in js
+    assert "function recommendationError(item)" in js
+    assert '`${t("errorCode")}: ${item.error || "UNKNOWN"}`' in js
+    assert '`${t("errorHttpStatus")}: ${context.http_status}`' in js
+    assert '`${t("errorRepository")}: ${context.repo}`' in js
+    assert '`${t("errorBranch")}: ${context.default_branch}`' in js
+    assert "${recommendationError(item)}" in js
     assert 'role="switch"' in js
     assert 'aria-checked="${item.activated ? "true" : "false"}"' in js
     assert "await loadRecommendations();" in js

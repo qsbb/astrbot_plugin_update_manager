@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
-from .core.adapters.registry import normalize_optional_setting
+from .core.adapters.registry import RegistryError, normalize_optional_setting
 from .core.adapters.storage import redact
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
@@ -653,6 +654,26 @@ class PagesAPIMixin:
             return False, "up_to_date"
         return False, "local_newer"
 
+    @staticmethod
+    def _recommendation_error(exc: Exception, repo_url: str) -> dict[str, Any]:
+        raw_code = getattr(exc, "code", None) or str(exc) or type(exc).__name__
+        code = (
+            raw_code
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*", raw_code)
+            else type(exc).__name__.upper()
+        )
+        context = exc.to_dict()["context"] if isinstance(exc, RegistryError) else {}
+        context.setdefault("repo", repo_url)
+        detail = redact(str(exc) or type(exc).__name__)
+        detail = re.sub(
+            r"(?i)\b(?:gh[pousr]_[a-z0-9_]+|bearer\s+\S+)", "***", detail
+        )
+        return {
+            "error": code,
+            "error_detail": detail,
+            "error_context": context,
+        }
+
     async def _recommendation_payload(self, *, force_refresh: bool) -> dict[str, Any]:
         snapshots = await self.adapter.snapshot_plugins()
         installed = {
@@ -685,7 +706,13 @@ class PagesAPIMixin:
                 update_available, version_status = False, "check_failed"
                 download_url = ""
                 default_branch = ""
-                error = str(exc) or type(exc).__name__
+                failure = self._recommendation_error(exc, trusted.repo_url)
+                error = failure["error"]
+                error_context = failure["error_context"]
+                error_detail = failure["error_detail"]
+            else:
+                error_context = {}
+                error_detail = None
             return trusted, snapshot, {
                 "latest_version": latest_version,
                 "update_available": update_available,
@@ -694,6 +721,8 @@ class PagesAPIMixin:
                 "default_branch": default_branch,
                 "checked_at": checked_at,
                 "error": error,
+                "error_detail": error_detail,
+                "error_context": error_context,
             }
 
         checked = await asyncio.gather(

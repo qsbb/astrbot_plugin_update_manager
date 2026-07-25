@@ -18,7 +18,38 @@ from ..models import Candidate
 
 
 class RegistryError(RuntimeError):
-    pass
+    """Stable registry failure with safe request context for UI diagnostics."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        http_status: int | None = None,
+        repo: str | None = None,
+        default_branch: str | None = None,
+    ) -> None:
+        self.code = code
+        self.http_status = http_status
+        self.repo = repo
+        self.default_branch = default_branch
+        super().__init__(code)
+
+    def with_context(
+        self, *, repo: str | None = None, default_branch: str | None = None
+    ) -> "RegistryError":
+        if repo and not self.repo:
+            self.repo = repo
+        if default_branch and not self.default_branch:
+            self.default_branch = default_branch
+        return self
+
+    def to_dict(self) -> dict[str, Any]:
+        context = {"repo": self.repo} if self.repo else {}
+        if self.default_branch:
+            context["default_branch"] = self.default_branch
+        if self.http_status is not None:
+            context["http_status"] = self.http_status
+        return {"code": self.code, "context": context}
 
 
 #: metadata.yaml 是版本权威来源；仅当权威源"确实缺失或不可信"时才允许回退到
@@ -95,16 +126,24 @@ class CandidateRegistry:
                         self._cache[url] = (time.monotonic(), cached[1], cached[2])
                         return cached[2]
                     if response.status in {301, 302, 307, 308}:
-                        raise RegistryError("SOURCE_REDIRECT_BLOCKED")
+                        raise RegistryError(
+                            "SOURCE_REDIRECT_BLOCKED", http_status=response.status
+                        )
                     if response.status in {403, 429} or response.status >= 500:
                         if attempt < 2:
                             await asyncio.sleep(min(2**attempt, 4))
                             continue
-                        raise RegistryError(f"REGISTRY_HTTP_{response.status}")
+                        raise RegistryError(
+                            f"REGISTRY_HTTP_{response.status}",
+                            http_status=response.status,
+                        )
                     if response.status == 404:
-                        raise RegistryError("REGISTRY_HTTP_404")
+                        raise RegistryError("REGISTRY_HTTP_404", http_status=404)
                     if response.status >= 400:
-                        raise RegistryError(f"REGISTRY_HTTP_{response.status}")
+                        raise RegistryError(
+                            f"REGISTRY_HTTP_{response.status}",
+                            http_status=response.status,
+                        )
                     try:
                         payload = await response.json(content_type=None)
                     except (aiohttp.ClientError, ValueError) as exc:
@@ -252,7 +291,10 @@ class CandidateRegistry:
         ):
             raise RegistryError("SOURCE_REQUIRED")
         repo = "/".join(parts)
-        default_branch = await self._default_branch(repo, force_refresh=force_refresh)
+        try:
+            default_branch = await self._default_branch(repo, force_refresh=force_refresh)
+        except RegistryError as exc:
+            raise exc.with_context(repo=repo)
         try:
             metadata_url = (
                 f"https://api.github.com/repos/{repo}/contents/metadata.yaml"
@@ -263,17 +305,23 @@ class CandidateRegistry:
             )
             target = self._github_metadata_version(metadata_payload, plugin_id)
         except RegistryError as exc:
+            exc.with_context(repo=repo, default_branch=default_branch)
             if str(exc) not in _METADATA_FALLBACK_ERRORS:
                 raise
-            return await self._release_or_tag_candidate(
-                plugin_id,
-                current_version,
-                source_url,
-                repo,
-                default_branch=default_branch,
-                fallback_reason=str(exc),
-                force_refresh=force_refresh,
-            )
+            try:
+                return await self._release_or_tag_candidate(
+                    plugin_id,
+                    current_version,
+                    source_url,
+                    repo,
+                    default_branch=default_branch,
+                    fallback_reason=str(exc),
+                    force_refresh=force_refresh,
+                )
+            except RegistryError as fallback_exc:
+                raise fallback_exc.with_context(
+                    repo=repo, default_branch=default_branch
+                )
         return await self._metadata_candidate(
             plugin_id,
             current_version,
