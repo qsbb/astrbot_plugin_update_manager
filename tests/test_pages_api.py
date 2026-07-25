@@ -59,6 +59,19 @@ def test_pages_config_never_returns_secret(monkeypatch, tmp_path):
     assert payload["config"]["proxy"] == "http://proxy"
 
 
+def test_apply_page_runtime_config_clears_optional_network_values(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"proxy": "http://proxy", "github_token": "secret"}
+    )
+    plugin._config = {"proxy": None, "github_token": None}
+
+    plugin._apply_page_runtime_config()
+
+    assert plugin.registry.proxy is None
+    assert plugin.registry.token is None
+
+
 def test_pages_request_json_prefers_astrbot_web_contract(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})

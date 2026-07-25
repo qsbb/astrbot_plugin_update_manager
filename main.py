@@ -61,8 +61,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self.registry = CandidateRegistry(
             timeout_seconds=int(self._get("network_timeout_seconds", 15)),
             cache_ttl_seconds=int(self._get("cache_ttl_seconds", 300)),
-            proxy=str(self._get("proxy", "")),
-            github_token=str(self._get("github_token", "")),
+            proxy=self._get("proxy", ""),
+            github_token=self._get("github_token", ""),
         )
         health = HealthChecker(
             self.adapter,

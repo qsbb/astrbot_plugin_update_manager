@@ -215,6 +215,16 @@ def test_string_bool_and_custom_config_values(monkeypatch, tmp_path):
     assert plugin.registry.proxy == "http://127.0.0.1:8080"
 
 
+def test_optional_network_config_none_stays_unconfigured(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"proxy": None, "github_token": None}
+    )
+
+    assert plugin.registry.proxy is None
+    assert plugin.registry.token is None
+
+
 def test_disabled_config_gates_all_commands(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {"enabled": False})
