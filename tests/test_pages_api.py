@@ -621,7 +621,9 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         )
 
     async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
-        return SimpleNamespace(target_version="0.1.0")
+        # 远端版本跟随本地版本，断言的是"已是最新"这一语义；
+        # 写死字面量会在每次发布 bump 后误报 local_newer。
+        return SimpleNamespace(target_version=module.__version__)
 
     plugin.adapter.snapshot_plugins = snapshots
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
@@ -648,7 +650,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     assert core["actions"]["disable"] is False
     assert payload["self_update"] == {
         "current_version": module.__version__,
-        "latest_version": "0.1.0",
+        "latest_version": module.__version__,
         "update_available": False,
         "version_status": "up_to_date",
         "checked_at": core["checked_at"],

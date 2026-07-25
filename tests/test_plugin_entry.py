@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import re
 import sys
 import types
 from pathlib import Path
@@ -96,7 +97,12 @@ def test_entry_identity_defaults_and_data_location(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     assert module.PLUGIN_NAME == "astrbot_plugin_update_manager"
-    assert module.__version__ == "0.1.0"
+    # 版本号断言绑定 metadata.yaml：AstrBot 与更新器读的是 metadata，
+    # 若只 bump 代码里的 __version__ 会导致远端始终报旧版本、收不到更新。
+    metadata = (PLUGIN_ROOT / "metadata.yaml").read_text(encoding="utf-8")
+    declared = re.search(r"^version:\s*(\S+)", metadata, re.MULTILINE)
+    assert declared, "metadata.yaml 缺少 version 字段"
+    assert module.__version__ == declared.group(1)
     assert plugin.enabled is True and plugin.auto_update_enabled is False
     assert plugin.store.root == (tmp_path / module.PLUGIN_NAME).resolve()
 
