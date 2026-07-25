@@ -77,6 +77,8 @@ class PagesAPIMixin:
             ("rule", self._pages_get_rule, ["GET"], "读取每日自动更新规则"),
             ("rule", self._pages_save_rule, ["POST"], "保存每日自动更新规则"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
+            ("catalog/enable", self._pages_catalog_enable, ["POST"], "启用目录插件"),
+            ("catalog/disable", self._pages_catalog_disable, ["POST"], "停用目录插件"),
             ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
             (
                 "recommendations/check-latest",
@@ -485,9 +487,27 @@ class PagesAPIMixin:
         )
         self._apply_log_level(str(self._get("log_level", "INFO")))
 
+    def _catalog_lifecycle(self, item, capabilities) -> dict[str, Any]:
+        reason = None
+        if not item.loaded:
+            reason = "PLUGIN_NOT_LOADED"
+        elif "RESERVED_PLUGIN" in item.reasons:
+            reason = "RESERVED_PLUGIN"
+        elif item.plugin_id == PLUGIN_ID:
+            reason = "SELF_LIFECYCLE_BLOCKED"
+        can_enable = bool(not reason and capabilities.turn_on_plugin)
+        can_disable = bool(not reason and capabilities.turn_off_plugin)
+        if not reason and not (can_enable if not item.activated else can_disable):
+            reason = "LIFECYCLE_CAPABILITY_UNAVAILABLE"
+        return {
+            "operable": can_disable if item.activated else can_enable,
+            "reason": reason,
+        }
+
     async def _pages_catalog(self):
         items = await self.catalog.scan()
         report = self.adapter.last_discovery_report
+        capabilities = self.adapter.probe_capabilities()
         diagnostics = list(report.diagnostics)
         if not items:
             if report.roots_checked == 0:
@@ -516,11 +536,68 @@ class PagesAPIMixin:
                         "reasons": list(item.reasons),
                         "source_kind": item.source_kind,
                         "source_url": item.source_url,
+                        "lifecycle": self._catalog_lifecycle(item, capabilities),
                     }
                     for item in items
                 ],
             }
         )
+
+    async def _catalog_plugin_id(
+        self, *, require_confirmation: bool, enabled: bool
+    ) -> str:
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        expected = {"plugin_id", "confirm"} if require_confirmation else {"plugin_id"}
+        if set(data) != expected:
+            raise ValueError(
+                "CONFIRMATION_REQUIRED" if require_confirmation else "INVALID_JSON_PAYLOAD"
+            )
+        if require_confirmation and data.get("confirm") is not True:
+            raise ValueError("CONFIRMATION_REQUIRED")
+        plugin_id = data.get("plugin_id")
+        if not isinstance(plugin_id, str) or not plugin_id.strip():
+            raise ValueError("INVALID_PLUGIN_ID")
+        plugin_id = plugin_id.strip()
+        if plugin_id == PLUGIN_ID:
+            raise ValueError("SELF_LIFECYCLE_BLOCKED")
+        catalog = {item.plugin_id: item for item in await self.catalog.scan()}
+        item = catalog.get(plugin_id)
+        if item is None:
+            raise ValueError("PLUGIN_NOT_FOUND")
+        lifecycle = self._catalog_lifecycle(item, self.adapter.probe_capabilities())
+        if not lifecycle["operable"]:
+            raise ValueError(str(lifecycle["reason"] or "PLUGIN_NOT_MANAGEABLE"))
+        if item.activated is enabled:
+            raise ValueError("PLUGIN_STATE_UNCHANGED")
+        return plugin_id
+
+    async def _set_catalog_enabled(self, enabled: bool):
+        try:
+            plugin_id = await self._catalog_plugin_id(
+                require_confirmation=not enabled, enabled=enabled
+            )
+            snapshot = await self.adapter.set_plugin_enabled(plugin_id, enabled)
+            if snapshot.activated is not enabled or not snapshot.loaded:
+                raise RuntimeError("ACTIVATION_RESULT_MISMATCH")
+            operation = "enable" if enabled else "disable"
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": plugin_id,
+                    "activated": snapshot.activated,
+                    "lifecycle": self._lifecycle(operation, snapshot),
+                }
+            )
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _pages_catalog_enable(self):
+        return await self._set_catalog_enabled(True)
+
+    async def _pages_catalog_disable(self):
+        return await self._set_catalog_enabled(False)
 
     async def _trusted_plugin_id(self, *, require_confirmation: bool = True) -> str:
         data = await self._request_json()
@@ -546,6 +623,13 @@ class PagesAPIMixin:
             "PLUGIN_NOT_TRUSTED": 403,
             "SELF_UPDATE_BLOCKED": 403,
             "SELF_DISABLE_BLOCKED": 403,
+            "SELF_LIFECYCLE_BLOCKED": 403,
+            "RESERVED_PLUGIN": 403,
+            "INVALID_PLUGIN_ID": 400,
+            "PLUGIN_NOT_FOUND": 404,
+            "PLUGIN_NOT_LOADED": 409,
+            "PLUGIN_STATE_UNCHANGED": 409,
+            "LIFECYCLE_CAPABILITY_UNAVAILABLE": 503,
             "PLUGIN_ALREADY_INSTALLED": 409,
             "PLUGIN_NOT_MANAGEABLE": 409,
             "ARCHIVE_URL_REQUIRED": 409,

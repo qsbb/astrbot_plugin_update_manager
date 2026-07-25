@@ -29,6 +29,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
         (f"/{module.PLUGIN_NAME}/rule", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/catalog/enable", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/catalog/disable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations/check-latest", ("POST",)),
         (f"/{module.PLUGIN_NAME}/install", ("POST",)),
@@ -323,7 +325,94 @@ def test_pages_catalog_payload(monkeypatch, tmp_path):
         "reasons": ["SOURCE_UNKNOWN"],
         "source_kind": None,
         "source_url": None,
+        "lifecycle": {
+            "operable": False,
+            "reason": "LIFECYCLE_CAPABILITY_UNAVAILABLE",
+        },
     }
+
+
+def test_catalog_lifecycle_api_accepts_loaded_nontrusted_and_verifies_snapshot(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    item = _rule_item("third_party")
+    item.activated = False
+    item.reasons = ()
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(item,))
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(turn_on_plugin=True, turn_off_plugin=True),
+    )
+    calls = []
+
+    async def request_enable():
+        return {"plugin_id": "third_party"}
+
+    async def set_enabled(plugin_id, enabled):
+        calls.append((plugin_id, enabled))
+        return SimpleNamespace(
+            version="1.0.0", loaded=True, activated=enabled
+        )
+
+    monkeypatch.setattr(plugin, "_request_json", request_enable)
+    monkeypatch.setattr(plugin.adapter, "set_plugin_enabled", set_enabled)
+    payload = unwrap(asyncio.run(plugin._pages_catalog_enable()))
+    assert payload["success"] is True
+    assert payload["activated"] is True
+    assert payload["lifecycle"]["snapshot_verified"] is True
+    assert calls == [("third_party", True)]
+
+    async def request_disable():
+        return {"plugin_id": "third_party", "confirm": True}
+
+    item.activated = True
+    monkeypatch.setattr(plugin, "_request_json", request_disable)
+    payload = unwrap(asyncio.run(plugin._pages_catalog_disable()))
+    assert payload["activated"] is False
+    assert calls[-1] == ("third_party", False)
+
+
+def test_catalog_lifecycle_blocks_missing_confirmation_self_and_unloaded(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(turn_on_plugin=True, turn_off_plugin=True),
+    )
+    loaded = _rule_item("third_party")
+    loaded.activated = True
+    loaded.reasons = ()
+    unloaded = _rule_item("unloaded", loaded=False)
+    unloaded.activated = False
+    unloaded.reasons = ("PLUGIN_NOT_LOADED",)
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(loaded, unloaded))
+
+    async def no_confirmation():
+        return {"plugin_id": "third_party"}
+
+    monkeypatch.setattr(plugin, "_request_json", no_confirmation)
+    payload, status = asyncio.run(plugin._pages_catalog_disable())
+    assert status == 400 and payload["error"] == "CONFIRMATION_REQUIRED"
+
+    async def self_request():
+        return {"plugin_id": module.PLUGIN_NAME}
+
+    monkeypatch.setattr(plugin, "_request_json", self_request)
+    payload, status = asyncio.run(plugin._pages_catalog_enable())
+    assert status == 403 and payload["error"] == "SELF_LIFECYCLE_BLOCKED"
+
+    async def unloaded_request():
+        return {"plugin_id": "unloaded"}
+
+    monkeypatch.setattr(plugin, "_request_json", unloaded_request)
+    payload, status = asyncio.run(plugin._pages_catalog_enable())
+    assert status == 409 and payload["error"] == "PLUGIN_NOT_LOADED"
 
 
 def test_pages_catalog_reports_empty_discovery_diagnostics(monkeypatch, tmp_path):
@@ -363,7 +452,11 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
             ),
         )
 
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        return SimpleNamespace(target_version="0.1.0")
+
     plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
     capabilities = SimpleNamespace(
         install_plugin=True,
         update_plugin=True,

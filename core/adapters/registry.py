@@ -31,7 +31,7 @@ class CandidateRegistry:
         self.proxy = proxy or None
         self.token = github_token or None
         self._session: aiohttp.ClientSession | None = None
-        self._cache: dict[str, tuple[float, str | None, dict[str, Any]]] = {}
+        self._cache: dict[str, tuple[float, str | None, Any]] = {}
 
     async def _client(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -39,12 +39,11 @@ class CandidateRegistry:
         return self._session
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
+        session, self._session = self._session, None
+        if session is not None and not session.closed:
+            await session.close()
 
-    async def fetch_json(
-        self, url: str, *, force_refresh: bool = False
-    ) -> dict[str, Any]:
+    async def fetch_json(self, url: str, *, force_refresh: bool = False) -> Any:
         cached = self._cache.get(url)
         if (
             not force_refresh
@@ -73,10 +72,14 @@ class CandidateRegistry:
                             await asyncio.sleep(min(2**attempt, 4))
                             continue
                         raise RegistryError(f"REGISTRY_HTTP_{response.status}")
-                    response.raise_for_status()
-                    payload = await response.json(content_type=None)
-                    if not isinstance(payload, dict):
-                        raise RegistryError("REGISTRY_SCHEMA_INVALID")
+                    if response.status == 404:
+                        raise RegistryError("REGISTRY_HTTP_404")
+                    if response.status >= 400:
+                        raise RegistryError(f"REGISTRY_HTTP_{response.status}")
+                    try:
+                        payload = await response.json(content_type=None)
+                    except (aiohttp.ClientError, ValueError) as exc:
+                        raise RegistryError("REGISTRY_JSON_INVALID") from exc
                     self._cache[url] = (
                         time.monotonic(),
                         response.headers.get("ETag"),
@@ -86,6 +89,8 @@ class CandidateRegistry:
             except asyncio.TimeoutError as exc:
                 if attempt == 2:
                     raise RegistryError("REGISTRY_TIMEOUT") from exc
+            except aiohttp.ClientError as exc:
+                raise RegistryError("REGISTRY_NETWORK_ERROR") from exc
         raise RegistryError("REGISTRY_UNAVAILABLE")
 
     @staticmethod
@@ -147,10 +152,45 @@ class CandidateRegistry:
         ):
             raise RegistryError("SOURCE_REQUIRED")
         repo = "/".join(parts)
-        payload = await self.fetch_json(
-            f"https://api.github.com/repos/{repo}/releases/latest",
-            force_refresh=force_refresh,
-        )
+        release_url = f"https://api.github.com/repos/{repo}/releases/latest"
+        try:
+            payload = await self.fetch_json(
+                release_url, force_refresh=force_refresh
+            )
+        except RegistryError as exc:
+            if str(exc) != "REGISTRY_HTTP_404":
+                raise
+            tags_url = f"https://api.github.com/repos/{repo}/tags?per_page=1"
+            tags = await self.fetch_json(tags_url, force_refresh=force_refresh)
+            if not isinstance(tags, list) or not tags or not isinstance(tags[0], dict):
+                raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
+            tag = tags[0]
+            tag_name = str(tag.get("name") or "").strip()
+            commit_data = tag.get("commit")
+            commit = (
+                str(commit_data.get("sha") or "").strip()
+                if isinstance(commit_data, dict)
+                else ""
+            )
+            zipball = str(tag.get("zipball_url") or "").strip()
+            if not tag_name:
+                raise RegistryError("GITHUB_TAG_SCHEMA_INVALID")
+            return Candidate(
+                plugin_id,
+                current_version,
+                tag_name.removeprefix("v"),
+                source_url,
+                "github",
+                tag=tag_name,
+                commit=commit or None,
+                archive_url=zipball or None,
+                evidence={
+                    "api": "github_latest_tag",
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        if not isinstance(payload, dict):
+            raise RegistryError("GITHUB_RELEASE_SCHEMA_INVALID")
         target = str(payload.get("tag_name") or "").removeprefix("v")
         published = payload.get("published_at")
         return Candidate(

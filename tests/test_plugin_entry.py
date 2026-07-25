@@ -7,6 +7,8 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT.parent))
 
@@ -132,6 +134,32 @@ def test_commands_and_terminate_cleanup(monkeypatch, tmp_path):
         and plugin.adapter is None
         and module._current_instance is None
     )
+
+
+def test_terminate_closes_registry_even_when_scheduler_cleanup_fails(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    closed = False
+
+    async def failing_scheduler_close():
+        raise RuntimeError("scheduler cleanup failed")
+
+    async def registry_close():
+        nonlocal closed
+        closed = True
+
+    monkeypatch.setattr(plugin.scheduler, "close", failing_scheduler_close)
+    monkeypatch.setattr(plugin.registry, "close", registry_close)
+
+    with pytest.raises(RuntimeError, match="scheduler cleanup failed"):
+        asyncio.run(plugin.terminate())
+
+    assert closed is True
+    assert plugin._terminated is True
+    assert plugin.adapter is None
+    assert module._current_instance is None
 
 
 def _load_metadata():

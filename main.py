@@ -503,10 +503,14 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     async def terminate(self) -> None:
         global _current_instance
         self.coordinator.cancel()
-        await self.scheduler.close()
-        await self.registry.close()
-        self.adapter = None  # type: ignore[assignment]
-        self._terminated = True
-        if _current_instance is self:
-            _current_instance = None
+        try:
+            await self.scheduler.close()
+        finally:
+            try:
+                await self.registry.close()
+            finally:
+                self.adapter = None  # type: ignore[assignment]
+                self._terminated = True
+                if _current_instance is self:
+                    _current_instance = None
         logger.info("[update-manager] terminated")

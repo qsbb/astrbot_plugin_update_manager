@@ -85,7 +85,8 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert ": { plugin_id: pluginId };" in js
     assert "await Promise.all([loadRecommendations(), loadOverview(), loadCatalog()])" in js
     assert "data?.success === false" in js
-    assert "data.detail || data.error" in js
+    assert "errorReason(data.error || data.detail)" in js
+    assert "ClientResponseError" not in js
     assert "field.write_only" in js
     assert 'type="password"' in js
     assert "敏感 token 仅显示是否已配置" in html
@@ -94,6 +95,19 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert "未加载插件不可更新" in html
     assert "unloaded plugins cannot be updated" in js
     assert "data.diagnostics?.messages" in js
+
+
+def test_catalog_has_safe_lifecycle_switch_and_localized_errors():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert "function catalogSwitch(item)" in js
+    assert 'data-catalog-action="${action}"' in js
+    assert 'apiPost(`catalog/${action}`, payload)' in js
+    assert 'action === "disable" && !await confirmRecommendationAction' in js
+    assert "item.lifecycle?.reason" in js
+    assert "errorReason" in js
+    assert "网络连接失败" in js
+    assert ".catalog-actions" in css
 
 
 def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch():

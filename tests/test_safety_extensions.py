@@ -108,6 +108,8 @@ class RegistryResponse:
         return None
 
     def raise_for_status(self):
+        if self.status >= 400:
+            raise RuntimeError(f"HTTP {self.status}")
         return None
 
     async def json(self, *, content_type=None):
@@ -122,6 +124,20 @@ class RegistryClient:
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.responses.pop(0)
+
+
+def test_registry_close_releases_real_client_session():
+    async def exercise():
+        registry = CandidateRegistry()
+        session = await registry._client()
+
+        await registry.close()
+
+        assert session.closed is True
+        assert registry._session is None
+        await registry.close()
+
+    asyncio.run(exercise())
 
 
 def test_registry_reuses_fresh_ttl_cache_without_network(monkeypatch):
@@ -164,6 +180,70 @@ def test_registry_force_refresh_preserves_etag_and_304_reuses_cache(monkeypatch)
     assert client.calls[1][1]["headers"]["If-None-Match"] == '"release-1"'
     assert refreshed is cached
     assert registry._cache["https://api.example/releases/latest"][2] is payload
+
+
+def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
+    client = RegistryClient(
+        RegistryResponse(404),
+        RegistryResponse(
+            200,
+            [{
+                "name": "v1.4.0",
+                "zipball_url": "https://api.github.com/repos/acme/demo/zipball/v1.4.0",
+                "commit": {"sha": "abc123"},
+            }],
+            {"ETag": '"tag-1"'},
+        ),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest("demo", "1.3.0", "https://github.com/acme/demo")
+    )
+
+    assert candidate.target_version == "1.4.0"
+    assert candidate.tag == "v1.4.0"
+    assert candidate.commit == "abc123"
+    assert candidate.archive_url.endswith("/zipball/v1.4.0")
+    assert candidate.evidence["api"] == "github_latest_tag"
+    assert [call[0] for call in client.calls] == [
+        "https://api.github.com/repos/acme/demo/releases/latest",
+        "https://api.github.com/repos/acme/demo/tags?per_page=1",
+    ]
+
+
+@pytest.mark.parametrize("payload", [None, {}, [], ["v1"], [{}]])
+def test_github_latest_rejects_invalid_tag_schema(monkeypatch, payload):
+    client = RegistryClient(RegistryResponse(404), RegistryResponse(200, payload))
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError, match="GITHUB_TAG_SCHEMA_INVALID"):
+        asyncio.run(
+            registry.github_latest("demo", "1.0", "https://github.com/acme/demo")
+        )
+
+
+def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
+    client = RegistryClient(RegistryResponse(401))
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError, match="REGISTRY_HTTP_401"):
+        asyncio.run(
+            registry.github_latest("demo", "1.0", "https://github.com/acme/demo")
+        )
+    assert len(client.calls) == 1
 
 
 def test_rule_rejects_unknown_policy_and_failure_mode(tmp_path):

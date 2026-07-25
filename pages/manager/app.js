@@ -8,7 +8,7 @@ const messages = {
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
     checkLatest: "检查最新版本", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
-    install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新",
+    install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", installRunning: "正在安装…", updateRunning: "正在更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
@@ -25,7 +25,7 @@ const messages = {
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
     checkLatest: "Check latest versions", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
-    install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported",
+    install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", installRunning: "Installing…", updateRunning: "Updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
@@ -84,12 +84,28 @@ async function apiPost(name, payload) {
   return parseJsonResponse(await bridge.apiPost(name, payload));
 }
 
+function errorReason(code) {
+  const value = String(code || "");
+  if (value === "REGISTRY_HTTP_404" || value === "GITHUB_TAG_SCHEMA_INVALID") return t("error404");
+  if (value === "REGISTRY_TIMEOUT") return t("errorTimeout");
+  if (value === "REGISTRY_NETWORK_ERROR") return t("errorNetwork");
+  if (["REGISTRY_HTTP_403", "REGISTRY_HTTP_429"].includes(value)) return t("errorRateLimit");
+  const known = {
+    CONFIRMATION_REQUIRED: "停用前必须明确确认",
+    SELF_LIFECYCLE_BLOCKED: "更新管理器不能操作自身启停",
+    RESERVED_PLUGIN: "AstrBot 保留插件不可操作",
+    PLUGIN_NOT_LOADED: "插件尚未加载",
+    PLUGIN_NOT_FOUND: "未找到该插件",
+    PLUGIN_STATE_UNCHANGED: "插件已经处于目标状态",
+    LIFECYCLE_CAPABILITY_UNAVAILABLE: "当前 AstrBot 不支持此启停操作",
+    ACTIVATION_RESULT_MISMATCH: "操作后插件状态校验失败"
+  };
+  return known[value] || (state.locale === "zh-CN" ? t("errorUnknown") : value || t("errorUnknown"));
+}
+
 function parseJsonResponse(value) {
   const data = typeof value === "string" ? JSON.parse(value) : value;
-  if (data?.success === false) {
-    const detail = data.detail || data.error || "API_ERROR";
-    throw new Error(detail);
-  }
+  if (data?.success === false) throw new Error(errorReason(data.error || data.detail));
   return data;
 }
 
@@ -228,11 +244,18 @@ async function saveConfig(event) {
   } catch (error) { toast(`${t("saveFailed")}: ${error.message}`, true); }
 }
 
+function catalogSwitch(item) {
+  const action = item.activated ? "disable" : "enable";
+  const operable = Boolean(item.lifecycle?.operable);
+  const reason = operable ? "" : (item.lifecycle?.reason || t("catalogUnavailable"));
+  return `<label class="lifecycle-switch" title="${escapeHtml(reason)}"><span class="sr-only">${escapeHtml(`${item.name || item.plugin_id} ${t(action)}`)}</span><input type="checkbox" role="switch" aria-checked="${item.activated ? "true" : "false"}" data-catalog-action="${action}" data-plugin-id="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.name || item.plugin_id)}" ${item.activated ? "checked" : ""} ${operable ? "" : "disabled"}/><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">${escapeHtml(t(action))}</span></label>`;
+}
+
 async function loadCatalog() {
   const data = await apiGet("catalog");
   const items = data.items || [];
   const diagnostics = data.diagnostics?.messages || [];
-  document.getElementById("catalog-list").innerHTML = items.length ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.plugin_id)}</strong><span>${escapeHtml(item.version || "—")} · ${item.loaded ? t("loaded") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></div><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span></article>`).join("") : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
+  document.getElementById("catalog-list").innerHTML = items.length ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.plugin_id)}</strong><span>${escapeHtml(item.version || "—")} · ${item.loaded ? t("loaded") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></div><div class="catalog-actions"><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span>${catalogSwitch(item)}</div></article>`).join("") : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
 }
 
 function actionButton(item, action, label, enabled) {
@@ -334,6 +357,29 @@ async function runRecommendationAction(button) {
   }
 }
 
+async function runCatalogAction(input) {
+  const action = input.dataset.catalogAction;
+  const pluginId = input.dataset.pluginId;
+  const pluginName = input.dataset.pluginName || pluginId;
+  if (!action || !pluginId || input.disabled) return;
+  if (action === "disable" && !await confirmRecommendationAction(action, pluginName)) {
+    await loadCatalog();
+    return;
+  }
+  input.disabled = true;
+  try {
+    const payload = action === "disable"
+      ? { plugin_id: pluginId, confirm: true }
+      : { plugin_id: pluginId };
+    await apiPost(`catalog/${action}`, payload);
+    toast(t("operationDone"));
+  } catch (error) {
+    toast(`${t("operationFailed")}: ${error.message}`, true);
+  } finally {
+    await Promise.all([loadCatalog(), loadOverview(), loadRule(), loadRecommendations()]);
+  }
+}
+
 async function refreshAll() {
   try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadCatalog()]); }
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
@@ -366,6 +412,10 @@ function bindEvents() {
       event.preventDefault();
       runRecommendationAction(button);
     }
+  });
+  document.getElementById("catalog-list").addEventListener("change", (event) => {
+    const input = event.target.closest("[data-catalog-action]");
+    if (input) runCatalogAction(input);
   });
   document.getElementById("check-latest").addEventListener("click", async (event) => {
     const button = event.currentTarget;
