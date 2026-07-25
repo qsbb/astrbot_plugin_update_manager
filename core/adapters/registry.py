@@ -26,6 +26,10 @@ RATE_LIMIT_MIN_BACKOFF_SECONDS = 60.0
 RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600.0
 #: 成功结果缓存默认 30 分钟，减少匿名 60 次/小时配额的消耗。
 DEFAULT_CACHE_TTL_SECONDS = 1800
+#: raw 域实测单请求可达 ~19s；探测用独立短超时，超时即回退 API，不拖垮整批检查。
+DEFAULT_RAW_TIMEOUT_SECONDS = 8.0
+#: 仓库默认分支极少变动，记住它即可让后续检查只探测一个分支。
+DEFAULT_BRANCH_CACHE_TTL_SECONDS = 86400.0
 RATE_LIMITED = "REGISTRY_RATE_LIMITED"
 
 
@@ -160,15 +164,19 @@ class CandidateRegistry:
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
         proxy: str | None = None,
         github_token: str | None = None,
+        raw_timeout_seconds: float = DEFAULT_RAW_TIMEOUT_SECONDS,
     ) -> None:
         self.timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.cache_ttl = cache_ttl_seconds
+        self.raw_timeout_seconds = max(1.0, float(raw_timeout_seconds))
         self.proxy = normalize_optional_setting(proxy)
         self.token = normalize_optional_setting(github_token)
         self._session: aiohttp.ClientSession | None = None
         self._cache: dict[str, tuple[float, str | None, Any]] = {}
         self._text_cache: dict[str, tuple[float, str | None, str]] = {}
         self._rate_limits: dict[str, RateLimitWindow] = {}
+        #: repo -> (记录时刻, 默认分支)，让后续检查跳过无用的第二次分支探测。
+        self._default_branches: dict[str, tuple[float, str]] = {}
 
     async def _client(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -269,6 +277,30 @@ class CandidateRegistry:
             return None
         return self._rate_limit_error(url, window)
 
+    # ------------------------------------------------------------ 默认分支缓存
+
+    def remembered_default_branch(self, repo: str) -> str | None:
+        """返回仍在有效期内的已知默认分支；过期即淘汰。"""
+        entry = self._default_branches.get(repo)
+        if entry is None:
+            return None
+        recorded_at, branch = entry
+        if time.monotonic() - recorded_at >= DEFAULT_BRANCH_CACHE_TTL_SECONDS:
+            self._default_branches.pop(repo, None)
+            return None
+        return branch
+
+    def _remember_default_branch(self, repo: str, branch: str) -> None:
+        if repo and branch:
+            self._default_branches[repo] = (time.monotonic(), branch)
+
+    def _branch_probe_order(self, repo: str) -> tuple[str, ...]:
+        """已知默认分支时只探测它一个，避免第二次注定 404 的 raw 请求。"""
+        known = self.remembered_default_branch(repo)
+        if known is None:
+            return DEFAULT_BRANCH_CANDIDATES
+        return (known,)
+
     # ------------------------------------------------------------------ 读取
 
     async def fetch_json(self, url: str, *, force_refresh: bool = False) -> Any:
@@ -343,8 +375,19 @@ class CandidateRegistry:
                 raise RegistryError("REGISTRY_NETWORK_ERROR") from exc
         raise RegistryError("REGISTRY_UNAVAILABLE")
 
-    async def fetch_text(self, url: str, *, force_refresh: bool = False) -> str | None:
-        """读取纯文本；404 返回 None 供调用方继续探测其他分支。"""
+    async def fetch_text(
+        self,
+        url: str,
+        *,
+        force_refresh: bool = False,
+        timeout_seconds: float | None = None,
+        attempts: int = 3,
+    ) -> str | None:
+        """读取纯文本；404 返回 None 供调用方继续探测其他分支。
+
+        ``timeout_seconds`` 用于给 raw 探测一个比全局超时更短的独立预算，
+        ``attempts`` 限制重试次数——探测失败本来就要回退 API，重试只会累加延迟。
+        """
         cached = self._text_cache.get(url)
         if (
             not force_refresh
@@ -359,11 +402,19 @@ class CandidateRegistry:
             headers["Authorization"] = f"Bearer {self.token}"
         if cached and cached[1]:
             headers["If-None-Match"] = cached[1]
+        request_kwargs: dict[str, Any] = {}
+        if timeout_seconds is not None:
+            request_kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout_seconds)
+        budget = max(1, attempts)
         client = await self._client()
-        for attempt in range(3):
+        for attempt in range(budget):
             try:
                 async with client.get(
-                    url, headers=headers, proxy=self.proxy, allow_redirects=False
+                    url,
+                    headers=headers,
+                    proxy=self.proxy,
+                    allow_redirects=False,
+                    **request_kwargs,
                 ) as response:
                     window, rate_limited = self._remember_rate_limit(
                         url, response.status, getattr(response, "headers", {})
@@ -378,7 +429,7 @@ class CandidateRegistry:
                             return cached[2]
                         raise self._rate_limit_error(url, window)
                     if response.status >= 500:
-                        if attempt < 2:
+                        if attempt < budget - 1:
                             await asyncio.sleep(min(2**attempt, 4))
                             continue
                         raise RegistryError(
@@ -403,7 +454,7 @@ class CandidateRegistry:
                     )
                     return text
             except asyncio.TimeoutError as exc:
-                if attempt == 2:
+                if attempt == budget - 1:
                     raise RegistryError("REGISTRY_TIMEOUT") from exc
             except aiohttp.ClientError as exc:
                 raise RegistryError("REGISTRY_NETWORK_ERROR") from exc
@@ -519,28 +570,38 @@ class CandidateRegistry:
     async def _raw_metadata_version(
         self, repo: str, plugin_id: str, *, force_refresh: bool
     ) -> tuple[str | None, str | None, RegistryError | None]:
-        """按 main/master 顺序从 raw 域读取 metadata.yaml，完全不消耗 API 配额。
+        """从 raw 域读取 metadata.yaml，完全不消耗 API 配额。
 
-        返回 (命中的分支, 权威版本, 权威源错误)。三者均为 None 表示两个候选分支
+        已知默认分支时只探测该分支；否则按 main/master 顺序探测。每次探测使用
+        独立的短超时且不重试，超时即视为探测失败并交给 API 回退。
+
+        返回 (命中的分支, 权威版本, 权威源错误)。三者均为 None 表示候选分支
         都不存在该文件，调用方需要回退 API 查询真实默认分支。
         """
-        for branch in DEFAULT_BRANCH_CANDIDATES:
+        for branch in self._branch_probe_order(repo):
             url = (
                 f"https://{GITHUB_RAW_HOST}/{repo}/"
                 f"{quote(branch, safe='')}/metadata.yaml"
             )
             try:
-                document = await self.fetch_text(url, force_refresh=force_refresh)
+                document = await self.fetch_text(
+                    url,
+                    force_refresh=force_refresh,
+                    timeout_seconds=self.raw_timeout_seconds,
+                    attempts=1,
+                )
             except RegistryError as exc:
                 # 网络/限流类问题对其他分支同样成立，直接交给 API 回退判定。
                 return None, None, exc.with_context(repo=repo, default_branch=branch)
             if document is None:
                 continue
             try:
-                return branch, self._metadata_yaml_version(document, plugin_id), None
+                version = self._metadata_yaml_version(document, plugin_id)
             except RegistryError as exc:
                 # 权威源存在但不可信：记录原因，交由 Release/Tag 回退处理。
                 return None, None, exc.with_context(repo=repo, default_branch=branch)
+            self._remember_default_branch(repo, branch)
+            return branch, version, None
         return None, None, None
 
     async def _default_branch(self, repo: str, *, force_refresh: bool) -> str:
@@ -552,7 +613,9 @@ class CandidateRegistry:
         branch = payload.get("default_branch")
         if not isinstance(branch, str) or not branch.strip():
             raise RegistryError("GITHUB_REPOSITORY_SCHEMA_INVALID")
-        return branch.strip()
+        branch = branch.strip()
+        self._remember_default_branch(repo, branch)
+        return branch
 
     async def github_latest(
         self,

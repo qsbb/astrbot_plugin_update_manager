@@ -95,7 +95,7 @@ async function apiPost(name, payload) {
 function errorReason(code) {
   const value = String(code || "");
   if (value === "REGISTRY_HTTP_404" || value === "GITHUB_TAG_SCHEMA_INVALID") return t("error404");
-  if (value === "REGISTRY_TIMEOUT") return t("errorTimeout");
+  if (value === "REGISTRY_TIMEOUT" || value === "VERSION_CHECK_TIMEOUT") return t("errorTimeout");
   if (value === "REGISTRY_NETWORK_ERROR") return t("errorNetwork");
   if (["REGISTRY_RATE_LIMITED", "REGISTRY_HTTP_403", "REGISTRY_HTTP_429"].includes(value)) return t("errorRateLimit");
   const known = {

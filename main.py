@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -13,12 +14,14 @@ from astrbot.api.star import Context, Star, register
 from .core.adapters.astrbot import AstrBotAdapter
 from .core.adapters.registry import (
     DEFAULT_CACHE_TTL_SECONDS,
+    DEFAULT_RAW_TIMEOUT_SECONDS,
     CandidateRegistry,
     RegistryError,
     normalize_optional_setting,
 )
 from .core.adapters.storage import AtomicJsonStore, redact
 from .core.catalog import PluginCatalog
+from .core.concurrency import bounded_gather
 from .core.coordinator import UpdateCoordinator
 from .core.health import HealthChecker
 from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
@@ -70,6 +73,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             ),
             proxy=normalize_optional_setting(self._get("proxy", "")),
             github_token=normalize_optional_setting(self._get("github_token", "")),
+            raw_timeout_seconds=float(
+                self._get("raw_timeout_seconds", DEFAULT_RAW_TIMEOUT_SECONDS)
+            ),
         )
         health = HealthChecker(
             self.adapter,
@@ -210,17 +216,27 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         yield event.plain_result("\n".join(lines))
 
     async def _candidates(self, selected: tuple[str, ...]) -> dict[str, Candidate]:
+        """并发（有上限）解析候选；单个仓库慢不再线性拖长整批检查。"""
         items = {item.plugin_id: item for item in await self.catalog.scan()}
         snapshots = {
             (item.name or item.root_dir_name or ""): item
             for item in await self.adapter.snapshot_plugins()
         }
-        candidates = {}
-        for plugin_id in selected:
+        candidates: dict[str, Candidate] = {}
+        remote: list[tuple[str, Any]] = []
+        for plugin_id in dict.fromkeys(selected):
             item = items.get(plugin_id)
             if item and item.source_kind == "github" and item.source_url:
-                candidates[plugin_id] = await self.registry.github_latest(
-                    plugin_id, item.current_version, item.source_url
+                remote.append(
+                    (
+                        plugin_id,
+                        partial(
+                            self.registry.github_latest,
+                            plugin_id,
+                            item.current_version,
+                            item.source_url,
+                        ),
+                    )
                 )
             elif item and item.source_kind == "market" and item.source_url:
                 record = snapshots.get(plugin_id)
@@ -230,6 +246,13 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                     item.source_url,
                     dict(record.install_source or {}) if record else {},
                 )
+        if remote:
+            resolved = await bounded_gather(
+                [factory for _, factory in remote],
+                limit=self._version_check_concurrency(),
+            )
+            for (plugin_id, _), candidate in zip(remote, resolved):
+                candidates[plugin_id] = candidate
         return candidates
 
     @filter.permission_type(filter.PermissionType.ADMIN)

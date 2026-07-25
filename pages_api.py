@@ -8,6 +8,7 @@ import json
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +17,16 @@ from packaging.version import InvalidVersion, Version
 from .core.adapters.astrbot import AdapterUnavailableError
 from .core.adapters.registry import (
     DEFAULT_CACHE_TTL_SECONDS,
+    DEFAULT_RAW_TIMEOUT_SECONDS,
     RegistryError,
     normalize_optional_setting,
 )
 from .core.adapters.storage import redact
+from .core.concurrency import (
+    DEFAULT_CHECK_CONCURRENCY,
+    bounded_gather,
+    normalize_concurrency,
+)
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
 from .core.trusted import TRUSTED_BY_ID, TRUSTED_SERIES
@@ -488,6 +495,10 @@ class PagesAPIMixin:
         self.registry.cache_ttl = int(
             self._get("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS)
         )
+        self.registry.raw_timeout_seconds = max(
+            1.0,
+            float(self._get("raw_timeout_seconds", DEFAULT_RAW_TIMEOUT_SECONDS)),
+        )
         self.registry.proxy = normalize_optional_setting(self._get("proxy", ""))
         self.registry.token = normalize_optional_setting(self._get("github_token", ""))
         self.transaction.health.stability_seconds = max(
@@ -683,6 +694,39 @@ class PagesAPIMixin:
             "error_context": context,
         }
 
+    def _version_check_concurrency(self) -> int:
+        return normalize_concurrency(
+            self._get("version_check_concurrency", DEFAULT_CHECK_CONCURRENCY),
+            default=DEFAULT_CHECK_CONCURRENCY,
+        )
+
+    def _version_check_timeout(self) -> float:
+        """单个插件版本检查的墙钟上限；<=0 表示不额外限制。"""
+        try:
+            return max(0.0, float(self._get("version_check_timeout_seconds", 25)))
+        except (TypeError, ValueError):
+            return 25.0
+
+    async def _check_latest_with_timeout(
+        self,
+        plugin_id: str,
+        current_version: str,
+        repo_url: str,
+        *,
+        force_refresh: bool,
+    ):
+        """给单个插件套一个墙钟上限，慢仓库不能拖住整批检查。"""
+        call = self.registry.github_latest(
+            plugin_id, current_version, repo_url, force_refresh=force_refresh
+        )
+        budget = self._version_check_timeout()
+        if not budget:
+            return await call
+        try:
+            return await asyncio.wait_for(call, timeout=budget)
+        except asyncio.TimeoutError as exc:
+            raise RegistryError("VERSION_CHECK_TIMEOUT", repo=repo_url) from exc
+
     async def _recommendation_payload(self, *, force_refresh: bool) -> dict[str, Any]:
         snapshots = await self.adapter.snapshot_plugins()
         installed = {
@@ -697,7 +741,7 @@ class PagesAPIMixin:
             snapshot = installed.get(trusted.plugin_id)
             checked_at = datetime.now(timezone.utc).isoformat()
             try:
-                candidate = await self.registry.github_latest(
+                candidate = await self._check_latest_with_timeout(
                     trusted.plugin_id,
                     snapshot.version if snapshot else "",
                     trusted.repo_url,
@@ -734,8 +778,9 @@ class PagesAPIMixin:
                 "error_context": error_context,
             }
 
-        checked = await asyncio.gather(
-            *(inspect_latest(trusted) for trusted in TRUSTED_SERIES)
+        checked = await bounded_gather(
+            [partial(inspect_latest, trusted) for trusted in TRUSTED_SERIES],
+            limit=self._version_check_concurrency(),
         )
         items = []
         for trusted, snapshot, version_check in checked:
