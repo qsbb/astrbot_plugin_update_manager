@@ -10,6 +10,7 @@ const messages = {
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
     selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新",
     install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
+    errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", installRunning: "正在安装…", updateRunning: "正在更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
@@ -28,6 +29,7 @@ const messages = {
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
     selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository",
     install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
+    errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", installRunning: "Installing…", updateRunning: "Updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
@@ -91,7 +93,7 @@ function errorReason(code) {
   if (value === "REGISTRY_HTTP_404" || value === "GITHUB_TAG_SCHEMA_INVALID") return t("error404");
   if (value === "REGISTRY_TIMEOUT") return t("errorTimeout");
   if (value === "REGISTRY_NETWORK_ERROR") return t("errorNetwork");
-  if (["REGISTRY_HTTP_403", "REGISTRY_HTTP_429"].includes(value)) return t("errorRateLimit");
+  if (["REGISTRY_RATE_LIMITED", "REGISTRY_HTTP_403", "REGISTRY_HTTP_429"].includes(value)) return t("errorRateLimit");
   const known = {
     CONFIRMATION_REQUIRED: "停用前必须明确确认",
     SELF_LIFECYCLE_BLOCKED: "更新管理器不能操作自身启停",
@@ -274,6 +276,26 @@ function lifecycleSwitch(item, actions) {
   return `<label class="lifecycle-switch" title="${enabled ? "" : escapeHtml(t("unavailableAction"))}"><span class="sr-only">${escapeHtml(`${item.name} ${t(action)}`)}</span><input type="checkbox" role="switch" aria-checked="${item.activated ? "true" : "false"}" data-recommendation-action="${action}" data-plugin-id="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.name)}" ${checked} ${disabled}/><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">${escapeHtml(t(action))}</span></label>`;
 }
 
+function formatRetryDelay(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total <= 0) return "";
+  const minutes = Math.ceil(total / 60);
+  if (minutes < 60) return state.locale === "zh-CN" ? `${minutes} 分钟` : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return state.locale === "zh-CN"
+    ? `${hours} 小时${rest ? ` ${rest} 分钟` : ""}`
+    : `${hours} h${rest ? ` ${rest} min` : ""}`;
+}
+
+function retryHint(context) {
+  const retry = formatRetryDelay(context.retry_after_seconds);
+  const at = context.reset_at ? new Date(context.reset_at) : null;
+  const readable = at && !Number.isNaN(at.getTime()) ? at.toLocaleString(state.locale) : "";
+  if (!retry && !readable) return "";
+  return `${t("errorRetryAfter")}: ${[retry, readable].filter(Boolean).join(" / ")}`;
+}
+
 function recommendationError(item) {
   if (item.version_status !== "check_failed") return "";
   const context = item.error_context || {};
@@ -281,10 +303,32 @@ function recommendationError(item) {
     `${t("errorCode")}: ${item.error || "UNKNOWN"}`,
     context.http_status ? `${t("errorHttpStatus")}: ${context.http_status}` : "",
     context.repo ? `${t("errorRepository")}: ${context.repo}` : "",
-    context.default_branch ? `${t("errorBranch")}: ${context.default_branch}` : ""
+    context.default_branch ? `${t("errorBranch")}: ${context.default_branch}` : "",
+    context.rate_limited ? retryHint(context) : "",
+    context.token_hint_required ? t("errorTokenHint") : ""
   ].filter(Boolean);
   const reason = errorReason(item.error || item.error_detail);
   return `<span class="version-error">${escapeHtml(reason)} · ${escapeHtml(details.join(" · "))}</span>`;
+}
+
+function renderRateLimitNotice(rateLimit) {
+  const notice = document.getElementById("rate-limit-notice");
+  if (!notice) return;
+  if (!rateLimit?.limited) {
+    notice.hidden = true;
+    notice.replaceChildren();
+    return;
+  }
+  const parts = [
+    t("rateLimitBanner").replace("{retry}", formatRetryDelay(rateLimit.retry_after_seconds) || "—"),
+    retryHint({ retry_after_seconds: rateLimit.retry_after_seconds, reset_at: rateLimit.reset_at }),
+    rateLimit.remaining === null || rateLimit.remaining === undefined
+      ? ""
+      : `${t("rateLimitRemaining")}: ${rateLimit.remaining}${rateLimit.limit ? `/${rateLimit.limit}` : ""}`,
+    rateLimit.token_configured ? "" : t("errorTokenHint")
+  ].filter(Boolean);
+  notice.innerHTML = `<strong>${escapeHtml(parts[0])}</strong><span>${escapeHtml(parts.slice(1).join(" · "))}</span>`;
+  notice.hidden = false;
 }
 
 function versionStatusBadge(item) {
@@ -320,6 +364,7 @@ async function loadRecommendations(force = false) {
   const data = force ? await apiPost("recommendations/check-latest", {}) : await apiGet("recommendations");
   const items = data.items || [];
   renderSelfUpdateNotice(data.self_update);
+  renderRateLimitNotice(data.rate_limit);
   const list = document.getElementById("recommendations-list");
   list.innerHTML = items.map((item) => {
     const actions = item.actions || {};

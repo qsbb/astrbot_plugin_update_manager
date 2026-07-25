@@ -253,6 +253,34 @@ def test_catalog_hint_describes_merged_runtime_and_metadata_catalog():
     assert "运行时列表为空时展示" not in html
 
 
+def test_rate_limit_notice_shows_retry_time_and_token_hint():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert 'id="rate-limit-notice"' in html
+    assert "function renderRateLimitNotice(rateLimit)" in js
+    assert "renderRateLimitNotice(data.rate_limit)" in js
+    assert "rateLimit?.limited" in js
+    # 限流提示必须同时给出可重试时间、剩余额度与提额入口。
+    assert 't("rateLimitBanner").replace("{retry}"' in js
+    assert 't("rateLimitRemaining")' in js
+    assert 'rateLimit.token_configured ? "" : t("errorTokenHint")' in js
+    assert "GitHub 配额已用尽" in js
+    assert "可在配置中填写 GitHub Token 提升额度" in js
+    assert "Set a GitHub Token in configuration to raise the quota" in js
+    assert ".rate-limit-notice" in css
+
+
+def test_recommendation_error_renders_retry_delay_and_token_hint():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function formatRetryDelay(seconds)" in js
+    assert "function retryHint(context)" in js
+    assert 'context.rate_limited ? retryHint(context) : ""' in js
+    assert 'context.token_hint_required ? t("errorTokenHint") : ""' in js
+    assert "errorRetryAfter" in js
+    assert '"REGISTRY_RATE_LIMITED", "REGISTRY_HTTP_403", "REGISTRY_HTTP_429"' in js
+
+
 def test_manager_page_is_responsive_and_accessible():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")

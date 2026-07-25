@@ -5,7 +5,7 @@
   "plugin_root": {"type": "string", "description": "AstrBot 插件根目录；留空时由当前插件位置推导", "default": ""},
   "plan_ttl_seconds": {"type": "int", "description": "冻结计划有效期（秒）", "default": 900},
   "network_timeout_seconds": {"type": "int", "description": "异步候选查询总超时（秒）", "default": 15},
-  "cache_ttl_seconds": {"type": "int", "description": "候选与条件请求缓存时长（秒）", "default": 300},
+  "cache_ttl_seconds": {"type": "int", "description": "候选与条件请求成功结果缓存时长（秒）；越长越省 GitHub 配额", "default": 1800},
   "proxy": {"type": "string", "description": "候选查询代理；留空时遵循系统环境", "default": ""},
   "github_token": {"type": "string", "description": "可选 GitHub API token；按 AstrBot 秘密配置保存且永不写入审计", "default": "", "obvious_hint": false, "secret": true},
   "health_stability_seconds": {"type": "float", "description": "更新重载后的健康稳定观察窗口（秒）", "default": 2.0},

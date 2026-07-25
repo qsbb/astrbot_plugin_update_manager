@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 from dataclasses import replace
 from datetime import timedelta
 
 import pytest
 
 from astrbot_plugin_update_manager.core.adapters.registry import (
+    DEFAULT_BRANCH_CANDIDATES,
+    DEFAULT_CACHE_TTL_SECONDS,
+    GITHUB_RAW_HOST,
     CandidateRegistry,
     RegistryError,
 )
@@ -97,10 +101,11 @@ def test_market_candidate_uses_only_recorded_evidence():
 
 
 class RegistryResponse:
-    def __init__(self, status, payload=None, headers=None):
+    def __init__(self, status, payload=None, headers=None, body=None):
         self.status = status
         self.payload = payload
         self.headers = headers or {}
+        self.body = body
 
     async def __aenter__(self):
         return self
@@ -116,6 +121,15 @@ class RegistryResponse:
     async def json(self, *, content_type=None):
         return self.payload
 
+    async def text(self):
+        """raw.githubusercontent.com 返回纯文本 metadata.yaml。"""
+        return "" if self.body is None else self.body
+
+
+def raw_miss(count=len(DEFAULT_BRANCH_CANDIDATES)):
+    """raw 域两个候选分支均 404，使 github_latest 回退到 API 路径。"""
+    return [RegistryResponse(404) for _ in range(count)]
+
 
 class RegistryClient:
     def __init__(self, *responses):
@@ -125,6 +139,11 @@ class RegistryClient:
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.responses.pop(0)
+
+    @property
+    def api_calls(self):
+        """忽略 raw 探测，只保留 API 调用，便于断言配额消耗。"""
+        return [url for url, _ in self.calls if "api.github.com" in url]
 
 
 def test_registry_close_releases_real_client_session():
@@ -190,6 +209,7 @@ def test_github_latest_prefers_default_branch_metadata_over_invalid_newer_tags(
         b"name: active_learner\nversion: 1.2.1.0\n"
     ).decode("ascii")
     client = RegistryClient(
+        *raw_miss(),
         RegistryResponse(200, {"default_branch": "main"}),
         RegistryResponse(200, {"encoding": "base64", "content": metadata}),
         RegistryResponse(200, {"tag_name": "v2.6.7.9"}),
@@ -225,8 +245,9 @@ def test_github_latest_prefers_default_branch_metadata_over_invalid_newer_tags(
         "observed_at": candidate.evidence["observed_at"],
         "version_source": "metadata.yaml",
         "matching_tag": False,
+        "quota_free_version_check": False,
     }
-    assert [call[0] for call in client.calls[:2]] == [
+    assert client.api_calls[:2] == [
         "https://api.github.com/repos/acme/demo",
         "https://api.github.com/repos/acme/demo/contents/metadata.yaml?ref=main",
     ]
@@ -239,6 +260,7 @@ def test_github_latest_uses_master_default_branch_archive_without_matching_tag(
         "ascii"
     )
     client = RegistryClient(
+        *raw_miss(),
         RegistryResponse(200, {"default_branch": "master"}),
         RegistryResponse(200, {"encoding": "base64", "content": metadata}),
         RegistryResponse(404),
@@ -262,11 +284,12 @@ def test_github_latest_uses_master_default_branch_archive_without_matching_tag(
     assert candidate.archive_url == (
         "https://api.github.com/repos/acme/identity_guardian/zipball/master"
     )
-    assert client.calls[1][0].endswith("/contents/metadata.yaml?ref=master")
+    assert client.api_calls[1].endswith("/contents/metadata.yaml?ref=master")
 
 
 def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
     client = RegistryClient(
+        *raw_miss(),
         RegistryResponse(200, {"default_branch": "main"}),
         RegistryResponse(404),
         RegistryResponse(404),
@@ -295,7 +318,7 @@ def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
     assert candidate.commit == "abc123"
     assert candidate.archive_url.endswith("/zipball/v1.4.0")
     assert candidate.evidence["api"] == "github_latest_tag"
-    assert [call[0] for call in client.calls] == [
+    assert client.api_calls == [
         "https://api.github.com/repos/acme/demo",
         "https://api.github.com/repos/acme/demo/contents/metadata.yaml?ref=main",
         "https://api.github.com/repos/acme/demo/releases/latest",
@@ -306,6 +329,7 @@ def test_github_latest_falls_back_to_tag_only_for_release_404(monkeypatch):
 @pytest.mark.parametrize("payload", [None, {}, [], ["v1"], [{}]])
 def test_github_latest_rejects_invalid_tag_schema(monkeypatch, payload):
     client = RegistryClient(
+        *raw_miss(),
         RegistryResponse(200, {"default_branch": "main"}),
         RegistryResponse(404),
         RegistryResponse(404),
@@ -325,6 +349,7 @@ def test_github_latest_rejects_invalid_tag_schema(monkeypatch, payload):
 
 def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
     client = RegistryClient(
+        *raw_miss(),
         RegistryResponse(200, {"default_branch": "main"}),
         RegistryResponse(404),
         RegistryResponse(401),
@@ -347,11 +372,11 @@ def test_github_latest_does_not_fallback_for_other_errors(monkeypatch):
             "http_status": 401,
         },
     }
-    assert len(client.calls) == 3
+    assert len(client.api_calls) == 3
 
 
 def test_github_latest_default_branch_failure_keeps_repo_and_http_status(monkeypatch):
-    client = RegistryClient(RegistryResponse(401))
+    client = RegistryClient(*raw_miss(), RegistryResponse(401))
     registry = CandidateRegistry()
 
     async def get_client():
@@ -366,6 +391,215 @@ def test_github_latest_default_branch_failure_keeps_repo_and_http_status(monkeyp
         "code": "REGISTRY_HTTP_401",
         "context": {"repo": "acme/demo", "http_status": 401},
     }
+
+
+def test_github_latest_reads_version_from_raw_without_spending_api_quota(monkeypatch):
+    """raw 命中默认分支 metadata.yaml 时，不应再请求仓库信息与 contents 接口。"""
+    client = RegistryClient(
+        RegistryResponse(200, body="name: demo\nversion: 1.4.0\n"),
+        RegistryResponse(
+            200,
+            {
+                "tag_name": "v1.4.0",
+                "zipball_url": "https://api.github.com/repos/acme/demo/zipball/v1.4.0",
+                "published_at": "2024-05-01T00:00:00Z",
+            },
+        ),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest("demo", "1.3.0", "https://github.com/acme/demo")
+    )
+
+    assert candidate.target_version == "1.4.0"
+    assert candidate.default_branch == "main"
+    assert candidate.evidence["api"] == "github_raw_default_branch_metadata"
+    assert candidate.evidence["quota_free_version_check"] is True
+    assert client.calls[0][0] == (
+        f"https://{GITHUB_RAW_HOST}/acme/demo/main/metadata.yaml"
+    )
+    # 版本判定阶段零 API 调用，只有补齐 release 证据时才碰 API。
+    assert client.api_calls == [
+        "https://api.github.com/repos/acme/demo/releases/latest"
+    ]
+
+
+def test_github_latest_probes_master_when_main_branch_is_absent(monkeypatch):
+    client = RegistryClient(
+        RegistryResponse(404),
+        RegistryResponse(200, body="name: demo\nversion: 2.0.0\n"),
+        RegistryResponse(404),
+        RegistryResponse(200, []),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest("demo", "1.0.0", "https://github.com/acme/demo")
+    )
+
+    assert candidate.target_version == "2.0.0"
+    assert candidate.default_branch == "master"
+    assert [call[0] for call in client.calls[:2]] == [
+        f"https://{GITHUB_RAW_HOST}/acme/demo/main/metadata.yaml",
+        f"https://{GITHUB_RAW_HOST}/acme/demo/master/metadata.yaml",
+    ]
+
+
+def test_rate_limit_headers_are_recorded_and_reported(monkeypatch):
+    reset_epoch = int(time.time()) + 900
+    client = RegistryClient(
+        RegistryResponse(
+            403,
+            headers={
+                "X-RateLimit-Limit": "60",
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(reset_epoch),
+                "Retry-After": "120",
+            },
+        )
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError) as captured:
+        asyncio.run(registry.fetch_json("https://api.github.com/repos/acme/demo"))
+
+    context = captured.value.to_dict()["context"]
+    assert captured.value.to_dict()["code"] == "REGISTRY_RATE_LIMITED"
+    assert context["rate_limited"] is True
+    # retry-after 优先于 reset 推算，UI 才能显示确定的可重试时间。
+    assert context["retry_after_seconds"] == pytest.approx(120, abs=2)
+    assert context["reset_at"].startswith("20")
+    assert context["token_configured"] is False
+
+    status = registry.rate_limit_status()
+    assert status["limited"] is True
+    assert status["remaining"] == 0
+    assert status["limit"] == 60
+    assert status["token_configured"] is False
+
+
+def test_rate_limit_reports_token_configured_when_token_present(monkeypatch):
+    client = RegistryClient(
+        RegistryResponse(429, headers={"Retry-After": "30"}),
+    )
+    registry = CandidateRegistry(github_token="ghp_example")
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError) as captured:
+        asyncio.run(registry.fetch_json("https://api.github.com/repos/acme/demo"))
+
+    assert captured.value.to_dict()["context"]["token_configured"] is True
+    assert registry.rate_limit_status()["token_configured"] is True
+
+
+def test_rate_limited_backoff_blocks_further_requests(monkeypatch):
+    client = RegistryClient(
+        RegistryResponse(
+            403, headers={"X-RateLimit-Remaining": "0", "Retry-After": "300"}
+        )
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError, match="REGISTRY_RATE_LIMITED"):
+        asyncio.run(registry.fetch_json("https://api.github.com/repos/acme/demo"))
+    # 退避窗口内第二次调用必须直接失败，不再发起网络请求耗尽配额。
+    with pytest.raises(RegistryError, match="REGISTRY_RATE_LIMITED"):
+        asyncio.run(registry.fetch_json("https://api.github.com/repos/acme/other"))
+
+    assert len(client.calls) == 1
+
+
+def test_rate_limited_prefers_stale_cache_over_failure(monkeypatch):
+    payload = {"tag_name": "v1.2.3"}
+    url = "https://api.github.com/repos/acme/demo/releases/latest"
+    client = RegistryClient(
+        RegistryResponse(200, payload),
+        RegistryResponse(
+            403, headers={"X-RateLimit-Remaining": "0", "Retry-After": "600"}
+        ),
+    )
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    fresh = asyncio.run(registry.fetch_json(url))
+    stale = asyncio.run(registry.fetch_json(url, force_refresh=True))
+    # 退避期内继续复用过期缓存，宁可稍旧也不让检查整体失败。
+    blocked = asyncio.run(registry.fetch_json(url, force_refresh=True))
+
+    assert fresh is payload
+    assert stale is payload
+    assert blocked is payload
+    assert len(client.calls) == 2
+
+
+def test_permission_403_without_quota_headers_is_not_treated_as_rate_limit(monkeypatch):
+    client = RegistryClient(
+        RegistryResponse(403, headers={"X-RateLimit-Remaining": "42"})
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    with pytest.raises(RegistryError, match="REGISTRY_HTTP_403"):
+        asyncio.run(registry.fetch_json("https://api.github.com/repos/acme/demo"))
+
+    assert registry.rate_limit_status()["limited"] is False
+
+
+def test_raw_rate_limit_does_not_block_api_fallback(monkeypatch):
+    """raw 域限流不应否定 API：两者配额独立，退避窗口按域名隔离。"""
+    metadata = base64.b64encode(b"name: demo\nversion: 3.1.0\n").decode("ascii")
+    client = RegistryClient(
+        RegistryResponse(429, headers={"Retry-After": "60"}),
+        RegistryResponse(200, {"default_branch": "main"}),
+        RegistryResponse(200, {"encoding": "base64", "content": metadata}),
+        RegistryResponse(404),
+        RegistryResponse(200, []),
+    )
+    registry = CandidateRegistry()
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(registry, "_client", get_client)
+    candidate = asyncio.run(
+        registry.github_latest("demo", "3.0.0", "https://github.com/acme/demo")
+    )
+
+    assert candidate.target_version == "3.1.0"
+    assert candidate.evidence["api"] == "github_default_branch_metadata"
+    # raw 限流后只探测一次就放弃，剩余分支不再重复请求。
+    assert len([url for url, _ in client.calls if GITHUB_RAW_HOST in url]) == 1
+
+
+def test_default_cache_ttl_is_extended_to_reduce_quota_usage():
+    assert CandidateRegistry().cache_ttl == DEFAULT_CACHE_TTL_SECONDS
+    assert DEFAULT_CACHE_TTL_SECONDS >= 1800
 
 
 def test_rule_rejects_unknown_policy_and_failure_mode(tmp_path):

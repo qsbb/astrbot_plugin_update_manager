@@ -14,7 +14,11 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
-from .core.adapters.registry import RegistryError, normalize_optional_setting
+from .core.adapters.registry import (
+    DEFAULT_CACHE_TTL_SECONDS,
+    RegistryError,
+    normalize_optional_setting,
+)
 from .core.adapters.storage import redact
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
@@ -481,7 +485,9 @@ class PagesAPIMixin:
         self.registry.timeout = type(self.registry.timeout)(
             total=int(self._get("network_timeout_seconds", 15))
         )
-        self.registry.cache_ttl = int(self._get("cache_ttl_seconds", 300))
+        self.registry.cache_ttl = int(
+            self._get("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS)
+        )
         self.registry.proxy = normalize_optional_setting(self._get("proxy", ""))
         self.registry.token = normalize_optional_setting(self._get("github_token", ""))
         self.transaction.health.stability_seconds = max(
@@ -654,8 +660,7 @@ class PagesAPIMixin:
             return False, "up_to_date"
         return False, "local_newer"
 
-    @staticmethod
-    def _recommendation_error(exc: Exception, repo_url: str) -> dict[str, Any]:
+    def _recommendation_error(self, exc: Exception, repo_url: str) -> dict[str, Any]:
         raw_code = getattr(exc, "code", None) or str(exc) or type(exc).__name__
         code = (
             raw_code
@@ -664,6 +669,10 @@ class PagesAPIMixin:
         )
         context = exc.to_dict()["context"] if isinstance(exc, RegistryError) else {}
         context.setdefault("repo", repo_url)
+        if context.get("rate_limited"):
+            # 限流失败必须能回答"多久后可重试"与"如何提额"。
+            context.setdefault("token_configured", bool(self.registry.token))
+            context["token_hint_required"] = not context["token_configured"]
         detail = redact(str(exc) or type(exc).__name__)
         detail = re.sub(
             r"(?i)\b(?:gh[pousr]_[a-z0-9_]+|bearer\s+\S+)", "***", detail
@@ -781,7 +790,17 @@ class PagesAPIMixin:
                 "error": self_item["error"],
                 "repo_url": self_item["repo_url"],
             }
-        return {"success": True, "items": items, "self_update": self_update}
+        rate_limit = (
+            self.registry.rate_limit_status()
+            if callable(getattr(self.registry, "rate_limit_status", None))
+            else None
+        )
+        return {
+            "success": True,
+            "items": items,
+            "self_update": self_update,
+            "rate_limit": rate_limit,
+        }
 
     async def _pages_recommendations(self):
         return json_response(await self._recommendation_payload(force_refresh=False))

@@ -12,6 +12,7 @@ from astrbot.api.star import Context, Star, register
 
 from .core.adapters.astrbot import AstrBotAdapter
 from .core.adapters.registry import (
+    DEFAULT_CACHE_TTL_SECONDS,
     CandidateRegistry,
     RegistryError,
     normalize_optional_setting,
@@ -64,7 +65,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         )
         self.registry = CandidateRegistry(
             timeout_seconds=int(self._get("network_timeout_seconds", 15)),
-            cache_ttl_seconds=int(self._get("cache_ttl_seconds", 300)),
+            cache_ttl_seconds=int(
+                self._get("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS)
+            ),
             proxy=normalize_optional_setting(self._get("proxy", "")),
             github_token=normalize_optional_setting(self._get("github_token", "")),
         )

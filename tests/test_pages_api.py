@@ -616,6 +616,90 @@ def test_recommendation_failure_payload_keeps_safe_registry_context(monkeypatch,
     }
 
 
+def test_recommendation_rate_limit_failure_exposes_retry_and_token_hint(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        raise pages_api.RegistryError(
+            "REGISTRY_RATE_LIMITED",
+            http_status=403,
+            repo="qsbb/example",
+            rate_limited=True,
+            retry_after_seconds=420,
+            reset_at="2024-05-01T00:00:00+00:00",
+            token_configured=False,
+        )
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    failed = payload["items"][0]
+    assert failed["error"] == "REGISTRY_RATE_LIMITED"
+    assert failed["error_context"]["rate_limited"] is True
+    assert failed["error_context"]["retry_after_seconds"] == 420
+    assert failed["error_context"]["reset_at"] == "2024-05-01T00:00:00+00:00"
+    # 未配置 token 时必须提示可通过配置 token 提升额度。
+    assert failed["error_context"]["token_hint_required"] is True
+    assert failed["error_context"]["token_configured"] is False
+
+
+def test_recommendation_rate_limit_hint_suppressed_when_token_configured(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {"github_token": "ghp_x"})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        raise pages_api.RegistryError(
+            "REGISTRY_RATE_LIMITED",
+            repo="qsbb/example",
+            rate_limited=True,
+            retry_after_seconds=60,
+            token_configured=True,
+        )
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    context_payload = payload["items"][0]["error_context"]
+    assert context_payload["token_configured"] is True
+    assert context_payload["token_hint_required"] is False
+
+
+def test_recommendations_payload_reports_global_rate_limit_snapshot(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        return SimpleNamespace(target_version="9.9.9")
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(
+        plugin.registry,
+        "rate_limit_status",
+        lambda: {
+            "limited": True,
+            "retry_after_seconds": 300,
+            "reset_at": "2024-05-01T00:00:00+00:00",
+            "remaining": 0,
+            "limit": 60,
+            "token_configured": False,
+        },
+    )
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    assert payload["rate_limit"]["limited"] is True
+    assert payload["rate_limit"]["retry_after_seconds"] == 300
+    assert payload["rate_limit"]["remaining"] == 0
+    assert "token" not in json.dumps(payload["rate_limit"]).replace(
+        "token_configured", ""
+    )
+
+
 def test_recommendation_failure_detail_redacts_tokens(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
