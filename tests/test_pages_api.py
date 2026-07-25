@@ -591,6 +591,51 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     assert all(item["checked_at"] for item in payload["items"])
 
 
+def test_check_latest_honours_cached_request_and_rejects_bad_flag(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    force_values = []
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        force_values.append(force_refresh)
+        return SimpleNamespace(target_version="9.9.9")
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+
+    # 页面自动检查显式请求缓存，不得强制刷新以免触发限流。
+    async def cached_payload():
+        return {"force_refresh": False}
+
+    monkeypatch.setattr(plugin, "_request_json", cached_payload)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    assert payload["success"] is True
+    assert force_values == [False] * 5
+
+    # 缺省仍是手动强制刷新语义。
+    force_values.clear()
+
+    async def empty_payload():
+        return {}
+
+    monkeypatch.setattr(plugin, "_request_json", empty_payload)
+    assert unwrap(asyncio.run(plugin._pages_check_recommendations()))["success"] is True
+    assert force_values == [True] * 5
+
+    # 非布尔值必须拒绝，不能被静默当成真值。
+    force_values.clear()
+
+    async def invalid_payload():
+        return {"force_refresh": "false"}
+
+    monkeypatch.setattr(plugin, "_request_json", invalid_payload)
+    response = asyncio.run(plugin._pages_check_recommendations())
+    body, status = response if isinstance(response, tuple) else (response, 200)
+    assert status == 400
+    assert body["success"] is False
+    assert body["error"] == "INVALID_FIELD_TYPE:force_refresh"
+    assert force_values == []
+
+
 def test_recommendation_failure_payload_keeps_safe_registry_context(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})

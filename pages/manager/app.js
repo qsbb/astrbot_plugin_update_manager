@@ -6,7 +6,7 @@ const messages = {
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
-    checkLatest: "检查最新版本", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
+    checkLatest: "检查最新版本", checkingLatest: "正在检查…", autoCheckingLatest: "正在自动检查版本…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
     selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新",
     install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
@@ -25,7 +25,7 @@ const messages = {
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
-    checkLatest: "Check latest versions", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
+    checkLatest: "Check latest versions", checkingLatest: "Checking…", autoCheckingLatest: "Checking versions automatically…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
     selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository",
     install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
@@ -63,7 +63,11 @@ const state = {
   locale: Object.prototype.hasOwnProperty.call(messages, storedLocale) ? storedLocale : "zh-CN",
   config: null,
   rule: null,
-  recommendationBusy: null
+  recommendationBusy: null,
+  // 版本检查互斥：自动检查与手动检查共享同一把锁，避免并发请求触发限流。
+  versionCheckBusy: false,
+  // 每次会话只自动检查一次；刷新页面才会重新自动检查。
+  autoVersionCheckDone: false
 };
 const t = (key) => messages[state.locale][key] || key;
 
@@ -360,8 +364,11 @@ function renderSelfUpdateNotice(selfUpdate) {
   notice.hidden = false;
 }
 
-async function loadRecommendations(force = false) {
-  const data = force ? await apiPost("recommendations/check-latest", {}) : await apiGet("recommendations");
+// check 为真时走 recommendations/check-latest；forceRefresh 为假时复用后端缓存，避免触发 GitHub 限流。
+async function loadRecommendations(check = false, forceRefresh = true) {
+  const data = check
+    ? await apiPost("recommendations/check-latest", { force_refresh: forceRefresh })
+    : await apiGet("recommendations");
   const items = data.items || [];
   renderSelfUpdateNotice(data.self_update);
   renderRateLimitNotice(data.rate_limit);
@@ -377,6 +384,51 @@ async function loadRecommendations(force = false) {
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
     return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${recommendationError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
+}
+
+function setVersionCheckBusy(labelKey) {
+  state.versionCheckBusy = true;
+  const button = document.getElementById("check-latest");
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("checkingLatest");
+  }
+  const status = document.getElementById("recommendation-status");
+  if (status) {
+    status.textContent = t(labelKey);
+    status.hidden = false;
+  }
+}
+
+function clearVersionCheckBusy() {
+  state.versionCheckBusy = false;
+  const button = document.getElementById("check-latest");
+  if (button) {
+    button.disabled = false;
+    button.textContent = t("checkLatest");
+  }
+  // 推荐操作（安装/更新/启停）自己拥有状态条，不能被版本检查提前隐藏。
+  const status = document.getElementById("recommendation-status");
+  if (status && !state.recommendationBusy) status.hidden = true;
+}
+
+// 首次切到"系列推荐"时自动检查一次仓库版本；使用缓存、不强制刷新，失败也不阻塞列表渲染。
+async function autoCheckRecommendations() {
+  if (state.autoVersionCheckDone || state.versionCheckBusy || state.recommendationBusy) return;
+  state.autoVersionCheckDone = true;
+  setVersionCheckBusy("autoCheckingLatest");
+  try {
+    await loadRecommendations(true, false);
+  } catch (error) {
+    toast(`${t("checkFailed")}: ${error.message}`, true);
+    try {
+      await loadRecommendations();
+    } catch (fallbackError) {
+      console.warn("Unable to render cached recommendations", fallbackError);
+    }
+  } finally {
+    clearVersionCheckBusy();
+  }
 }
 
 function confirmRecommendationAction(action, pluginName) {
@@ -472,6 +524,11 @@ function bindEvents() {
     document.querySelectorAll("[data-tab], .panel").forEach((node) => node.classList.remove("active"));
     button.classList.add("active");
     document.getElementById(button.dataset.tab).classList.add("active");
+    if (button.dataset.tab === "recommendations") {
+      autoCheckRecommendations().catch((error) => {
+        console.warn("Automatic recommendation version check failed", error);
+      });
+    }
   }));
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("rule-form").addEventListener("submit", saveRule);
@@ -489,18 +546,19 @@ function bindEvents() {
     const input = event.target.closest("[data-catalog-action]");
     if (input) runCatalogAction(input);
   });
-  document.getElementById("check-latest").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.textContent = t("checkingLatest");
+  document.getElementById("check-latest").addEventListener("click", async () => {
+    // 与自动检查共享同一把锁：任一方在跑时忽略新的手动点击。
+    if (state.versionCheckBusy) return;
+    // 手动检查是明确的用户意图，跳过自动检查以免重复请求。
+    state.autoVersionCheckDone = true;
+    setVersionCheckBusy("checkingLatest");
     try {
       await loadRecommendations(true);
       toast(t("latestChecked"));
     } catch (error) {
       toast(`${t("loadFailed")}: ${error.message}`, true);
     } finally {
-      button.disabled = false;
-      button.textContent = t("checkLatest");
+      clearVersionCheckBusy();
     }
   });
   document.getElementById("refresh").addEventListener("click", refreshAll);

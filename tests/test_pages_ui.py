@@ -117,7 +117,7 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert 'id="check-latest"' in html
-    assert 'apiPost("recommendations/check-latest", {})' in js
+    assert 'apiPost("recommendations/check-latest", { force_refresh: forceRefresh })' in js
     assert "actions.update" in js
     for status in (
         "update_available",
@@ -141,6 +141,55 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert ".lifecycle-switch input:focus-visible" in css
     assert "官方安装会直接加载" in html
     assert "不会额外重复重载" in html
+
+
+def test_recommendations_tab_auto_checks_once_with_cached_request():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    # 自动检查必须复用 loadRecommendations 与 check-latest，且不强制刷新。
+    assert "async function loadRecommendations(check = false, forceRefresh = true)" in js
+    assert "async function autoCheckRecommendations()" in js
+    assert "await loadRecommendations(true, false);" in js
+    assert "versionCheckBusy: false" in js
+    assert "autoVersionCheckDone: false" in js
+    auto_check = js[
+        js.index("async function autoCheckRecommendations()") : js.index(
+            "function confirmRecommendationAction"
+        )
+    ]
+    # 会话内只自动检查一次，并与手动检查/推荐操作互斥。
+    assert (
+        "if (state.autoVersionCheckDone || state.versionCheckBusy || state.recommendationBusy) return;"
+        in auto_check
+    )
+    assert auto_check.index("state.autoVersionCheckDone = true;") < auto_check.index(
+        "await loadRecommendations(true, false);"
+    )
+    # 检查中显示状态，失败仍回落到缓存列表渲染。
+    assert 'setVersionCheckBusy("autoCheckingLatest")' in auto_check
+    assert "clearVersionCheckBusy();" in auto_check
+    assert "await loadRecommendations();" in auto_check
+    assert "catch (error)" in auto_check
+    tab_handler = js[js.index('document.querySelectorAll("[data-tab]")') : js.index('document.getElementById("config-form")')]
+    assert 'button.dataset.tab === "recommendations"' in tab_handler
+    assert "autoCheckRecommendations()" in tab_handler
+
+
+def test_manual_and_auto_version_check_share_one_busy_lock():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function setVersionCheckBusy(labelKey)" in js
+    assert "function clearVersionCheckBusy()" in js
+    assert "state.versionCheckBusy = true;" in js
+    assert "state.versionCheckBusy = false;" in js
+    manual = js[js.index('document.getElementById("check-latest").addEventListener') : js.index('document.getElementById("refresh").addEventListener')]
+    assert "if (state.versionCheckBusy) return;" in manual
+    assert "state.autoVersionCheckDone = true;" in manual
+    assert 'setVersionCheckBusy("checkingLatest")' in manual
+    assert "await loadRecommendations(true);" in manual
+    assert "clearVersionCheckBusy();" in manual
+    # 版本检查不得抢走推荐操作的状态条。
+    assert "if (status && !state.recommendationBusy) status.hidden = true;" in js
+    assert "autoCheckingLatest: \"正在自动检查版本…\"" in js
+    assert "autoCheckingLatest: \"Checking versions automatically…\"" in js
 
 
 def test_recommendations_show_self_update_repository_notice():

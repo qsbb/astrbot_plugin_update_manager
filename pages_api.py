@@ -806,7 +806,20 @@ class PagesAPIMixin:
         return json_response(await self._recommendation_payload(force_refresh=False))
 
     async def _pages_check_recommendations(self):
-        return json_response(await self._recommendation_payload(force_refresh=True))
+        # 默认强制刷新（手动"检查最新版本"）；页面自动检查显式传 force_refresh=false 走缓存，避免限流。
+        data = await self._request_json()
+        force_refresh = True
+        if isinstance(data, dict) and "force_refresh" in data:
+            value = data["force_refresh"]
+            if not isinstance(value, bool):
+                return json_response(
+                    {"success": False, "error": "INVALID_FIELD_TYPE:force_refresh"},
+                    status=400,
+                )
+            force_refresh = value
+        return json_response(
+            await self._recommendation_payload(force_refresh=force_refresh)
+        )
 
     @staticmethod
     def _lifecycle(operation: str, snapshot) -> dict[str, Any]:
