@@ -193,7 +193,47 @@ def test_snapshot_deduplicates_by_root_before_plugin_id(monkeypatch, tmp_path):
     assert [(item.name, item.root_dir_name, item.loaded) for item in snapshots] == [
         ("shared_id", "runtime_root", True)
     ]
+    assert snapshots[0].version == "1.2.3"
     assert adapter.last_discovery_report.discovered_count == 0
+
+
+def test_snapshot_repairs_invalid_runtime_version_from_metadata(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    write_metadata(tmp_path, "demo", version="1.2.4")
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    runtime = star("demo")
+    runtime.version = "unknown (local checkout)"
+    snapshots = asyncio.run(AstrBotAdapter(FakeContext([runtime], manager)).snapshot_plugins())
+    assert len(snapshots) == 1
+    assert snapshots[0].version == "1.2.4"
+    assert snapshots[0].loaded is True
+    assert snapshots[0].activated is True
+
+
+def test_module_discovery_prefers_real_unicode_directory_path(monkeypatch, tmp_path):
+    install_shared_preferences(monkeypatch, {})
+    plugin = tmp_path / "凝心溯溪-声"
+    plugin.mkdir()
+    (plugin / "metadata.yaml").write_text(
+        "name: astrbot_plugin_voice_hub\n"
+        "display_name: 凝心溯溪-声\n"
+        "version: 1.2.3\n",
+        encoding="utf-8",
+    )
+    manager = FakeManager()
+    manager.plugin_store_path = tmp_path
+    manager._get_plugin_modules = lambda: {
+        "astrbot_plugin_voice_hub": {
+            "pname": "astrbot_plugin_voice_hub",
+            "module_path": plugin / "main.py",
+        }
+    }
+    snapshots = asyncio.run(AstrBotAdapter(FakeContext([], manager)).snapshot_plugins())
+    assert len(snapshots) == 1
+    assert snapshots[0].name == "astrbot_plugin_voice_hub"
+    assert snapshots[0].display_name == "凝心溯溪-声"
+    assert snapshots[0].root_dir_name == "凝心溯溪-声"
 
 
 def test_snapshot_falls_back_to_installed_metadata_when_runtime_empty(

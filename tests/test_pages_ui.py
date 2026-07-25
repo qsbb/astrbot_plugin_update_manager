@@ -136,6 +136,19 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert "不会额外重复重载" in html
 
 
+def test_recommendations_show_self_update_repository_notice():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert 'id="self-update-notice"' in html
+    assert "function renderSelfUpdateNotice(selfUpdate)" in js
+    assert "selfUpdate?.update_available" in js
+    assert "renderSelfUpdateNotice(data.self_update)" in js
+    assert 'target="_blank" rel="noopener noreferrer"' in js
+    assert "自身更新已禁用，请前往仓库更新" in js
+    assert ".self-update-notice" in css
+
+
 def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")

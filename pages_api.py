@@ -733,7 +733,21 @@ class PagesAPIMixin:
                     },
                 }
             )
-        return {"success": True, "items": items}
+        self_item = next(
+            (item for item in items if item["plugin_id"] == PLUGIN_ID), None
+        )
+        self_update = None
+        if self_item is not None:
+            self_update = {
+                "current_version": self_item["version"],
+                "latest_version": self_item["latest_version"],
+                "update_available": self_item["update_available"],
+                "version_status": self_item["version_status"],
+                "checked_at": self_item["checked_at"],
+                "error": self_item["error"],
+                "repo_url": self_item["repo_url"],
+            }
+        return {"success": True, "items": items, "self_update": self_update}
 
     async def _pages_recommendations(self):
         return json_response(await self._recommendation_payload(force_refresh=False))

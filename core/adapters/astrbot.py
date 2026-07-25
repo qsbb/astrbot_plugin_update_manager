@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import yaml
+from packaging.version import InvalidVersion, Version
 
 PLUGIN_INSTALL_SOURCES_KEY = "plugin_install_sources"
 SELF_PLUGIN_NAME = "astrbot_plugin_update_manager"
@@ -220,15 +221,16 @@ class AstrBotAdapter:
             )
             if raw_path is None and isinstance(record, (str, Path)):
                 raw_path = record
+        if isinstance(raw_path, (str, Path)):
+            module_path = Path(raw_path).expanduser().resolve()
+            plugin_dir = module_path if module_path.is_dir() else module_path.parent
+            if self._contained(plugin_dir, root):
+                return plugin_dir
         if isinstance(raw_name, str) and raw_name.strip():
             named_dir = (root / raw_name.strip()).resolve()
             if self._contained(named_dir, root):
                 return named_dir
-        if not isinstance(raw_path, (str, Path)):
-            return None
-        module_path = Path(raw_path).expanduser().resolve()
-        plugin_dir = module_path if module_path.is_dir() else module_path.parent
-        return plugin_dir if self._contained(plugin_dir, root) else None
+        return None
 
     def _discoverable_directories(
         self, root: Path, diagnostics: list[str]
@@ -315,28 +317,72 @@ class AstrBotAdapter:
         return tuple(result)
 
     @staticmethod
+    def _valid_version(value: str) -> bool:
+        try:
+            Version(value.strip())
+        except (InvalidVersion, AttributeError):
+            return False
+        return True
+
+    @classmethod
+    def _merge_snapshot_pair(
+        cls, runtime: PluginSnapshot, discovered: PluginSnapshot
+    ) -> PluginSnapshot:
+        version = runtime.version.strip()
+        if not cls._valid_version(version) and cls._valid_version(discovered.version):
+            version = discovered.version
+        return PluginSnapshot(
+            name=runtime.name or discovered.name,
+            root_dir_name=discovered.root_dir_name or runtime.root_dir_name,
+            display_name=runtime.display_name or discovered.display_name,
+            version=version,
+            repo=runtime.repo or discovered.repo,
+            reserved=runtime.reserved,
+            activated=runtime.activated,
+            loaded=True,
+            metadata_complete=runtime.metadata_complete or discovered.metadata_complete,
+            install_source=runtime.install_source or discovered.install_source,
+        )
+
+    @classmethod
     def _merge_snapshots(
-        runtime: Iterable[PluginSnapshot], discovered: Iterable[PluginSnapshot]
+        cls,
+        runtime: Iterable[PluginSnapshot],
+        discovered: Iterable[PluginSnapshot],
     ) -> tuple[PluginSnapshot, ...]:
-        merged: list[PluginSnapshot] = []
-        for candidate in (*runtime, *discovered):
-            duplicate = next(
+        merged = list(runtime)
+        metadata_merged: set[int] = set()
+        for candidate in discovered:
+            matched_by_root = False
+            duplicate_index = next(
                 (
-                    item
-                    for item in merged
-                    if (
-                        candidate.root_dir_name
-                        and item.root_dir_name == candidate.root_dir_name
-                    )
+                    index
+                    for index, item in enumerate(merged)
+                    if candidate.root_dir_name
+                    and item.root_dir_name == candidate.root_dir_name
                 ),
                 None,
             )
-            if duplicate is None and candidate.name:
-                duplicate = next(
-                    (item for item in merged if item.name == candidate.name), None
+            if duplicate_index is not None:
+                matched_by_root = True
+            if duplicate_index is None and candidate.name:
+                duplicate_index = next(
+                    (
+                        index
+                        for index, item in enumerate(merged)
+                        if item.name == candidate.name
+                    ),
+                    None,
                 )
-            if duplicate is None:
+            if duplicate_index is None:
                 merged.append(candidate)
+            elif merged[duplicate_index].loaded and (
+                matched_by_root or duplicate_index not in metadata_merged
+            ):
+                merged[duplicate_index] = cls._merge_snapshot_pair(
+                    merged[duplicate_index], candidate
+                )
+                metadata_merged.add(duplicate_index)
         return tuple(merged)
 
     async def snapshot_plugins(self) -> tuple[PluginSnapshot, ...]:

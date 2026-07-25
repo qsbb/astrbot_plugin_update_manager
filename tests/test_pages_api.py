@@ -478,11 +478,63 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     assert core["installed"] is True
     assert core["actions"]["update"] is False
     assert core["actions"]["disable"] is False
+    assert payload["self_update"] == {
+        "current_version": module.__version__,
+        "latest_version": "0.1.0",
+        "update_available": False,
+        "version_status": "up_to_date",
+        "checked_at": core["checked_at"],
+        "error": None,
+        "repo_url": "https://github.com/qsbb/astrbot_plugin_update_manager",
+    }
     assert all(
         {"latest_version", "update_available", "version_status", "checked_at", "error"}
         <= item.keys()
         for item in payload["items"]
     )
+
+
+def test_self_update_check_reports_repository_update_without_self_action(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    async def snapshots():
+        return (
+            SimpleNamespace(
+                name=module.PLUGIN_NAME,
+                root_dir_name="凝心溯溪-核",
+                version="0.1.0",
+                loaded=True,
+                activated=True,
+            ),
+        )
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        target = "0.2.0" if plugin_id == module.PLUGIN_NAME else "0.1.0"
+        return SimpleNamespace(target_version=target)
+
+    plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(
+            install_plugin=True,
+            update_plugin=True,
+            turn_on_plugin=True,
+            turn_off_plugin=True,
+        ),
+    )
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    core = next(
+        item for item in payload["items"] if item["plugin_id"] == module.PLUGIN_NAME
+    )
+    assert payload["self_update"]["update_available"] is True
+    assert payload["self_update"]["latest_version"] == "0.2.0"
+    assert payload["self_update"]["repo_url"] == core["repo_url"]
+    assert core["actions"]["update"] is False
 
 
 def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
