@@ -16,6 +16,7 @@ const messages = {
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
     eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
     empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败",
+    checkUpdates: "检查更新", checkingUpdates: "正在检查更新…", updatesChecked: "更新检查完成", notChecked: "未检查", catalogUpdateHint: "点击「检查更新」后才会显示版本状态",
     mirrorsTitle: "GitHub 镜像加速", mirrorsHint: "加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。", mirrorDirect: "直连 GitHub（不使用加速站）", mirrorBuiltin: "内置", mirrorCustom: "自定义",
     mirrorBenchmark: "一键测速", mirrorBenchmarking: "正在测速…", mirrorBenchmarkDone: "测速完成", mirrorLatency: "延迟", mirrorUnreachable: "不可用", mirrorUntested: "未测速",
     mirrorApply: "使用该加速站", mirrorApplied: "加速站已切换", mirrorAddTitle: "添加自定义加速站", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "添加", mirrorAdded: "自定义加速站已添加", mirrorInvalid: "加速站必须是合法的 https 前缀", mirrorDuplicate: "该加速站已在列表中", mirrorRemove: "移除", mirrorRemoved: "自定义加速站已移除", mirrorProbeHint: "测速探针",
@@ -38,6 +39,7 @@ const messages = {
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
     eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
     empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed",
+    checkUpdates: "Check for updates", checkingUpdates: "Checking for updates…", updatesChecked: "Update check completed", notChecked: "Not checked", catalogUpdateHint: "Version status appears after you run a check",
     mirrorsTitle: "GitHub mirror acceleration", mirrorsHint: "Mirrors only proxy by prefix. An unavailable mirror falls back to a direct connection and never fails the check.", mirrorDirect: "Direct GitHub connection (no mirror)", mirrorBuiltin: "Built-in", mirrorCustom: "Custom",
     mirrorBenchmark: "Run benchmark", mirrorBenchmarking: "Benchmarking…", mirrorBenchmarkDone: "Benchmark completed", mirrorLatency: "Latency", mirrorUnreachable: "Unavailable", mirrorUntested: "Not tested",
     mirrorApply: "Use this mirror", mirrorApplied: "Mirror switched", mirrorAddTitle: "Add a custom mirror", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "Add", mirrorAdded: "Custom mirror added", mirrorInvalid: "A mirror must be a valid https prefix", mirrorDuplicate: "This mirror is already listed", mirrorRemove: "Remove", mirrorRemoved: "Custom mirror removed", mirrorProbeHint: "Benchmark probe",
@@ -77,7 +79,15 @@ const state = {
   // 版本检查互斥：自动检查与手动检查共享同一把锁，避免并发请求触发限流。
   versionCheckBusy: false,
   // 每次会话只自动检查一次；刷新页面才会重新自动检查。
-  autoVersionCheckDone: false
+  autoVersionCheckDone: false,
+  // 目录版本结果按 plugin_id 缓存。目录不做自动检查（全量插件探测会拖慢首屏并
+  // 快速耗尽 GitHub 匿名配额），所以刷新目录列表时必须保留已有结果，否则用户
+  // 点过的检查会因为一次启停操作而白跑。
+  catalogVersions: {},
+  catalogCheckBusy: false,
+  catalogBusy: null,
+  catalogItems: [],
+  catalogDiagnostics: []
 };
 const t = (key) => messages[state.locale][key] || key;
 
@@ -116,7 +126,11 @@ function errorReason(code) {
     PLUGIN_NOT_FOUND: "未找到该插件",
     PLUGIN_STATE_UNCHANGED: "插件已经处于目标状态",
     LIFECYCLE_CAPABILITY_UNAVAILABLE: "当前 AstrBot 不支持此启停操作",
-    ACTIVATION_RESULT_MISMATCH: "操作后插件状态校验失败"
+    ACTIVATION_RESULT_MISMATCH: "操作后插件状态校验失败",
+    SELF_UPDATE_BLOCKED: "更新管理器不能更新自身",
+    SOURCE_REQUIRED: "无法识别 GitHub 来源，不能更新",
+    NO_UPDATE_AVAILABLE: "当前已是最新版本",
+    UPDATE_CAPABILITY_UNAVAILABLE: "当前 AstrBot 不支持插件更新"
   };
   return known[value] || (state.locale === "zh-CN" ? t("errorUnknown") : value || t("errorUnknown"));
 }
@@ -388,11 +402,123 @@ function catalogSwitch(item) {
   return `<label class="lifecycle-switch" title="${escapeHtml(reason)}"><span class="sr-only">${escapeHtml(`${item.name || item.plugin_id} ${t(action)}`)}</span><input type="checkbox" role="switch" aria-checked="${item.activated ? "true" : "false"}" data-catalog-action="${action}" data-plugin-id="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.name || item.plugin_id)}" ${item.activated ? "checked" : ""} ${operable ? "" : "disabled"}/><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">${escapeHtml(t(action))}</span></label>`;
 }
 
+// 把目录项与本地缓存的版本结果合并成推荐区同构的形状，直接复用
+// versionStatusBadge / versionError，避免两套状态文案漂移。
+function catalogVersionView(item) {
+  const result = state.catalogVersions[item.plugin_id];
+  if (!result) return null;
+  return {
+    version_status: result.version_status,
+    error: result.error,
+    error_detail: result.error_detail,
+    error_context: result.error_context,
+    latest_version: result.latest_version,
+    update_available: Boolean(result.update_available)
+  };
+}
+
+function catalogVersionLine(item) {
+  const view = catalogVersionView(item);
+  const base = `${escapeHtml(item.version || "—")} · ${item.loaded ? t("loaded") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}`;
+  if (!view) {
+    // 没检查过就明确写"未检查"，不能让空白被误读成"已是最新"。
+    const hint = item.update_lifecycle?.checkable ? `<span class="version-badge unknown">${escapeHtml(t("notChecked"))}</span>` : "";
+    return `<span class="version-line">${hint}<span>${base}</span></span>`;
+  }
+  const detail = `${t("latestVersion")}: ${escapeHtml(view.latest_version || "—")}`;
+  return `<span class="version-line">${versionStatusBadge(view)}<span>${base} · ${detail}</span></span>${versionError(view)}`;
+}
+
+function catalogUpdateButton(item) {
+  // 来源不可回溯到 GitHub 的插件根本没有更新通道，直接不渲染按钮。
+  if (!item.update_lifecycle?.checkable) return "";
+  const view = catalogVersionView(item);
+  const enabled = Boolean(item.update_lifecycle?.operable) && Boolean(view?.update_available);
+  const reason = item.update_lifecycle?.operable
+    ? t("unavailableAction")
+    : errorReason(item.update_lifecycle?.reason);
+  const hint = enabled ? "" : `title="${escapeHtml(reason)}"`;
+  return `<button type="button" data-catalog-update="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.display_name || item.plugin_id)}" ${enabled ? "" : "disabled"} ${hint}>${escapeHtml(t("update"))}</button>`;
+}
+
+function renderCatalog() {
+  const items = state.catalogItems || [];
+  const diagnostics = state.catalogDiagnostics || [];
+  document.getElementById("catalog-list").innerHTML = items.length
+    ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code>${catalogVersionLine(item)}</div><div class="catalog-actions"><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span>${catalogUpdateButton(item)}${catalogSwitch(item)}</div></article>`).join("")
+    : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
+  const button = document.getElementById("catalog-check-updates");
+  if (button) {
+    button.disabled = state.catalogCheckBusy || Boolean(state.catalogBusy);
+    button.textContent = state.catalogCheckBusy ? t("checkingUpdates") : t("checkUpdates");
+  }
+}
+
 async function loadCatalog() {
   const data = await apiGet("catalog");
-  const items = data.items || [];
-  const diagnostics = data.diagnostics?.messages || [];
-  document.getElementById("catalog-list").innerHTML = items.length ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code><span>${escapeHtml(item.version || "—")} · ${item.loaded ? t("loaded") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></div><div class="catalog-actions"><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span>${catalogSwitch(item)}</div></article>`).join("") : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
+  state.catalogItems = data.items || [];
+  state.catalogDiagnostics = data.diagnostics?.messages || [];
+  // 目录被卸载或改名后残留的版本结果会一直显示旧数据，这里按最新目录裁剪。
+  const known = new Set(state.catalogItems.map((item) => item.plugin_id));
+  for (const pluginId of Object.keys(state.catalogVersions)) {
+    if (!known.has(pluginId)) delete state.catalogVersions[pluginId];
+  }
+  renderCatalog();
+}
+
+// 只在用户点击时调用；进入页面和切到目录标签都不会自动触发。
+// pluginIds 为空表示全量检查，传入时只复查指定插件（更新成功后单项刷新）。
+async function checkCatalogUpdates(pluginIds = null) {
+  const payload = { force_refresh: true };
+  if (pluginIds?.length) payload.plugin_ids = pluginIds;
+  const data = await apiPost("catalog/check-updates", payload);
+  for (const result of data.items || []) state.catalogVersions[result.plugin_id] = result;
+  renderRateLimitNotice(data.rate_limit, "catalog-rate-limit-notice");
+  renderCatalog();
+}
+
+async function runCatalogCheck() {
+  if (state.catalogCheckBusy || state.catalogBusy) return;
+  state.catalogCheckBusy = true;
+  renderCatalog();
+  try {
+    await checkCatalogUpdates();
+    toast(t("updatesChecked"));
+  } catch (error) {
+    toast(`${t("checkFailed")}: ${error.message}`, true);
+  } finally {
+    state.catalogCheckBusy = false;
+    renderCatalog();
+  }
+}
+
+async function runCatalogUpdate(button) {
+  const pluginId = button.dataset.catalogUpdate;
+  const pluginName = button.dataset.pluginName || pluginId;
+  if (!pluginId || button.disabled || state.catalogBusy || state.catalogCheckBusy) return;
+  if (!await confirmRecommendationAction("update", pluginName)) return;
+  state.catalogBusy = pluginId;
+  document.querySelectorAll("#catalog-list button, #catalog-list input[role='switch']").forEach((node) => { node.disabled = true; });
+  const status = document.getElementById("recommendation-status");
+  status.textContent = `${pluginName}：${t("updateRunning")}`;
+  status.hidden = false;
+  try {
+    await apiPost("catalog/update", { plugin_id: pluginId, confirm: true });
+    toast(t("operationDone"));
+    // 更新成功后该行的版本结果已过期，只复查这一个插件而不是全量重扫。
+    delete state.catalogVersions[pluginId];
+  } catch (error) {
+    toast(`${t("operationFailed")}: ${error.message}`, true);
+  } finally {
+    state.catalogBusy = null;
+    status.hidden = true;
+    await Promise.all([loadCatalog(), loadOverview(), loadRecommendations()]);
+    try {
+      await checkCatalogUpdates([pluginId]);
+    } catch (error) {
+      console.warn("Unable to re-check catalog plugin version", error);
+    }
+  }
 }
 
 function actionButton(item, action, label, enabled) {
@@ -429,7 +555,8 @@ function retryHint(context) {
   return `${t("errorRetryAfter")}: ${[retry, readable].filter(Boolean).join(" / ")}`;
 }
 
-function recommendationError(item) {
+// 推荐区与目录区共用同一份错误明细渲染：两侧的 check_failed 结构完全一致。
+function versionError(item) {
   if (item.version_status !== "check_failed") return "";
   const context = item.error_context || {};
   const details = [
@@ -444,8 +571,8 @@ function recommendationError(item) {
   return `<span class="version-error">${escapeHtml(reason)} · ${escapeHtml(details.join(" · "))}</span>`;
 }
 
-function renderRateLimitNotice(rateLimit) {
-  const notice = document.getElementById("rate-limit-notice");
+function renderRateLimitNotice(rateLimit, nodeId = "rate-limit-notice") {
+  const notice = document.getElementById(nodeId);
   if (!notice) return;
   if (!rateLimit?.limited) {
     notice.hidden = true;
@@ -511,7 +638,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `${actionButton(item, "update", "update", actions.update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${recommendationError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
 }
 
@@ -615,6 +742,11 @@ async function runCatalogAction(input) {
   const pluginId = input.dataset.pluginId;
   const pluginName = input.dataset.pluginName || pluginId;
   if (!action || !pluginId || input.disabled) return;
+  // 更新与启停都会走热重载，必须串行，否则两个流程会互相打断。
+  if (state.catalogBusy || state.catalogCheckBusy) {
+    await loadCatalog();
+    return;
+  }
   if (action === "disable" && !await confirmRecommendationAction(action, pluginName)) {
     await loadCatalog();
     return;
@@ -675,6 +807,14 @@ function bindEvents() {
     const input = event.target.closest("[data-catalog-action]");
     if (input) runCatalogAction(input);
   });
+  document.getElementById("catalog-list").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-catalog-update]");
+    if (button) {
+      event.preventDefault();
+      runCatalogUpdate(button);
+    }
+  });
+  document.getElementById("catalog-check-updates").addEventListener("click", runCatalogCheck);
   document.getElementById("mirror-benchmark").addEventListener("click", benchmarkMirrors);
   document.getElementById("mirror-add-form").addEventListener("submit", addCustomMirror);
   document.getElementById("mirror-list").addEventListener("change", (event) => {

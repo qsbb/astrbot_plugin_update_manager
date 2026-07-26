@@ -75,7 +75,8 @@
     </section>
 
     <section id="catalog" class="panel">
-      <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div></div><div id="catalog-list" class="catalog-list"></div></article>
+      <div id="catalog-rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
+      <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
     </section>
     <div id="startup-error" class="startup-error" role="alert" hidden></div>
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>

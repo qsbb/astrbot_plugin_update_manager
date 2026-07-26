@@ -113,6 +113,45 @@ def test_catalog_has_safe_lifecycle_switch_and_localized_errors():
     assert ".catalog-actions" in css
 
 
+def test_catalog_updates_are_click_only_and_never_auto_checked():
+    """目录更新必须与系列推荐同款：按钮点击驱动，且不会进页面自动检查。
+
+    这里逐条钉住"按需"的三个前提：右上角有独立的检查更新按钮、检查只在点击
+    回调里发起、以及标签切换回调不会替目录触发检查。若哪天有人给目录加上
+    自动检查，全量插件探测会拖慢首屏并快速耗尽 GitHub 匿名配额。
+    """
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'id="catalog-check-updates"' in html
+    assert 'data-i18n="checkUpdates"' in html
+    assert 'id="catalog-rate-limit-notice"' in html
+    assert 'apiPost("catalog/check-updates", payload)' in js
+    assert (
+        'document.getElementById("catalog-check-updates").addEventListener("click", runCatalogCheck)'
+        in js
+    )
+    # 检查更新只能由 runCatalogCheck 发起；loadCatalog 保持零网络版本探测。
+    load_catalog = js.split("async function loadCatalog()", 1)[1].split(
+        "\n// 只在用户点击时调用", 1
+    )[0]
+    assert "check-updates" not in load_catalog
+    # 标签切换只为系列推荐自动检查，目录不在其中。
+    tab_handler = js.split('document.querySelectorAll("[data-tab]")', 1)[1].split(
+        "config-form", 1
+    )[0]
+    assert "autoCheckRecommendations" in tab_handler
+    assert "runCatalogCheck" not in tab_handler
+    assert "checkCatalogUpdates" not in tab_handler
+    # 点击更新必须二次确认并带 confirm，与推荐区同一条底线。
+    assert 'await confirmRecommendationAction("update", pluginName)' in js
+    assert 'apiPost("catalog/update", { plugin_id: pluginId, confirm: true })' in js
+    # 只有确实检测到新版本才允许点，未检查过的行显示"未检查"。
+    assert "Boolean(view?.update_available)" in js
+    assert 't("notChecked")' in js
+    assert "未检查" in js
+    assert 'checkUpdates: "Check for updates"' in js
+
+
 def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
@@ -130,12 +169,12 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     ):
         assert status in js
     assert "function versionStatusBadge(item)" in js
-    assert "function recommendationError(item)" in js
+    assert "function versionError(item)" in js
     assert '`${t("errorCode")}: ${item.error || "UNKNOWN"}`' in js
     assert '`${t("errorHttpStatus")}: ${context.http_status}`' in js
     assert '`${t("errorRepository")}: ${context.repo}`' in js
     assert '`${t("errorBranch")}: ${context.default_branch}`' in js
-    assert "${recommendationError(item)}" in js
+    assert "${versionError(item)}" in js
     assert 'role="switch"' in js
     assert 'aria-checked="${item.activated ? "true" : "false"}"' in js
     assert "await loadRecommendations();" in js
@@ -308,7 +347,7 @@ def test_rate_limit_notice_shows_retry_time_and_token_hint():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert 'id="rate-limit-notice"' in html
-    assert "function renderRateLimitNotice(rateLimit)" in js
+    assert 'function renderRateLimitNotice(rateLimit, nodeId = "rate-limit-notice")' in js
     assert "renderRateLimitNotice(data.rate_limit)" in js
     assert "rateLimit?.limited" in js
     # 限流提示必须同时给出可重试时间、剩余额度与提额入口。

@@ -31,6 +31,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
         (f"/{module.PLUGIN_NAME}/rule", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/catalog/check-updates", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/catalog/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog/enable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog/disable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
@@ -497,6 +499,11 @@ def test_pages_catalog_payload(monkeypatch, tmp_path):
             "operable": False,
             "reason": "LIFECYCLE_CAPABILITY_UNAVAILABLE",
         },
+        "update_lifecycle": {
+            "checkable": False,
+            "operable": False,
+            "reason": "SOURCE_REQUIRED",
+        },
     }
 
 
@@ -581,6 +588,166 @@ def test_catalog_lifecycle_blocks_missing_confirmation_self_and_unloaded(
     monkeypatch.setattr(plugin, "_request_json", unloaded_request)
     payload, status = asyncio.run(plugin._pages_catalog_enable())
     assert status == 409 and payload["error"] == "PLUGIN_NOT_LOADED"
+
+
+def _github_catalog_item(
+    plugin_id="third_party",
+    *,
+    version="1.0.0",
+    source_kind="github",
+    source_url="https://github.com/owner/third_party",
+):
+    return SimpleNamespace(
+        plugin_id=plugin_id,
+        name="Third Party",
+        display_name="Third Party",
+        current_version=version,
+        activated=True,
+        loaded=True,
+        eligible=True,
+        reasons=(),
+        source_kind=source_kind,
+        source_url=source_url,
+    )
+
+
+def test_catalog_check_updates_is_scoped_and_isolates_single_failures(
+    monkeypatch, tmp_path
+):
+    """目录检查只探测有 GitHub 来源的行，且单个仓库失败不能拖垮整批。
+
+    market 来源与缺 URL 的行在进网络调用前就该被挡掉，否则等于拿必然失败的
+    请求去消耗 GitHub 匿名配额。
+    """
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    good = _github_catalog_item("good")
+    broken = _github_catalog_item("broken")
+    market = _github_catalog_item("market", source_kind="market", source_url=None)
+    plugin.catalog.scan = lambda: asyncio.sleep(
+        0, result=(good, broken, market)
+    )
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(
+            turn_on_plugin=True, turn_off_plugin=True, update_plugin=True
+        ),
+    )
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        assert force_refresh is True
+        if plugin_id == "broken":
+            raise RuntimeError("REGISTRY_HTTP_404")
+        return SimpleNamespace(target_version="1.1.0", archive_url="https://zip")
+
+    async def payload():
+        return {}
+
+    monkeypatch.setattr(plugin, "_request_json", payload)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    result = unwrap(asyncio.run(plugin._pages_check_catalog()))
+    assert result["success"] is True
+    by_id = {item["plugin_id"]: item for item in result["items"]}
+    assert set(by_id) == {"good", "broken"}
+    assert by_id["good"]["update_available"] is True
+    assert by_id["good"]["latest_version"] == "1.1.0"
+    assert by_id["broken"]["version_status"] == "check_failed"
+    assert by_id["broken"]["update_available"] is False
+    assert by_id["broken"]["error"]
+
+    async def scoped():
+        return {"plugin_ids": ["good"]}
+
+    monkeypatch.setattr(plugin, "_request_json", scoped)
+    scoped_result = unwrap(asyncio.run(plugin._pages_check_catalog()))
+    assert [item["plugin_id"] for item in scoped_result["items"]] == ["good"]
+
+    async def bad_flag():
+        return {"force_refresh": "yes"}
+
+    monkeypatch.setattr(plugin, "_request_json", bad_flag)
+    payload_error, status = asyncio.run(plugin._pages_check_catalog())
+    assert status == 400
+    assert payload_error["error"] == "INVALID_FIELD_TYPE:force_refresh"
+
+
+def test_catalog_update_requires_confirmation_source_and_new_version(
+    monkeypatch, tmp_path
+):
+    """目录更新的四条底线：二次确认、GitHub 来源、有新版本、禁止自更新。"""
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    target = _github_catalog_item("third_party")
+    market = _github_catalog_item("market", source_kind="market", source_url=None)
+    myself = _github_catalog_item(module.PLUGIN_NAME)
+    plugin.catalog.scan = lambda: asyncio.sleep(
+        0, result=(target, market, myself)
+    )
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(
+            turn_on_plugin=True, turn_off_plugin=True, update_plugin=True
+        ),
+    )
+    calls = []
+    remote_version = "1.1.0"
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        assert force_refresh is True
+        return SimpleNamespace(target_version=remote_version, archive_url="https://zip")
+
+    async def update(plugin_id, *, source_kind, source_url, archive_url=None):
+        calls.append((plugin_id, source_kind, source_url, archive_url))
+        return SimpleNamespace(version=remote_version, loaded=True, activated=True)
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+
+    async def confirmed():
+        return {"plugin_id": "third_party", "confirm": True}
+
+    monkeypatch.setattr(plugin, "_request_json", confirmed)
+    payload = unwrap(asyncio.run(plugin._pages_catalog_update()))
+    assert payload["success"] is True and payload["updated"] is True
+    assert payload["version"] == "1.1.0"
+    assert calls == [
+        (
+            "third_party",
+            "github",
+            "https://github.com/owner/third_party",
+            "https://zip",
+        )
+    ]
+
+    async def unconfirmed():
+        return {"plugin_id": "third_party"}
+
+    monkeypatch.setattr(plugin, "_request_json", unconfirmed)
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 400 and error["error"] == "CONFIRMATION_REQUIRED"
+
+    async def market_request():
+        return {"plugin_id": "market", "confirm": True}
+
+    monkeypatch.setattr(plugin, "_request_json", market_request)
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 409 and error["error"] == "SOURCE_REQUIRED"
+
+    async def self_request():
+        return {"plugin_id": module.PLUGIN_NAME, "confirm": True}
+
+    monkeypatch.setattr(plugin, "_request_json", self_request)
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 403 and error["error"] == "SELF_UPDATE_BLOCKED"
+
+    # 远端与本地同版本时必须在下载与热重载之前就拒绝。
+    remote_version = "1.0.0"
+    monkeypatch.setattr(plugin, "_request_json", confirmed)
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 409 and error["error"] == "NO_UPDATE_AVAILABLE"
+    assert len(calls) == 1
 
 
 def test_pages_catalog_reports_empty_discovery_diagnostics(monkeypatch, tmp_path):

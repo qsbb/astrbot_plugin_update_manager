@@ -108,6 +108,13 @@ class PagesAPIMixin:
             ("rule", self._pages_get_rule, ["GET"], "读取每日自动更新规则"),
             ("rule", self._pages_save_rule, ["POST"], "保存每日自动更新规则"),
             ("catalog", self._pages_catalog, ["GET"], "查看插件目录"),
+            (
+                "catalog/check-updates",
+                self._pages_check_catalog,
+                ["POST"],
+                "检查目录插件最新版本",
+            ),
+            ("catalog/update", self._pages_catalog_update, ["POST"], "更新目录插件"),
             ("catalog/enable", self._pages_catalog_enable, ["POST"], "启用目录插件"),
             ("catalog/disable", self._pages_catalog_disable, ["POST"], "停用目录插件"),
             ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
@@ -630,6 +637,34 @@ class PagesAPIMixin:
             "reason": reason,
         }
 
+    def _catalog_update_lifecycle(self, item, capabilities) -> dict[str, Any]:
+        """判断目录项能否被检查版本与更新。
+
+        与启停能力分开算：启停只要插件已加载即可，更新还要求来源可回溯到
+        具体的 GitHub 仓库。``registry.github_latest`` 只认
+        ``https://github.com/{owner}/{repo}``，market 来源或 URL 缺失的行
+        必须在这里就被挡住，不能放进网络调用去换一个必然失败的报错。
+        """
+        reason = None
+        if item.plugin_id == PLUGIN_ID:
+            # 自更新会在替换自身代码的过程中打断正在执行的更新流程。
+            reason = "SELF_UPDATE_BLOCKED"
+        elif "RESERVED_PLUGIN" in item.reasons:
+            reason = "RESERVED_PLUGIN"
+        elif not item.loaded:
+            reason = "PLUGIN_NOT_LOADED"
+        elif item.source_kind != "github" or not item.source_url:
+            reason = "SOURCE_REQUIRED"
+        checkable = reason is None
+        if checkable and not capabilities.update_plugin:
+            reason = "UPDATE_CAPABILITY_UNAVAILABLE"
+        return {
+            # 可检查与可更新分开：能力缺失时仍允许查看是否有新版本。
+            "checkable": checkable,
+            "operable": checkable and bool(capabilities.update_plugin),
+            "reason": reason,
+        }
+
     async def _pages_catalog(self):
         items = await self.catalog.scan()
         report = self.adapter.last_discovery_report
@@ -661,11 +696,164 @@ class PagesAPIMixin:
                         "source_kind": item.source_kind,
                         "source_url": item.source_url,
                         "lifecycle": self._catalog_lifecycle(item, capabilities),
+                        # 更新能力随目录一起返回，但不含版本号：GET catalog 保持零网络请求，
+                        # 进入页面不会因为几十个插件的版本探测而变慢或消耗 GitHub 配额。
+                        "update_lifecycle": self._catalog_update_lifecycle(
+                            item, capabilities
+                        ),
                     }
                     for item in items
                 ],
             }
         )
+
+    async def _pages_check_catalog(self):
+        """按需检查目录插件的最新版本。
+
+        只在用户点击「检查更新」时调用，不参与页面初始加载——目录是全量插件
+        （可能几十个），无条件全量探测会拖慢首屏并快速耗尽 GitHub 匿名配额。
+        可选 ``plugin_ids`` 只检查指定插件，用于更新成功后单项复查。
+        """
+        data = await self._request_json()
+        force_refresh = True
+        requested: set[str] | None = None
+        if isinstance(data, dict):
+            if "force_refresh" in data:
+                value = data["force_refresh"]
+                if not isinstance(value, bool):
+                    return json_response(
+                        {"success": False, "error": "INVALID_FIELD_TYPE:force_refresh"},
+                        status=400,
+                    )
+                force_refresh = value
+            if data.get("plugin_ids") is not None:
+                raw = data["plugin_ids"]
+                if not isinstance(raw, list) or not all(
+                    isinstance(entry, str) for entry in raw
+                ):
+                    return json_response(
+                        {"success": False, "error": "INVALID_FIELD_TYPE:plugin_ids"},
+                        status=400,
+                    )
+                requested = {entry.strip() for entry in raw if entry.strip()}
+
+        items = await self.catalog.scan()
+        capabilities = self.adapter.probe_capabilities()
+        targets = [
+            item
+            for item in items
+            if self._catalog_update_lifecycle(item, capabilities)["checkable"]
+            and (requested is None or item.plugin_id in requested)
+        ]
+
+        async def inspect(item):
+            checked_at = datetime.now(timezone.utc).isoformat()
+            try:
+                candidate = await self._check_latest_with_timeout(
+                    item.plugin_id,
+                    item.current_version or "",
+                    item.source_url or "",
+                    force_refresh=force_refresh,
+                )
+                latest_version = candidate.target_version
+                update_available, version_status = self._version_state(
+                    item.current_version or "", latest_version
+                )
+                failure: dict[str, Any] = {
+                    "error": None,
+                    "error_detail": None,
+                    "error_context": {},
+                }
+            except Exception as exc:
+                # 单个仓库探测失败只影响该行，其余插件照常返回版本。
+                latest_version = ""
+                update_available, version_status = False, "check_failed"
+                failure = self._recommendation_error(exc, item.source_url or "")
+            return {
+                "plugin_id": item.plugin_id,
+                "current_version": item.current_version,
+                "latest_version": latest_version,
+                "update_available": update_available,
+                "version_status": version_status,
+                "checked_at": checked_at,
+                **failure,
+            }
+
+        checked = await bounded_gather(
+            [partial(inspect, item) for item in targets],
+            limit=self._version_check_concurrency(),
+        )
+        return json_response(
+            {
+                "success": True,
+                "items": list(checked),
+                "rate_limit": self.registry.rate_limit_status(),
+            }
+        )
+
+    async def _catalog_update_target(self):
+        """校验目录更新入参并返回目标目录项。
+
+        与 ``_catalog_plugin_id`` 同样严格：key 集合精确匹配、强制二次确认、
+        必须在册且通过更新资格复核。资格在这里重新算一遍而不是信任前端，
+        避免页面数据过期后把不该更新的插件放进来。
+        """
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        if set(data) != {"plugin_id", "confirm"}:
+            raise ValueError("CONFIRMATION_REQUIRED")
+        if data.get("confirm") is not True:
+            raise ValueError("CONFIRMATION_REQUIRED")
+        plugin_id = data.get("plugin_id")
+        if not isinstance(plugin_id, str) or not plugin_id.strip():
+            raise ValueError("INVALID_PLUGIN_ID")
+        plugin_id = plugin_id.strip()
+        if plugin_id == PLUGIN_ID:
+            raise ValueError("SELF_UPDATE_BLOCKED")
+        catalog = {item.plugin_id: item for item in await self.catalog.scan()}
+        item = catalog.get(plugin_id)
+        if item is None:
+            raise ValueError("PLUGIN_NOT_FOUND")
+        lifecycle = self._catalog_update_lifecycle(
+            item, self.adapter.probe_capabilities()
+        )
+        if not lifecycle["operable"]:
+            raise ValueError(str(lifecycle["reason"] or "PLUGIN_NOT_MANAGEABLE"))
+        return item
+
+    async def _pages_catalog_update(self):
+        try:
+            item = await self._catalog_update_target()
+            candidate = await self.registry.github_latest(
+                item.plugin_id,
+                item.current_version or "",
+                item.source_url or "",
+                force_refresh=True,
+            )
+            update_available, _ = self._version_state(
+                item.current_version or "", candidate.target_version
+            )
+            if not update_available:
+                # 没有新版本就不该触发下载与热重载。
+                raise ValueError("NO_UPDATE_AVAILABLE")
+            snapshot = await self.adapter.update_plugin(
+                item.plugin_id,
+                source_kind="github",
+                source_url=item.source_url or "",
+                archive_url=candidate.archive_url,
+            )
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": item.plugin_id,
+                    "updated": True,
+                    "version": snapshot.version,
+                    "lifecycle": self._lifecycle("update", snapshot),
+                }
+            )
+        except Exception as exc:
+            return self._mutation_error(exc)
 
     async def _catalog_plugin_id(
         self, *, require_confirmation: bool, enabled: bool
@@ -757,6 +945,9 @@ class PagesAPIMixin:
             "PLUGIN_ALREADY_INSTALLED": 409,
             "PLUGIN_NOT_MANAGEABLE": 409,
             "ARCHIVE_URL_REQUIRED": 409,
+            "SOURCE_REQUIRED": 409,
+            "NO_UPDATE_AVAILABLE": 409,
+            "UPDATE_CAPABILITY_UNAVAILABLE": 503,
         }
         code = str(exc) if str(exc) in known else type(exc).__name__.upper()
         status = known.get(code, 503 if isinstance(exc, AdapterUnavailableError) else 500)
