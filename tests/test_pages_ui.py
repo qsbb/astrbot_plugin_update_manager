@@ -248,10 +248,13 @@ def test_recommendations_show_self_update_repository_notice():
     assert "renderSelfUpdateNotice(data.self_update)" in js
     assert 'target = "_blank"' in js
     assert 'rel = "noopener noreferrer"' in js
-    # 插件页嵌在 iframe 时 target=_blank 可能被拦，必须显式 window.open / 顶层跳转。
+    # 自更新入口应回到 AstrBot 已安装插件页；普通仓库链接仍显式外部打开。
+    assert "function openInternalRoute(route)" in js
+    assert 'const installedRoute = "#/extension#installed"' in js
+    assert "link.dataset.internalRoute = installedRoute" in js
+    assert "window.top.location.assign(target)" in js
     assert "function openExternalUrl(url)" in js
     assert 'window.open(href, "_blank", "noopener,noreferrer")' in js
-    assert "window.top.location.assign(href)" in js
     assert 'a[data-external-url]' in js
     assert "link.dataset.externalUrl = repoUrl" in js
     assert 'data-external-url="${escapeHtml(item.repo_url)}"' in js

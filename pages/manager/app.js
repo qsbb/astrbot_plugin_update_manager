@@ -149,6 +149,26 @@ function escapeHtml(value) {
 
 // AstrBot 插件页常嵌在 iframe/沙箱里，裸 <a target="_blank"> 可能被拦截且无反馈。
 // 统一走显式打开：先尝试新窗口，失败再顶层/本页跳转。
+function openInternalRoute(route) {
+  const target = String(route || "").trim();
+  if (!target || !target.startsWith("#/")) return false;
+  try {
+    if (window.top && window.top !== window) {
+      window.top.location.assign(target);
+      return true;
+    }
+  } catch (error) {
+    console.warn("Top-level route navigation blocked", error);
+  }
+  try {
+    window.location.assign(target);
+    return true;
+  } catch (error) {
+    console.warn("Unable to navigate to internal route", error);
+    return false;
+  }
+}
+
 function openExternalUrl(url) {
   const href = String(url || "").trim();
   if (!href || href === "#" || href.toLowerCase().startsWith("javascript:")) return false;
@@ -654,6 +674,7 @@ function renderSelfUpdateNotice(selfUpdate) {
     .replace("{current}", selfUpdate.current_version || "—")
     .replace("{latest}", selfUpdate.latest_version || "—");
   const repoUrl = String(selfUpdate.repo_url || "").trim();
+  const installedRoute = "#/extension#installed";
   const strong = document.createElement("strong");
   strong.textContent = message;
   const link = document.createElement("a");
@@ -662,6 +683,7 @@ function renderSelfUpdateNotice(selfUpdate) {
   link.rel = "noopener noreferrer";
   link.textContent = t("goToRepository");
   link.dataset.externalUrl = repoUrl;
+  link.dataset.internalRoute = installedRoute;
   if (!repoUrl) {
     link.setAttribute("aria-disabled", "true");
     link.classList.add("is-disabled");
@@ -875,6 +897,12 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const link = event.target.closest("a[data-external-url]");
     if (!link || !document.contains(link)) return;
+    const route = link.dataset.internalRoute || "";
+    if (route) {
+      event.preventDefault();
+      if (!openInternalRoute(route)) toast(t("operationFailed"), true);
+      return;
+    }
     const url = link.dataset.externalUrl || link.getAttribute("href") || "";
     if (!url || url === "#") {
       event.preventDefault();
