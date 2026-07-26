@@ -7,6 +7,7 @@ const messages = {
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
     checkLatest: "检查最新版本", checkingLatest: "正在检查…", autoCheckingLatest: "正在自动检查版本…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
+    applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
     selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新",
     install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
@@ -30,6 +31,7 @@ const messages = {
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
     checkLatest: "Check latest versions", checkingLatest: "Checking…", autoCheckingLatest: "Checking versions automatically…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
+    applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
     selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository",
     install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
@@ -735,16 +737,20 @@ async function autoCheckRecommendations() {
   }
 }
 
-function confirmRecommendationAction(action, pluginName) {
+function showConfirmation(message) {
   const dialog = document.getElementById("confirmation-dialog");
-  const message = t("confirmPrompt")
-    .replace("{action}", t(action))
-    .replace("{name}", pluginName);
   document.getElementById("confirmation-message").textContent = message;
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
     dialog.showModal();
   });
+}
+
+function confirmRecommendationAction(action, pluginName) {
+  const message = t("confirmPrompt")
+    .replace("{action}", t(action))
+    .replace("{name}", pluginName);
+  return showConfirmation(message);
 }
 
 function setRecommendationBusy(action, pluginName) {
@@ -758,6 +764,32 @@ function setRecommendationBusy(action, pluginName) {
 function clearRecommendationBusy() {
   state.recommendationBusy = null;
   document.getElementById("recommendation-status").hidden = true;
+}
+
+async function runApplyAllRecommendations() {
+  const button = document.getElementById("apply-all-recommendations");
+  if (!button || button.disabled || state.recommendationBusy || state.versionCheckBusy) return;
+  if (!await showConfirmation(t("applyAllConfirm"))) return;
+
+  state.recommendationBusy = "applyAll";
+  button.disabled = true;
+  document.getElementById("check-latest").disabled = true;
+  document.querySelectorAll("#recommendations-list button, #recommendations-list input[role='switch']").forEach((item) => { item.disabled = true; });
+  const status = document.getElementById("recommendation-status");
+  status.textContent = t("applyingAll");
+  status.hidden = false;
+  try {
+    const result = await apiPost("recommendations/apply-all", { confirm: true });
+    const message = `${result.all_succeeded ? t("applyAllDone") : t("applyAllPartial")}：${result.succeeded}/${result.total}`;
+    toast(message, !result.all_succeeded);
+  } catch (error) {
+    toast(`${t("operationFailed")}: ${error.message}`, true);
+  } finally {
+    clearRecommendationBusy();
+    button.disabled = false;
+    document.getElementById("check-latest").disabled = false;
+    await Promise.all([loadRecommendations(), loadOverview(), loadCatalog()]);
+  }
 }
 
 async function runRecommendationAction(button) {
@@ -856,6 +888,7 @@ function bindEvents() {
   document.getElementById("rule-policy").addEventListener("change", (event) => {
     document.getElementById("check-only-note").hidden = event.target.value !== "check_only";
   });
+  document.getElementById("apply-all-recommendations").addEventListener("click", runApplyAllRecommendations);
   document.getElementById("recommendations-list").addEventListener("click", (event) => {
     const button = event.target.closest("[data-recommendation-action]");
     if (button) {

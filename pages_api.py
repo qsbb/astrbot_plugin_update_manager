@@ -124,6 +124,12 @@ class PagesAPIMixin:
                 ["POST"],
                 "强制检查可信系列最新版本",
             ),
+            (
+                "recommendations/apply-all",
+                self._pages_apply_all_recommendations,
+                ["POST"],
+                "安装或更新全部可信系列插件",
+            ),
             ("install", self._pages_install, ["POST"], "安装可信系列插件"),
             ("update", self._pages_update, ["POST"], "更新可信系列插件"),
             ("enable", self._pages_enable, ["POST"], "启用可信系列插件"),
@@ -1181,29 +1187,13 @@ class PagesAPIMixin:
             },
         }
 
-    async def _pages_install(self):
-        try:
-            plugin_id = await self._trusted_plugin_id()
-            item = TRUSTED_BY_ID[plugin_id]
+    async def _apply_recommended_plugin(self, plugin_id: str, operation: str) -> dict[str, Any]:
+        item = TRUSTED_BY_ID[plugin_id]
+        if operation == "install":
             snapshot = await self.adapter.install_plugin(plugin_id, repo_url=item.repo_url)
-            return json_response(
-                {
-                    "success": True,
-                    "plugin_id": plugin_id,
-                    "installed": True,
-                    "version": snapshot.version,
-                    "lifecycle": self._lifecycle("install", snapshot),
-                }
-            )
-        except Exception as exc:
-            return self._mutation_error(exc)
-
-    async def _pages_update(self):
-        try:
-            plugin_id = await self._trusted_plugin_id()
+        elif operation == "update":
             if plugin_id == PLUGIN_ID:
                 raise ValueError("SELF_UPDATE_BLOCKED")
-            item = TRUSTED_BY_ID[plugin_id]
             current = await self.adapter.get_plugin(plugin_id)
             candidate = await self.registry.github_latest(
                 plugin_id,
@@ -1217,13 +1207,90 @@ class PagesAPIMixin:
                 source_url=item.repo_url,
                 archive_url=candidate.archive_url,
             )
+        else:
+            raise ValueError("INVALID_OPERATION")
+        return {
+            "plugin_id": plugin_id,
+            "operation": operation,
+            "success": True,
+            "version": snapshot.version,
+            "lifecycle": self._lifecycle(operation, snapshot),
+        }
+
+    async def _pages_apply_all_recommendations(self):
+        try:
+            data = await self._request_json()
+            if not isinstance(data, dict) or set(data) != {"confirm"}:
+                raise ValueError("CONFIRMATION_REQUIRED")
+            if data.get("confirm") is not True:
+                raise ValueError("CONFIRMATION_REQUIRED")
+
+            payload = await self._recommendation_payload(force_refresh=True)
+            targets = []
+            for item in payload["items"]:
+                if item["actions"]["install"]:
+                    targets.append((item["plugin_id"], "install"))
+                elif item["actions"]["update"]:
+                    targets.append((item["plugin_id"], "update"))
+
+            results = []
+            for plugin_id, operation in targets:
+                try:
+                    results.append(await self._apply_recommended_plugin(plugin_id, operation))
+                except Exception as exc:
+                    error_response = self._mutation_error(exc)
+                    error_payload = error_response[0] if isinstance(error_response, tuple) else error_response
+                    results.append(
+                        {
+                            "plugin_id": plugin_id,
+                            "operation": operation,
+                            "success": False,
+                            "error": error_payload.get("error", "UNKNOWN"),
+                            "detail": error_payload.get("detail", "UNKNOWN"),
+                        }
+                    )
+
+            succeeded = sum(1 for result in results if result["success"])
+            return json_response(
+                {
+                    "success": True,
+                    "all_succeeded": all(result["success"] for result in results),
+                    "total": len(results),
+                    "succeeded": succeeded,
+                    "failed": len(results) - succeeded,
+                    "results": results,
+                }
+            )
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _pages_install(self):
+        try:
+            plugin_id = await self._trusted_plugin_id()
+            result = await self._apply_recommended_plugin(plugin_id, "install")
+            return json_response(
+                {
+                    "success": True,
+                    "plugin_id": plugin_id,
+                    "installed": True,
+                    "version": result["version"],
+                    "lifecycle": result["lifecycle"],
+                }
+            )
+        except Exception as exc:
+            return self._mutation_error(exc)
+
+    async def _pages_update(self):
+        try:
+            plugin_id = await self._trusted_plugin_id()
+            result = await self._apply_recommended_plugin(plugin_id, "update")
             return json_response(
                 {
                     "success": True,
                     "plugin_id": plugin_id,
                     "updated": True,
-                    "version": snapshot.version,
-                    "lifecycle": self._lifecycle("update", snapshot),
+                    "version": result["version"],
+                    "lifecycle": result["lifecycle"],
                 }
             )
         except Exception as exc:

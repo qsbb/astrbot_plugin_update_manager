@@ -157,7 +157,13 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert 'id="check-latest"' in html
+    assert 'id="apply-all-recommendations"' in html
+    assert 'data-i18n="applyAll"' in html
     assert 'apiPost("recommendations/check-latest", { force_refresh: forceRefresh })' in js
+    assert 'apiPost("recommendations/apply-all", { confirm: true })' in js
+    assert "async function runApplyAllRecommendations()" in js
+    assert "applyAllConfirm" in js
+    assert "all_succeeded" in js
     assert "actions.update" in js
     for status in (
         "update_available",

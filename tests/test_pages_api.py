@@ -37,6 +37,7 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/catalog/disable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations/check-latest", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/recommendations/apply-all", ("POST",)),
         (f"/{module.PLUGIN_NAME}/install", ("POST",)),
         (f"/{module.PLUGIN_NAME}/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/enable", ("POST",)),
@@ -1240,6 +1241,78 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
     monkeypatch.setattr(plugin, "_request_json", request_self)
     assert asyncio.run(plugin._pages_update())[1] == 403
     assert asyncio.run(plugin._pages_disable())[1] == 403
+
+
+def test_apply_all_recommendations_runs_serially_and_reports_partial_failure(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    calls = []
+
+    async def confirmed():
+        return {"confirm": True}
+
+    async def recommendations(*, force_refresh):
+        assert force_refresh is True
+        return {
+            "items": [
+                {
+                    "plugin_id": "astrbot_plugin_knowledge_base",
+                    "actions": {"install": True, "update": False},
+                },
+                {
+                    "plugin_id": "astrbot_plugin_voice_hub",
+                    "actions": {"install": False, "update": True},
+                },
+                {
+                    "plugin_id": module.PLUGIN_NAME,
+                    "actions": {"install": False, "update": False},
+                },
+            ]
+        }
+
+    async def apply(plugin_id, operation):
+        calls.append((plugin_id, operation))
+        if operation == "update":
+            raise RuntimeError("boom")
+        return {
+            "plugin_id": plugin_id,
+            "operation": operation,
+            "success": True,
+            "version": "1.0.0",
+            "lifecycle": {},
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", confirmed)
+    monkeypatch.setattr(plugin, "_recommendation_payload", recommendations)
+    monkeypatch.setattr(plugin, "_apply_recommended_plugin", apply)
+    payload = unwrap(asyncio.run(plugin._pages_apply_all_recommendations()))
+
+    assert calls == [
+        ("astrbot_plugin_knowledge_base", "install"),
+        ("astrbot_plugin_voice_hub", "update"),
+    ]
+    assert payload["success"] is True
+    assert payload["all_succeeded"] is False
+    assert payload["total"] == 2
+    assert payload["succeeded"] == 1
+    assert payload["failed"] == 1
+    assert payload["results"][1]["error"] == "RUNTIMEERROR"
+
+
+def test_apply_all_recommendations_requires_explicit_confirmation(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    for payload in ({}, {"confirm": False}, {"confirm": 1}, {"confirm": True, "extra": 1}):
+        async def request(payload=payload):
+            return payload
+
+        monkeypatch.setattr(plugin, "_request_json", request)
+        response, status = asyncio.run(plugin._pages_apply_all_recommendations())
+        assert status == 400
+        assert response["error"] == "CONFIRMATION_REQUIRED"
 
 
 def test_destructive_recommendation_mutations_require_explicit_confirmation(

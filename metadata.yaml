@@ -3,7 +3,7 @@ display_name: 凝心溯溪-核
 short_desc: 凝心溯溪系列更新模块：提供安全的插件检查、计划、更新、回滚与每日规则
 desc: >
   凝心溯溪系列更新模块：发现可信来源候选，冻结不可变计划，通过 AstrBot 核心串行更新，并提供备份、健康检查、自动回滚、审计、持久化每日规则与清理能力。
-version: 0.3.1
+version: 0.4.0
 author: Justice-ocr
 astrbot_version: ">=4.16,<5"
 repo: "https://github.com/qsbb/astrbot_plugin_update_manager"
