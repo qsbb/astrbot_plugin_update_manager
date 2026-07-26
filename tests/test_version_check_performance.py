@@ -291,6 +291,35 @@ def test_unknown_repo_keeps_conventional_probe_order():
     assert registry._branch_probe_order("acme/demo") == ("main", "master")
 
 
+# ------------------------------------------------ 远端版本解析：跨格式兼容
+
+
+def test_registry_parse_version_handles_v_prefix_and_four_segments():
+    """远端 tag/release 名解析同样必须兼容 v 前缀与四段式，且拒绝双重 v。"""
+    parse = CandidateRegistry._parse_version
+    assert parse("v0.7.4") == parse("0.7.4")
+    assert parse("v0.7.4") < parse("0.7.5")
+    assert parse("1.2.0.0") == parse("1.2.0")
+    assert parse("0.7.9") < parse("0.7.10")
+    # removeprefix 只去除一个前导 v；双重 v 解析失败返回 None。
+    assert parse("vv1.0") is None
+    assert parse(None) is None
+
+
+def test_metadata_yaml_version_strips_single_v_prefix():
+    """metadata.yaml 中残留的 v 前缀版本要归一化为无前缀 PEP 440 版本。"""
+    document = "name: demo\nversion: v0.7.5\n"
+    assert CandidateRegistry._metadata_yaml_version(document, "demo") == "0.7.5"
+    # 三段式无前缀原样通过。
+    plain = "name: demo\nversion: 0.7.5\n"
+    assert CandidateRegistry._metadata_yaml_version(plain, "demo") == "0.7.5"
+    # 双重 v 前缀不是合法 PEP 440，必须报 schema 错误。
+    with pytest.raises(RegistryError):
+        CandidateRegistry._metadata_yaml_version(
+            "name: demo\nversion: vv0.7.5\n", "demo"
+        )
+
+
 # ------------------------------------------------ 页面批量检查：并发与快速回退
 
 

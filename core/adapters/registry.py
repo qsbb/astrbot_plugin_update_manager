@@ -573,18 +573,23 @@ class CandidateRegistry:
             raise RegistryError("GITHUB_METADATA_SCHEMA_INVALID")
         if str(metadata.get("name") or "") != plugin_id:
             raise RegistryError("GITHUB_METADATA_ID_MISMATCH")
-        version = str(metadata.get("version") or "").strip().removeprefix("v")
+        # PEP 440 本身只接受一个前导 v；这里不再手动 removeprefix，否则会与
+        # Version 的原生宽容叠加成"去掉两个 v"，让 vv0.7.5 之类非法值溜进来。
+        raw = str(metadata.get("version") or "").strip()
         try:
-            Version(version)
+            parsed = Version(raw)
         except InvalidVersion as exc:
             raise RegistryError("GITHUB_METADATA_VERSION_INVALID") from exc
-        return version
+        # 返回规范化字符串（无 v 前缀、保留四段式），供后续 PEP 440 比较。
+        return str(parsed)
 
     @staticmethod
     def _parse_version(value: Any) -> Version | None:
+        # 同上：Version 原生最多吃掉一个前导 v；不再手动去前缀，
+        # 确保 vv1.0 这类双重前缀解析失败而不是被静默接受。
         try:
-            return Version(str(value).strip().removeprefix("v"))
-        except (InvalidVersion, AttributeError):
+            return Version(str(value).strip())
+        except (InvalidVersion, AttributeError, TypeError):
             return None
 
     @classmethod

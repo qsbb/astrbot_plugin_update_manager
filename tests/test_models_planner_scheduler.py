@@ -74,6 +74,38 @@ def test_pep440_and_policy():
     assert not policy_allows("0.2.0", "0.2.1", Policy.STABLE)[0]
 
 
+def test_version_parse_accepts_v_prefix_and_four_segments():
+    """系列插件将统一为三段式无 v 前缀；过渡期必须能跨格式正确比较。
+
+    PEP 440 原生接受最多一个前导 v（大小写均可），四段式与三段式按数值
+    比较；这里逐条钉住：不允许字符串比较，也不允许双重 v 通过。
+    """
+    # 带 v 前缀与三段式互相比较（言 v0.6.0 → 0.6.1 类升级）。
+    assert parse_version("v0.7.4") == parse_version("0.7.4")
+    assert parse_version("v0.7.4") < parse_version("0.7.5")
+    # 四段式与三段式（知 1.2.x.x → 1.2.x 类对齐）。
+    assert parse_version("1.2.0.0") == parse_version("1.2.0")
+    assert parse_version("1.2.3.4") < parse_version("1.2.4")
+    assert parse_version("1.2.4") > parse_version("1.2.3.9")
+    # 数值比较而非字符串比较：字符串序会把 0.7.10 排在 0.7.9 前面。
+    assert parse_version("0.7.9") < parse_version("0.7.10")
+    # 只允许一个前导 v；双重前缀与空值必须解析失败。
+    assert parse_version("vv1.0") is None
+    assert parse_version("") is None
+    assert parse_version("not-a-version") is None
+
+
+def test_policy_allows_across_v_prefix_and_segment_formats():
+    """策略判断也必须吃下跨格式版本（v0.7.4 → 0.7.5 判定为补丁升级）。"""
+    allowed, reason = policy_allows("v0.7.4", "0.7.5", Policy.CHECK_ONLY)
+    assert not allowed and reason == "CHECK_ONLY"  # 0.x 仍按手动/检查策略处理
+    assert policy_allows("v1.2.3", "1.2.4", Policy.PATCH)[0]
+    assert policy_allows("1.2.0.0", "1.2.1", Policy.PATCH)[0]
+    # 同版本跨格式不得误报为可升级。
+    assert policy_allows("v1.2.4", "1.2.4", Policy.PATCH) == (False, "NOT_NEWER")
+    assert policy_allows("1.2.0.0", "1.2.0", Policy.PATCH) == (False, "NOT_NEWER")
+
+
 def test_catalog_explains_security_blocks():
     adapter = Adapter(
         [

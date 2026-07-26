@@ -962,6 +962,34 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(monkeypatch, t
     assert force_values == []
 
 
+def test_version_state_compares_across_v_prefix_and_segment_formats(
+    monkeypatch, tmp_path
+):
+    """页面版本状态判断必须吃下 v 前缀与四段式，禁止字符串比较。
+
+    系列插件即将统一为三段式无 v 前缀（如声 v0.7.4 → 0.7.5），过渡期本地
+    metadata 里仍可能是旧格式；packaging.Version 原生接受最多一个前导 v，
+    这里钉住跨格式升级判定与同值判定。
+    """
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    # v 前缀 → 三段式的补丁升级必须判定为有新版本。
+    assert plugin._version_state("v0.7.4", "0.7.5") == (True, "update_available")
+    # 同版本跨格式不得误报升级。
+    assert plugin._version_state("v0.7.5", "0.7.5") == (False, "up_to_date")
+    # 四段式与三段式按数值等价与比较（知 1.2.0.0 → 1.2.0 / 1.2.1）。
+    assert plugin._version_state("1.2.0.0", "1.2.0") == (False, "up_to_date")
+    assert plugin._version_state("1.2.0.0", "1.2.1") == (True, "update_available")
+    # 数值比较而非字符串比较：0.7.10 > 0.7.9。
+    assert plugin._version_state("0.7.9", "0.7.10") == (True, "update_available")
+    assert plugin._version_state("0.7.10", "0.7.9") == (False, "local_newer")
+    # 本地比远端新（远端还是旧 v 前缀）不得误报升级。
+    assert plugin._version_state("0.7.5", "v0.7.4") == (False, "local_newer")
+    # 非法版本与未安装维持既有语义。
+    assert plugin._version_state("vv1.0", "1.0.0") == (False, "unknown")
+    assert plugin._version_state("", "1.0.0") == (False, "not_installed")
+
+
 def test_recommendation_failure_payload_keeps_safe_registry_context(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
