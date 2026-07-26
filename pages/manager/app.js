@@ -145,6 +145,41 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 }
 
+// AstrBot 插件页常嵌在 iframe/沙箱里，裸 <a target="_blank"> 可能被拦截且无反馈。
+// 统一走显式打开：先尝试新窗口，失败再顶层/本页跳转。
+function openExternalUrl(url) {
+  const href = String(url || "").trim();
+  if (!href || href === "#" || href.toLowerCase().startsWith("javascript:")) return false;
+  try {
+    const opened = window.open(href, "_blank", "noopener,noreferrer");
+    if (opened) {
+      try {
+        opened.opener = null;
+      } catch (error) {
+        console.warn("Unable to clear opener for external link", error);
+      }
+      return true;
+    }
+  } catch (error) {
+    console.warn("window.open blocked for external link", error);
+  }
+  try {
+    if (window.top && window.top !== window) {
+      window.top.location.assign(href);
+      return true;
+    }
+  } catch (error) {
+    console.warn("top-level navigation blocked for external link", error);
+  }
+  try {
+    window.location.assign(href);
+    return true;
+  } catch (error) {
+    console.warn("Unable to navigate to external link", error);
+    return false;
+  }
+}
+
 function toast(message, error = false) {
   const node = document.getElementById("toast");
   node.textContent = message;
@@ -616,7 +651,20 @@ function renderSelfUpdateNotice(selfUpdate) {
   const message = t("selfUpdateNotice")
     .replace("{current}", selfUpdate.current_version || "—")
     .replace("{latest}", selfUpdate.latest_version || "—");
-  notice.innerHTML = `<strong>${escapeHtml(message)}</strong><a href="${escapeHtml(selfUpdate.repo_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("goToRepository"))}</a>`;
+  const repoUrl = String(selfUpdate.repo_url || "").trim();
+  const strong = document.createElement("strong");
+  strong.textContent = message;
+  const link = document.createElement("a");
+  link.href = repoUrl || "#";
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = t("goToRepository");
+  link.dataset.externalUrl = repoUrl;
+  if (!repoUrl) {
+    link.setAttribute("aria-disabled", "true");
+    link.classList.add("is-disabled");
+  }
+  notice.replaceChildren(strong, link);
   notice.hidden = false;
 }
 
@@ -638,7 +686,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `${actionButton(item, "update", "update", actions.update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
 }
 
@@ -791,6 +839,18 @@ function bindEvents() {
       });
     }
   }));
+  // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-external-url]");
+    if (!link || !document.contains(link)) return;
+    const url = link.dataset.externalUrl || link.getAttribute("href") || "";
+    if (!url || url === "#") {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    if (!openExternalUrl(url)) toast(t("operationFailed"), true);
+  });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("rule-form").addEventListener("submit", saveRule);
   document.getElementById("rule-policy").addEventListener("change", (event) => {

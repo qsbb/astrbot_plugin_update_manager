@@ -37,6 +37,13 @@ TRUSTED_SERIES = (
         "提供身份、关系与权限守护，维护群组互动秩序。",
     ),
     TrustedPlugin(
+        "情",
+        "astrbot_plugin_relationship",
+        "凝心溯溪-情",
+        "https://github.com/qsbb/astrbot_plugin_relationship",
+        "统一管理短期情绪、长期好感、信任与熟悉度，并输出结构化行为建议。",
+    ),
+    TrustedPlugin(
         "声",
         "astrbot_plugin_voice_hub",
         "凝心溯溪-声",

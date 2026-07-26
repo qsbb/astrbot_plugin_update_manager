@@ -320,14 +320,14 @@ def test_recommendation_check_respects_configured_concurrency_limit(
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
 
     assert payload["success"] is True
-    assert len(payload["items"]) == 5
+    assert len(payload["items"]) == 6
     assert 1 < peak <= 2
 
 
 def test_recommendation_check_defaults_to_full_parallel_for_trusted_series(
     monkeypatch, tmp_path
 ):
-    """默认上限要能让五个可信插件同时检查，总耗时不再线性累加。"""
+    """默认上限要能让六个可信插件同时检查，总耗时不再线性累加。"""
     _, plugin = make_plugin(monkeypatch, tmp_path)
     active = 0
     peak = 0
@@ -346,8 +346,9 @@ def test_recommendation_check_defaults_to_full_parallel_for_trusted_series(
     elapsed = time.monotonic() - started
 
     assert payload["success"] is True
-    assert peak == 5
-    assert elapsed < 0.02 * 5
+    assert len(payload["items"]) == 6
+    assert peak == 6
+    assert elapsed < 0.02 * 6
 
 
 def test_invalid_concurrency_config_falls_back_to_default(monkeypatch, tmp_path):

@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Iterable, Sequence, TypeVar
 
-#: 默认并发上限：足够让五个可信插件同时检查，又不至于对 GitHub 形成突发压力。
-DEFAULT_CHECK_CONCURRENCY = 5
+#: 默认并发上限：允许六个可信插件同时检查，同时避免对 GitHub 造成突发压力。
+DEFAULT_CHECK_CONCURRENCY = 6
 
 T = TypeVar("T")
 
