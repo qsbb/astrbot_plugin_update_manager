@@ -751,6 +751,110 @@ def test_catalog_update_requires_confirmation_source_and_new_version(
     assert len(calls) == 1
 
 
+def test_catalog_force_update_allows_supported_version_states_only(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    target = _github_catalog_item("third_party")
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(target,))
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(
+            turn_on_plugin=True, turn_off_plugin=True, update_plugin=True
+        ),
+    )
+    remote_version = "1.0.0"
+    calls = []
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        return SimpleNamespace(
+            target_version=remote_version,
+            archive_url="https://api.github.com/repos/owner/third_party/zipball/main",
+        )
+
+    async def update(plugin_id, *, source_kind, source_url, archive_url=None):
+        calls.append((plugin_id, source_kind, source_url, archive_url))
+        return SimpleNamespace(version=remote_version, loaded=True, activated=True)
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+
+    async def force_request():
+        return {"plugin_id": "third_party", "confirm": True, "force": True}
+
+    monkeypatch.setattr(plugin, "_request_json", force_request)
+    same = unwrap(asyncio.run(plugin._pages_catalog_update()))
+    assert same["forced"] is True
+    assert same["version_status"] == "up_to_date"
+
+    remote_version = "0.9.0"
+    older = unwrap(asyncio.run(plugin._pages_catalog_update()))
+    assert older["forced"] is True
+    assert older["version_status"] == "local_newer"
+
+    remote_version = "1.1.0"
+    newer = unwrap(asyncio.run(plugin._pages_catalog_update()))
+    assert newer["forced"] is True
+    assert newer["version_status"] == "update_available"
+    assert len(calls) == 3
+
+    remote_version = "not-a-version"
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 409
+    assert error["error"] == "FORCE_UPDATE_VERSION_UNAVAILABLE"
+    assert len(calls) == 3
+
+
+def test_catalog_force_update_keeps_confirmation_and_safety_gates(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    target = _github_catalog_item("third_party")
+    market = _github_catalog_item("market", source_kind="market", source_url=None)
+    myself = _github_catalog_item(module.PLUGIN_NAME)
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(target, market, myself))
+    capabilities = SimpleNamespace(
+        turn_on_plugin=True, turn_off_plugin=True, update_plugin=True
+    )
+    monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
+
+    payloads = (
+        ({"plugin_id": "third_party", "force": True}, "CONFIRMATION_REQUIRED", 400),
+        (
+            {"plugin_id": "third_party", "confirm": True, "force": "yes"},
+            "INVALID_FORCE_FLAG",
+            400,
+        ),
+        (
+            {"plugin_id": "market", "confirm": True, "force": True},
+            "SOURCE_REQUIRED",
+            409,
+        ),
+        (
+            {"plugin_id": module.PLUGIN_NAME, "confirm": True, "force": True},
+            "SELF_UPDATE_BLOCKED",
+            403,
+        ),
+    )
+    for payload, code, expected_status in payloads:
+        async def request(payload=payload):
+            return payload
+
+        monkeypatch.setattr(plugin, "_request_json", request)
+        error, status = asyncio.run(plugin._pages_catalog_update())
+        assert status == expected_status
+        assert error["error"] == code
+
+    capabilities.update_plugin = False
+
+    async def no_capability():
+        return {"plugin_id": "third_party", "confirm": True, "force": True}
+
+    monkeypatch.setattr(plugin, "_request_json", no_capability)
+    error, status = asyncio.run(plugin._pages_catalog_update())
+    assert status == 503
+    assert error["error"] == "UPDATE_CAPABILITY_UNAVAILABLE"
+
+
 def test_pages_catalog_reports_empty_discovery_diagnostics(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})

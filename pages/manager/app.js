@@ -10,9 +10,9 @@ const messages = {
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
     selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新",
-    install: "安装", installed: "已安装", update: "更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
+    install: "安装", installed: "已安装", update: "更新", forceUpdate: "强制更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", forceUpdateUnavailable: "强制更新仅支持有新版本、已是最新版或本地版本更新的插件", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
     errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
-    confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", installRunning: "正在安装…", updateRunning: "正在更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
+    confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", forceUpdateConfirm: "确定要强制更新“{name}”吗？即使已是最新版或远端版本更旧，也会用远端版本覆盖本地代码。", installRunning: "正在安装…", updateRunning: "正在更新…", forceUpdateRunning: "正在强制更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
     enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
     eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
@@ -34,9 +34,9 @@ const messages = {
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
     selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository",
-    install: "Install", installed: "Installed", update: "Update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
+    install: "Install", installed: "Installed", update: "Update", forceUpdate: "Force update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", forceUpdateUnavailable: "Force update requires an available, up-to-date, or locally newer version state", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
     errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
-    confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", installRunning: "Installing…", updateRunning: "Updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
+    confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", forceUpdateConfirm: "Force update “{name}”? The remote version will overwrite local code even when it is the same version or older.", installRunning: "Installing…", updateRunning: "Updating…", forceUpdateRunning: "Force updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
     enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
     eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
@@ -490,12 +490,14 @@ function catalogUpdateButton(item) {
   // 来源不可回溯到 GitHub 的插件根本没有更新通道，直接不渲染按钮。
   if (!item.update_lifecycle?.checkable) return "";
   const view = catalogVersionView(item);
-  const enabled = Boolean(item.update_lifecycle?.operable) && Boolean(view?.update_available);
-  const reason = item.update_lifecycle?.operable
-    ? t("unavailableAction")
-    : errorReason(item.update_lifecycle?.reason);
-  const hint = enabled ? "" : `title="${escapeHtml(reason)}"`;
-  return `<button type="button" data-catalog-update="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.display_name || item.plugin_id)}" ${enabled ? "" : "disabled"} ${hint}>${escapeHtml(t("update"))}</button>`;
+  const operable = Boolean(item.update_lifecycle?.operable);
+  const updateEnabled = operable && Boolean(view?.update_available);
+  const forceEnabled = operable && ["update_available", "up_to_date", "local_newer"].includes(view?.version_status);
+  const lifecycleReason = errorReason(item.update_lifecycle?.reason);
+  const updateHint = updateEnabled ? "" : `title="${escapeHtml(operable ? t("unavailableAction") : lifecycleReason)}"`;
+  const forceHint = forceEnabled ? "" : `title="${escapeHtml(operable ? t("forceUpdateUnavailable") : lifecycleReason)}"`;
+  const attributes = `data-catalog-update="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.display_name || item.plugin_id)}"`;
+  return `<button type="button" ${attributes} ${updateEnabled ? "" : "disabled"} ${updateHint}>${escapeHtml(t("update"))}</button><button type="button" ${attributes} data-force-update="true" ${forceEnabled ? "" : "disabled"} ${forceHint}>${escapeHtml(t("forceUpdate"))}</button>`;
 }
 
 function renderCatalog() {
@@ -552,15 +554,22 @@ async function runCatalogCheck() {
 async function runCatalogUpdate(button) {
   const pluginId = button.dataset.catalogUpdate;
   const pluginName = button.dataset.pluginName || pluginId;
+  const force = button.dataset.forceUpdate === "true";
   if (!pluginId || button.disabled || state.catalogBusy || state.catalogCheckBusy) return;
-  if (!await confirmRecommendationAction("update", pluginName)) return;
+  const confirmed = force
+    ? await showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))
+    : await confirmRecommendationAction("update", pluginName);
+  if (!confirmed) return;
   state.catalogBusy = pluginId;
   document.querySelectorAll("#catalog-list button, #catalog-list input[role='switch']").forEach((node) => { node.disabled = true; });
   const status = document.getElementById("recommendation-status");
-  status.textContent = `${pluginName}：${t("updateRunning")}`;
+  status.textContent = `${pluginName}：${t(force ? "forceUpdateRunning" : "updateRunning")}`;
   status.hidden = false;
   try {
-    await apiPost("catalog/update", { plugin_id: pluginId, confirm: true });
+    const payload = force
+      ? { plugin_id: pluginId, confirm: true, force: true }
+      : { plugin_id: pluginId, confirm: true };
+    await apiPost("catalog/update", payload);
     toast(t("operationDone"));
     // 更新成功后该行的版本结果已过期，只复查这一个插件而不是全量重扫。
     delete state.catalogVersions[pluginId];

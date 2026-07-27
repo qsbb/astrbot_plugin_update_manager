@@ -798,7 +798,7 @@ class PagesAPIMixin:
         )
 
     async def _catalog_update_target(self):
-        """校验目录更新入参并返回目标目录项。
+        """校验目录更新入参并返回目标目录项与强制模式。
 
         与 ``_catalog_plugin_id`` 同样严格：key 集合精确匹配、强制二次确认、
         必须在册且通过更新资格复核。资格在这里重新算一遍而不是信任前端，
@@ -807,10 +807,16 @@ class PagesAPIMixin:
         data = await self._request_json()
         if not isinstance(data, dict):
             raise ValueError("INVALID_JSON_PAYLOAD")
-        if set(data) != {"plugin_id", "confirm"}:
+        if set(data) not in (
+            {"plugin_id", "confirm"},
+            {"plugin_id", "confirm", "force"},
+        ):
             raise ValueError("CONFIRMATION_REQUIRED")
         if data.get("confirm") is not True:
             raise ValueError("CONFIRMATION_REQUIRED")
+        force = data.get("force", False)
+        if not isinstance(force, bool):
+            raise ValueError("INVALID_FORCE_FLAG")
         plugin_id = data.get("plugin_id")
         if not isinstance(plugin_id, str) or not plugin_id.strip():
             raise ValueError("INVALID_PLUGIN_ID")
@@ -826,22 +832,29 @@ class PagesAPIMixin:
         )
         if not lifecycle["operable"]:
             raise ValueError(str(lifecycle["reason"] or "PLUGIN_NOT_MANAGEABLE"))
-        return item
+        return item, force
 
     async def _pages_catalog_update(self):
         try:
-            item = await self._catalog_update_target()
+            item, force = await self._catalog_update_target()
             candidate = await self.registry.github_latest(
                 item.plugin_id,
                 item.current_version or "",
                 item.source_url or "",
                 force_refresh=True,
             )
-            update_available, _ = self._version_state(
+            update_available, version_status = self._version_state(
                 item.current_version or "", candidate.target_version
             )
-            if not update_available:
-                # 没有新版本就不该触发下载与热重载。
+            if force:
+                if version_status not in {
+                    "update_available",
+                    "up_to_date",
+                    "local_newer",
+                }:
+                    raise ValueError("FORCE_UPDATE_VERSION_UNAVAILABLE")
+            elif not update_available:
+                # 普通模式没有新版本就不该触发下载与热重载。
                 raise ValueError("NO_UPDATE_AVAILABLE")
             snapshot = await self.adapter.update_plugin(
                 item.plugin_id,
@@ -854,6 +867,8 @@ class PagesAPIMixin:
                     "success": True,
                     "plugin_id": item.plugin_id,
                     "updated": True,
+                    "forced": force,
+                    "version_status": version_status,
                     "version": snapshot.version,
                     "lifecycle": self._lifecycle("update", snapshot),
                 }
@@ -944,6 +959,7 @@ class PagesAPIMixin:
             "SELF_LIFECYCLE_BLOCKED": 403,
             "RESERVED_PLUGIN": 403,
             "INVALID_PLUGIN_ID": 400,
+            "INVALID_FORCE_FLAG": 400,
             "PLUGIN_NOT_FOUND": 404,
             "PLUGIN_NOT_LOADED": 409,
             "PLUGIN_STATE_UNCHANGED": 409,
@@ -953,6 +969,7 @@ class PagesAPIMixin:
             "ARCHIVE_URL_REQUIRED": 409,
             "SOURCE_REQUIRED": 409,
             "NO_UPDATE_AVAILABLE": 409,
+            "FORCE_UPDATE_VERSION_UNAVAILABLE": 409,
             "UPDATE_CAPABILITY_UNAVAILABLE": 503,
         }
         code = str(exc) if str(exc) in known else type(exc).__name__.upper()

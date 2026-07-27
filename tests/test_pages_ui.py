@@ -142,11 +142,18 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
     assert "autoCheckRecommendations" in tab_handler
     assert "runCatalogCheck" not in tab_handler
     assert "checkCatalogUpdates" not in tab_handler
-    # 点击更新必须二次确认并带 confirm，与推荐区同一条底线。
+    # 普通与强制更新都必须二次确认；强制模式使用独立警示文案与显式 force。
     assert 'await confirmRecommendationAction("update", pluginName)' in js
-    assert 'apiPost("catalog/update", { plugin_id: pluginId, confirm: true })' in js
-    # 只有确实检测到新版本才允许点，未检查过的行显示"未检查"。
+    assert 'await showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))' in js
+    assert "? { plugin_id: pluginId, confirm: true, force: true }" in js
+    assert ": { plugin_id: pluginId, confirm: true };" in js
+    assert 'apiPost("catalog/update", payload)' in js
+    assert 'data-force-update="true"' in js
+    assert "即使已是最新版或远端版本更旧" in js
+    assert "even when it is the same version or older" in js
+    # 普通更新仅允许新版本；强制更新额外允许同版本和本地较新。
     assert "Boolean(view?.update_available)" in js
+    assert '["update_available", "up_to_date", "local_newer"].includes(view?.version_status)' in js
     assert 't("notChecked")' in js
     assert "未检查" in js
     assert 'checkUpdates: "Check for updates"' in js
