@@ -32,7 +32,7 @@ from .core.transaction import PluginTransaction
 from .pages_api import PagesAPIMixin
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 

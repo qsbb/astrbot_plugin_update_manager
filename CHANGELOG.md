@@ -2,6 +2,15 @@
 
 本项目遵循语义化版本（Semantic Versioning），版本号不带 `v` 前缀。
 
+## 0.5.1 - 2026-07-27
+
+### 修复
+- 修复手机端 Plugin Page 点击“前往仓库更新”无反馈：优先探测宿主 `bridge.navigate` 与 `bridge.openExternal`，不再把 iframe 自身内部 hash 跳转误判为成功。
+- 旧版宿主缺少导航能力时，页面会明确显示仓库 URL 并尝试复制；剪贴板不可用或复制失败时通过 `prompt` 展示 URL，确保用户始终获得可操作反馈。
+
+### 测试
+- 补充移动端自更新 UI 回归测试，覆盖 bridge 调用顺序、iframe hash 禁用以及显示、复制、`prompt` 降级链路。
+
 ## 0.5.0 - 2026-07-27
 
 ### 新增

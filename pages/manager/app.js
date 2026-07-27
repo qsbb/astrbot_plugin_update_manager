@@ -9,7 +9,7 @@ const messages = {
     checkLatest: "检查最新版本", checkingLatest: "正在检查…", autoCheckingLatest: "正在自动检查版本…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
-    selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新",
+    selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新", repositoryUrlLabel: "仓库地址", repositoryUrlCopied: "旧版宿主无法直接跳转，仓库地址已复制", copyRepositoryUrl: "请复制仓库地址后在浏览器中打开：",
     install: "安装", installed: "已安装", update: "更新", forceUpdate: "强制更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", forceUpdateUnavailable: "强制更新仅支持有新版本、已是最新版或本地版本更新的插件", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
     errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", forceUpdateConfirm: "确定要强制更新“{name}”吗？即使已是最新版或远端版本更旧，也会用远端版本覆盖本地代码。", installRunning: "正在安装…", updateRunning: "正在更新…", forceUpdateRunning: "正在强制更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
@@ -33,7 +33,7 @@ const messages = {
     checkLatest: "Check latest versions", checkingLatest: "Checking…", autoCheckingLatest: "Checking versions automatically…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
-    selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository",
+    selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository", repositoryUrlLabel: "Repository URL", repositoryUrlCopied: "This host cannot open the link directly. The repository URL was copied.", copyRepositoryUrl: "Copy this repository URL and open it in a browser:",
     install: "Install", installed: "Installed", update: "Update", forceUpdate: "Force update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", forceUpdateUnavailable: "Force update requires an available, up-to-date, or locally newer version state", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
     errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", forceUpdateConfirm: "Force update “{name}”? The remote version will overwrite local code even when it is the same version or older.", installRunning: "Installing…", updateRunning: "Updating…", forceUpdateRunning: "Force updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
@@ -147,59 +147,73 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 }
 
-// AstrBot 插件页常嵌在 iframe/沙箱里，裸 <a target="_blank"> 可能被拦截且无反馈。
-// 统一走显式打开：先尝试新窗口，失败再顶层/本页跳转。
-function openInternalRoute(route) {
-  const target = String(route || "").trim();
-  if (!target || !target.startsWith("#/")) return false;
+// 移动端 Plugin Page 常嵌在受限 iframe 中。宿主 bridge 能明确接管导航时才算成功；
+// 不再用 iframe 自身的 location/hash 兜底，以免页面看似成功但用户仍停在原处。
+async function invokeBridgeNavigation(method, target) {
+  if (!bridge || typeof bridge[method] !== "function") return false;
   try {
-    if (window.top && window.top !== window) {
-      window.top.location.assign(target);
-      return true;
-    }
+    const result = await bridge[method](target);
+    return result !== false;
   } catch (error) {
-    console.warn("Top-level route navigation blocked", error);
-  }
-  try {
-    window.location.assign(target);
-    return true;
-  } catch (error) {
-    console.warn("Unable to navigate to internal route", error);
+    console.warn(`Bridge ${method} failed`, error);
     return false;
   }
 }
 
-function openExternalUrl(url) {
+async function openInternalRoute(route) {
+  const target = String(route || "").trim();
+  if (!target || !target.startsWith("#/")) return false;
+  return invokeBridgeNavigation("navigate", target);
+}
+
+async function openExternalUrl(url) {
   const href = String(url || "").trim();
   if (!href || href === "#" || href.toLowerCase().startsWith("javascript:")) return false;
+  if (await invokeBridgeNavigation("openExternal", href)) return true;
   try {
     const opened = window.open(href, "_blank", "noopener,noreferrer");
-    if (opened) {
-      try {
-        opened.opener = null;
-      } catch (error) {
-        console.warn("Unable to clear opener for external link", error);
-      }
-      return true;
+    if (!opened) return false;
+    try {
+      opened.opener = null;
+    } catch (error) {
+      console.warn("Unable to clear opener for external link", error);
     }
-  } catch (error) {
-    console.warn("window.open blocked for external link", error);
-  }
-  try {
-    if (window.top && window.top !== window) {
-      window.top.location.assign(href);
-      return true;
-    }
-  } catch (error) {
-    console.warn("top-level navigation blocked for external link", error);
-  }
-  try {
-    window.location.assign(href);
     return true;
   } catch (error) {
-    console.warn("Unable to navigate to external link", error);
+    console.warn("window.open blocked for external link", error);
     return false;
   }
+}
+
+function revealRepositoryUrl(link, url) {
+  const notice = link.closest(".self-update-notice");
+  if (!notice) return;
+  let fallback = notice.querySelector(".repository-url-fallback");
+  if (!fallback) {
+    fallback = document.createElement("p");
+    fallback.className = "repository-url-fallback";
+    notice.append(fallback);
+  }
+  fallback.textContent = `${t("repositoryUrlLabel")}：${url}`;
+}
+
+async function copyRepositoryUrl(link, url) {
+  revealRepositoryUrl(link, url);
+  try {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("Clipboard API unavailable");
+    await navigator.clipboard.writeText(url);
+    toast(t("repositoryUrlCopied"));
+  } catch (error) {
+    console.warn("Unable to copy repository URL", error);
+    window.prompt(t("copyRepositoryUrl"), url);
+  }
+}
+
+async function openSelfUpdateTarget(link, route, url) {
+  if (await openInternalRoute(route)) return true;
+  if (await invokeBridgeNavigation("openExternal", url)) return true;
+  await copyRepositoryUrl(link, url);
+  return false;
 }
 
 function toast(message, error = false) {
@@ -903,22 +917,21 @@ function bindEvents() {
     }
   }));
   // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     const link = event.target.closest("a[data-external-url]");
     if (!link || !document.contains(link)) return;
-    const route = link.dataset.internalRoute || "";
-    if (route) {
-      event.preventDefault();
-      if (!openInternalRoute(route)) toast(t("operationFailed"), true);
-      return;
-    }
     const url = link.dataset.externalUrl || link.getAttribute("href") || "";
     if (!url || url === "#") {
       event.preventDefault();
       return;
     }
     event.preventDefault();
-    if (!openExternalUrl(url)) toast(t("operationFailed"), true);
+    const route = link.dataset.internalRoute || "";
+    if (route) {
+      await openSelfUpdateTarget(link, route, url);
+      return;
+    }
+    if (!await openExternalUrl(url)) toast(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("rule-form").addEventListener("submit", saveRule);

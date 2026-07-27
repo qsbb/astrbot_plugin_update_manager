@@ -255,18 +255,52 @@ def test_recommendations_show_self_update_repository_notice():
     assert "renderSelfUpdateNotice(data.self_update)" in js
     assert 'target = "_blank"' in js
     assert 'rel = "noopener noreferrer"' in js
-    # 自更新入口应回到 AstrBot 已安装插件页；普通仓库链接仍显式外部打开。
-    assert "function openInternalRoute(route)" in js
     assert 'const installedRoute = "#/extension#installed"' in js
     assert "link.dataset.internalRoute = installedRoute" in js
-    assert "window.top.location.assign(target)" in js
-    assert "function openExternalUrl(url)" in js
-    assert 'window.open(href, "_blank", "noopener,noreferrer")' in js
     assert 'a[data-external-url]' in js
     assert "link.dataset.externalUrl = repoUrl" in js
     assert 'data-external-url="${escapeHtml(item.repo_url)}"' in js
     assert "自身更新已禁用，请前往仓库更新" in js
     assert ".self-update-notice" in css
+
+
+def test_mobile_self_update_prefers_bridge_and_never_accepts_iframe_hash():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    helper = js[js.index("async function invokeBridgeNavigation") : js.index("function toast")]
+    self_update = helper[
+        helper.index("async function openSelfUpdateTarget") :
+    ]
+
+    assert 'typeof bridge[method] !== "function"' in helper
+    assert "await bridge[method](target)" in helper
+    assert 'invokeBridgeNavigation("navigate", target)' in helper
+    assert self_update.index("await openInternalRoute(route)") < self_update.index(
+        'await invokeBridgeNavigation("openExternal", url)'
+    )
+    assert self_update.index('await invokeBridgeNavigation("openExternal", url)') < (
+        self_update.index("await copyRepositoryUrl(link, url)")
+    )
+    # iframe 自身 hash/location 不能再被当作宿主导航成功。
+    assert "window.location.assign" not in helper
+    assert "window.top.location.assign" not in helper
+
+
+def test_legacy_mobile_host_reveals_and_copies_repository_url_with_prompt_fallback():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    fallback = js[js.index("function revealRepositoryUrl") : js.index("function toast")]
+
+    assert 'link.closest(".self-update-notice")' in fallback
+    assert 'fallback.className = "repository-url-fallback"' in fallback
+    assert 'fallback.textContent = `${t("repositoryUrlLabel")}：${url}`' in fallback
+    assert "await navigator.clipboard.writeText(url)" in fallback
+    assert 'toast(t("repositoryUrlCopied"))' in fallback
+    assert 'window.prompt(t("copyRepositoryUrl"), url)' in fallback
+    assert fallback.index("revealRepositoryUrl(link, url)") < fallback.index(
+        "await navigator.clipboard.writeText(url)"
+    )
+    assert ".repository-url-fallback" in css
+    assert "user-select:all" in css
 
 
 def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress():
