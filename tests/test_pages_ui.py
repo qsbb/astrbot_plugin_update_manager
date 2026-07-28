@@ -258,18 +258,20 @@ def test_recommendations_show_self_update_repository_notice():
     assert "function renderSelfUpdateNotice(selfUpdate)" in js
     assert "selfUpdate?.update_available" in js
     assert "renderSelfUpdateNotice(data.self_update)" in js
-    assert 'target = "_blank"' in js
+    assert 'target = "_top"' in js
     assert 'rel = "noopener noreferrer"' in js
-    assert 'const installedRoute = "#/extension#installed"' in js
+    assert 'const installedRoute = "/extension#installed"' in js
     assert "link.dataset.internalRoute = installedRoute" in js
     assert 'a[data-external-url]' in js
-    assert "link.dataset.externalUrl = repoUrl" in js
+    assert 'a[data-internal-route]' in js
+    assert 'link.href = internalRouteUrl(installedRoute) || "#"' in js
     assert 'data-external-url="${escapeHtml(item.repo_url)}"' in js
-    assert "自身更新已禁用，请前往仓库更新" in js
+    assert "自身更新已禁用，请前往已安装插件页更新" in js
+    assert 'goToInstalledPlugins: "前往已安装插件页"' in js
     assert ".self-update-notice" in css
 
 
-def test_mobile_self_update_prefers_bridge_and_never_accepts_iframe_hash():
+def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     helper = js[js.index("async function invokeBridgeNavigation") : js.index("function toast")]
     self_update = helper[
@@ -279,32 +281,33 @@ def test_mobile_self_update_prefers_bridge_and_never_accepts_iframe_hash():
     assert 'typeof bridge[method] !== "function"' in helper
     assert "await bridge[method](target)" in helper
     assert 'invokeBridgeNavigation("navigate", target)' in helper
+    assert 'new URL(`/#${target}`, window.location.origin).href' in helper
+    assert 'window.open(targetUrl, "_top")' in helper
+    assert 'target.startsWith("/")' in helper
+    assert 'target.startsWith("//")' in helper
     assert self_update.index("await openInternalRoute(route)") < self_update.index(
-        'await invokeBridgeNavigation("openExternal", url)'
+        "await copyInstalledPageUrl(link, internalRouteUrl(route))"
     )
-    assert self_update.index('await invokeBridgeNavigation("openExternal", url)') < (
-        self_update.index("await copyRepositoryUrl(link, url)")
-    )
-    # iframe 自身 hash/location 不能再被当作宿主导航成功。
+    # iframe 自身的 hash/location 不能被当作宿主导航成功；兜底必须指向顶层 Dashboard。
     assert "window.location.assign" not in helper
     assert "window.top.location.assign" not in helper
 
 
-def test_legacy_mobile_host_reveals_and_copies_repository_url_with_prompt_fallback():
+def test_restricted_host_reveals_and_copies_update_page_url_with_prompt_fallback():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
-    fallback = js[js.index("function revealRepositoryUrl") : js.index("function toast")]
+    fallback = js[js.index("function revealInstalledPageUrl") : js.index("function toast")]
 
     assert 'link.closest(".self-update-notice")' in fallback
-    assert 'fallback.className = "repository-url-fallback"' in fallback
-    assert 'fallback.textContent = `${t("repositoryUrlLabel")}：${url}`' in fallback
+    assert 'fallback.className = "installed-page-url-fallback"' in fallback
+    assert 'fallback.textContent = `${t("installedPageUrlLabel")}：${url}`' in fallback
     assert "await navigator.clipboard.writeText(url)" in fallback
-    assert 'toast(t("repositoryUrlCopied"))' in fallback
-    assert 'window.prompt(t("copyRepositoryUrl"), url)' in fallback
-    assert fallback.index("revealRepositoryUrl(link, url)") < fallback.index(
+    assert 'toast(t("installedPageUrlCopied"))' in fallback
+    assert 'window.prompt(t("copyInstalledPageUrl"), url)' in fallback
+    assert fallback.index("revealInstalledPageUrl(link, url)") < fallback.index(
         "await navigator.clipboard.writeText(url)"
     )
-    assert ".repository-url-fallback" in css
+    assert ".installed-page-url-fallback" in css
     assert "user-select:all" in css
 
 

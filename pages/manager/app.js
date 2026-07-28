@@ -9,7 +9,7 @@ const messages = {
     checkLatest: "检查最新版本", checkingLatest: "正在检查…", autoCheckingLatest: "正在自动检查版本…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
-    selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往仓库更新。", goToRepository: "前往仓库更新", repositoryUrlLabel: "仓库地址", repositoryUrlCopied: "旧版宿主无法直接跳转，仓库地址已复制", copyRepositoryUrl: "请复制仓库地址后在浏览器中打开：",
+    selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制", copyInstalledPageUrl: "请复制更新页地址后在浏览器中打开：",
     install: "安装", installed: "已安装", update: "更新", forceUpdate: "强制更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", forceUpdateUnavailable: "强制更新仅支持有新版本、已是最新版或本地版本更新的插件", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
     errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", forceUpdateConfirm: "确定要强制更新“{name}”吗？即使已是最新版或远端版本更旧，也会用远端版本覆盖本地代码。", installRunning: "正在安装…", updateRunning: "正在更新…", forceUpdateRunning: "正在强制更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
@@ -33,7 +33,7 @@ const messages = {
     checkLatest: "Check latest versions", checkingLatest: "Checking…", autoCheckingLatest: "Checking versions automatically…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
-    selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the repository.", goToRepository: "Open repository", repositoryUrlLabel: "Repository URL", repositoryUrlCopied: "This host cannot open the link directly. The repository URL was copied.", copyRepositoryUrl: "Copy this repository URL and open it in a browser:",
+    selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.", copyInstalledPageUrl: "Copy this update page URL and open it in a browser:",
     install: "Install", installed: "Installed", update: "Update", forceUpdate: "Force update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", forceUpdateUnavailable: "Force update requires an available, up-to-date, or locally newer version state", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
     errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", forceUpdateConfirm: "Force update “{name}”? The remote version will overwrite local code even when it is the same version or older.", installRunning: "Installing…", updateRunning: "Updating…", forceUpdateRunning: "Force updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
@@ -160,10 +160,27 @@ async function invokeBridgeNavigation(method, target) {
   }
 }
 
+function internalRouteUrl(route) {
+  const target = String(route || "").trim();
+  if (!target || !target.startsWith("/") || target.startsWith("//")) return "";
+  return new URL(`/#${target}`, window.location.origin).href;
+}
+
 async function openInternalRoute(route) {
   const target = String(route || "").trim();
-  if (!target || !target.startsWith("#/")) return false;
-  return invokeBridgeNavigation("navigate", target);
+  const targetUrl = internalRouteUrl(target);
+  if (!targetUrl) return false;
+  if (await invokeBridgeNavigation("navigate", target)) return true;
+
+  // 官方 bridge 暂未暴露 navigate。旧版/定制宿主若允许用户手势触发顶层导航，
+  // 用完整 Dashboard URL 返回已安装插件页；受限 sandbox 会返回 null 或抛错。
+  try {
+    const opened = window.open(targetUrl, "_top");
+    return Boolean(opened);
+  } catch (error) {
+    console.warn("Top-level Dashboard navigation blocked", error);
+    return false;
+  }
 }
 
 async function openExternalUrl(url) {
@@ -185,34 +202,33 @@ async function openExternalUrl(url) {
   }
 }
 
-function revealRepositoryUrl(link, url) {
+function revealInstalledPageUrl(link, url) {
   const notice = link.closest(".self-update-notice");
   if (!notice) return;
-  let fallback = notice.querySelector(".repository-url-fallback");
+  let fallback = notice.querySelector(".installed-page-url-fallback");
   if (!fallback) {
     fallback = document.createElement("p");
-    fallback.className = "repository-url-fallback";
+    fallback.className = "installed-page-url-fallback";
     notice.append(fallback);
   }
-  fallback.textContent = `${t("repositoryUrlLabel")}：${url}`;
+  fallback.textContent = `${t("installedPageUrlLabel")}：${url}`;
 }
 
-async function copyRepositoryUrl(link, url) {
-  revealRepositoryUrl(link, url);
+async function copyInstalledPageUrl(link, url) {
+  revealInstalledPageUrl(link, url);
   try {
     if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("Clipboard API unavailable");
     await navigator.clipboard.writeText(url);
-    toast(t("repositoryUrlCopied"));
+    toast(t("installedPageUrlCopied"));
   } catch (error) {
-    console.warn("Unable to copy repository URL", error);
-    window.prompt(t("copyRepositoryUrl"), url);
+    console.warn("Unable to copy installed plugins page URL", error);
+    window.prompt(t("copyInstalledPageUrl"), url);
   }
 }
 
-async function openSelfUpdateTarget(link, route, url) {
+async function openSelfUpdateTarget(link, route) {
   if (await openInternalRoute(route)) return true;
-  if (await invokeBridgeNavigation("openExternal", url)) return true;
-  await copyRepositoryUrl(link, url);
+  await copyInstalledPageUrl(link, internalRouteUrl(route));
   return false;
 }
 
@@ -702,21 +718,15 @@ function renderSelfUpdateNotice(selfUpdate) {
   const message = t("selfUpdateNotice")
     .replace("{current}", selfUpdate.current_version || "—")
     .replace("{latest}", selfUpdate.latest_version || "—");
-  const repoUrl = String(selfUpdate.repo_url || "").trim();
-  const installedRoute = "#/extension#installed";
+  const installedRoute = "/extension#installed";
   const strong = document.createElement("strong");
   strong.textContent = message;
   const link = document.createElement("a");
-  link.href = repoUrl || "#";
-  link.target = "_blank";
+  link.href = internalRouteUrl(installedRoute) || "#";
+  link.target = "_top";
   link.rel = "noopener noreferrer";
-  link.textContent = t("goToRepository");
-  link.dataset.externalUrl = repoUrl;
+  link.textContent = t("goToInstalledPlugins");
   link.dataset.internalRoute = installedRoute;
-  if (!repoUrl) {
-    link.setAttribute("aria-disabled", "true");
-    link.classList.add("is-disabled");
-  }
   notice.replaceChildren(strong, link);
   notice.hidden = false;
 }
@@ -931,19 +941,20 @@ function bindEvents() {
   }));
   // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
   document.addEventListener("click", async (event) => {
-    const link = event.target.closest("a[data-external-url]");
+    const link = event.target.closest("a[data-external-url], a[data-internal-route]");
     if (!link || !document.contains(link)) return;
+    const route = link.dataset.internalRoute || "";
+    if (route) {
+      event.preventDefault();
+      await openSelfUpdateTarget(link, route);
+      return;
+    }
     const url = link.dataset.externalUrl || link.getAttribute("href") || "";
     if (!url || url === "#") {
       event.preventDefault();
       return;
     }
     event.preventDefault();
-    const route = link.dataset.internalRoute || "";
-    if (route) {
-      await openSelfUpdateTarget(link, route, url);
-      return;
-    }
     if (!await openExternalUrl(url)) toast(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
