@@ -478,6 +478,37 @@ class AstrBotAdapter:
             None,
         )
 
+    async def get_plugin_instance(self, plugin_id: str) -> Any | None:
+        """Best-effort 获取运行中实例，仅供只读健康探针使用。"""
+        getter = getattr(self.context, "get_star_instance", None)
+        if callable(getter):
+            try:
+                instance = getter(plugin_id)
+                if inspect.isawaitable(instance):
+                    instance = await instance
+                if instance is not None:
+                    return instance
+            except Exception:
+                pass
+        try:
+            stars = self._get_all_stars()
+        except Exception:
+            return None
+        for star in stars:
+            identities = {
+                str(getattr(star, "name", "") or ""),
+                str(getattr(star, "root_dir_name", "") or ""),
+            }
+            if plugin_id not in identities:
+                continue
+            if callable(getattr(star, "plugin_health", None)):
+                return star
+            for attribute in ("star", "instance", "star_instance", "plugin"):
+                instance = getattr(star, attribute, None)
+                if instance is not None:
+                    return instance
+        return None
+
     @staticmethod
     def _validate_result(result: Any, operation: str) -> None:
         if result is False:

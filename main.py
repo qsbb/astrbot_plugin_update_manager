@@ -23,16 +23,25 @@ from .core.adapters.storage import AtomicJsonStore, redact
 from .core.catalog import PluginCatalog
 from .core.concurrency import bounded_gather
 from .core.coordinator import UpdateCoordinator
+from .core.diagnostics import diagnose_series
 from .core.health import HealthChecker
 from .core.mirrors import resolve_mirror
 from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
 from .core.planner import PlanError, UpdatePlanner
+from .core.request_context import (
+    OWNER_UPDATE_MANAGER,
+    PHASE_COMMAND,
+    add_reason,
+    ensure_context,
+    set_artifact,
+    set_flag,
+)
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
 from .pages_api import PagesAPIMixin
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -43,6 +52,8 @@ _current_instance: "UpdateManagerPlugin | None" = None
     __version__,
 )
 class UpdateManagerPlugin(PagesAPIMixin, Star):
+    PLUGIN_HEALTH_CONTRACT = "plugin.health@1.0"
+
     def __init__(self, context: Context, config: Any = None) -> None:
         super().__init__(context)
         global _current_instance
@@ -104,6 +115,21 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             interrupted,
             self.auto_update_enabled,
         )
+
+    def plugin_health(self) -> dict[str, object]:
+        checks = {
+            "adapter_ready": getattr(self, "adapter", None) is not None,
+            "transaction_ready": getattr(self, "transaction", None) is not None,
+            "coordinator_ready": getattr(self, "coordinator", None) is not None,
+            "runtime_active": not bool(getattr(self, "_terminated", False)),
+        }
+        reasons = [name.upper() for name, passed in checks.items() if not passed]
+        return {
+            "status": "ok" if not reasons else "unhealthy",
+            "checks": checks,
+            "reasons": reasons,
+            "version": __version__,
+        }
 
     def _get(self, key: str, default: Any) -> Any:
         if key in self._config_overrides:
@@ -435,6 +461,47 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             yield event.plain_result("暂无执行记录。")
             return
         yield event.plain_result(self._run_summary(self.store.read(runs[0].name, {})))
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @aup_group.command("diag")
+    async def aup_diag(self, event: AstrMessageEvent):
+        """诊断知、言、序、情、声、核六个系列插件。"""
+        report = await diagnose_series(self.adapter)
+        request_context = ensure_context(event, PHASE_COMMAND)
+        set_artifact(
+            request_context,
+            OWNER_UPDATE_MANAGER,
+            "suite_diagnostics",
+            report,
+        )
+        set_flag(
+            request_context,
+            OWNER_UPDATE_MANAGER,
+            "suite_healthy",
+            report["status"] == "ok",
+        )
+        add_reason(
+            request_context,
+            OWNER_UPDATE_MANAGER,
+            "SUITE_DIAGNOSTICS_COMPLETED",
+        )
+        lines = [
+            f"凝心溯溪套件诊断: {report['healthy']}/{report['total']} 正常",
+        ]
+        status_names = {
+            "ok": "正常",
+            "compatible": "兼容模式",
+            "degraded": "降级",
+            "unhealthy": "异常",
+            "missing": "缺失",
+        }
+        for row in report["members"]:
+            version = f" v{row['version']}" if row["version"] else ""
+            lines.append(
+                f"- {row['label']}{version}: "
+                f"{status_names.get(row['status'], row['status'])} ({row['reason']})"
+            )
+        yield event.plain_result("\n".join(lines))
 
     async def _scheduled_run(self, rule: UpdateRule) -> None:
         if self.coordinator.busy:
