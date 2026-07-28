@@ -607,6 +607,12 @@ function actionButton(item, action, label, enabled) {
   return `<button type="button" data-recommendation-action="${action}" data-plugin-id="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.name)}" ${disabled} ${hint}>${escapeHtml(t(label))}</button>`;
 }
 
+function forceUpdateButton(item, enabled) {
+  const disabled = enabled ? "" : "disabled";
+  const hint = enabled ? "" : `title="${escapeHtml(t("forceUpdateUnavailable"))}"`;
+  return `<button type="button" data-recommendation-action="update" data-force-update="true" data-plugin-id="${escapeHtml(item.plugin_id)}" data-plugin-name="${escapeHtml(item.name)}" ${disabled} ${hint}>${escapeHtml(t("forceUpdate"))}</button>`;
+}
+
 function lifecycleSwitch(item, actions) {
   const action = item.activated ? "disable" : "enable";
   const enabled = Boolean(actions[action]);
@@ -730,7 +736,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `<button type="button" disabled>${escapeHtml(t("installed"))}</button>`
       : actionButton(item, "install", "install", actions.install);
     const lifecycle = item.installed
-      ? `${actionButton(item, "update", "update", actions.update)}${lifecycleSwitch(item, actions)}`
+      ? `${actionButton(item, "update", "update", actions.update)}${forceUpdateButton(item, actions.force_update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
     return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
@@ -841,17 +847,24 @@ async function runRecommendationAction(button) {
   const action = button.dataset.recommendationAction;
   const pluginId = button.dataset.pluginId;
   const pluginName = button.dataset.pluginName || pluginId;
+  const force = action === "update" && button.dataset.forceUpdate === "true";
   if (!action || !pluginId || button.disabled || state.recommendationBusy) return;
   const requiresConfirmation = ["install", "update", "disable"].includes(action);
-  if (requiresConfirmation && !await confirmRecommendationAction(action, pluginName)) {
+  const confirmed = !requiresConfirmation
+    || (force
+      ? await showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))
+      : await confirmRecommendationAction(action, pluginName));
+  if (!confirmed) {
     await loadRecommendations();
     return;
   }
-  setRecommendationBusy(action, pluginName);
+  setRecommendationBusy(force ? "forceUpdate" : action, pluginName);
   try {
-    const payload = requiresConfirmation
-      ? { plugin_id: pluginId, confirm: true }
-      : { plugin_id: pluginId };
+    const payload = force
+      ? { plugin_id: pluginId, confirm: true, force: true }
+      : requiresConfirmation
+        ? { plugin_id: pluginId, confirm: true }
+        : { plugin_id: pluginId };
     await apiPost(action, payload);
     toast(t("operationDone"));
   } catch (error) {

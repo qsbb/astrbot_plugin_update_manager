@@ -172,6 +172,11 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert "applyAllConfirm" in js
     assert "all_succeeded" in js
     assert "actions.update" in js
+    assert "actions.force_update" in js
+    assert 'data-recommendation-action="update" data-force-update="true"' in js
+    assert '? { plugin_id: pluginId, confirm: true, force: true }' in js
+    assert 'setRecommendationBusy(force ? "forceUpdate" : action, pluginName)' in js
+    assert 'showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))' in js
     for status in (
         "update_available",
         "up_to_date",
@@ -310,10 +315,11 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     assert "item.description_zh" in js
     assert 'id="confirmation-dialog"' in html
     assert 'id="recommendation-status"' in html
-    assert "requiresConfirmation && !await confirmRecommendationAction" in js
+    assert "const confirmed = !requiresConfirmation" in js
+    assert "await confirmRecommendationAction(action, pluginName)" in js
     assert 'input[role=\'switch\']' in js
     assert "item.disabled = true" in js
-    assert "setRecommendationBusy(action, pluginName)" in js
+    assert 'setRecommendationBusy(force ? "forceUpdate" : action, pluginName)' in js
     assert "clearRecommendationBusy()" in js
     assert ".recommendation-description" in css
     assert ".operation-status" in css

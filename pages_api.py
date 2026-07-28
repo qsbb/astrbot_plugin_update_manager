@@ -1126,6 +1126,14 @@ class PagesAPIMixin:
                             and trusted.plugin_id != PLUGIN_ID
                             and capabilities.update_plugin
                         ),
+                        "force_update": bool(
+                            snapshot
+                            and snapshot.loaded
+                            and version_check["version_status"]
+                            in {"update_available", "up_to_date", "local_newer"}
+                            and trusted.plugin_id != PLUGIN_ID
+                            and capabilities.update_plugin
+                        ),
                         "enable": bool(
                             snapshot
                             and snapshot.loaded
@@ -1204,20 +1212,39 @@ class PagesAPIMixin:
             },
         }
 
-    async def _apply_recommended_plugin(self, plugin_id: str, operation: str) -> dict[str, Any]:
+    async def _apply_recommended_plugin(
+        self, plugin_id: str, operation: str, *, force: bool = False
+    ) -> dict[str, Any]:
         item = TRUSTED_BY_ID[plugin_id]
         if operation == "install":
+            if force:
+                raise ValueError("INVALID_FORCE_FLAG")
             snapshot = await self.adapter.install_plugin(plugin_id, repo_url=item.repo_url)
+            version_status = "not_installed"
         elif operation == "update":
             if plugin_id == PLUGIN_ID:
                 raise ValueError("SELF_UPDATE_BLOCKED")
             current = await self.adapter.get_plugin(plugin_id)
+            if current is None or not current.loaded:
+                raise ValueError("PLUGIN_NOT_MANAGEABLE")
             candidate = await self.registry.github_latest(
                 plugin_id,
-                current.version if current else "",
+                current.version,
                 item.repo_url,
                 force_refresh=True,
             )
+            update_available, version_status = self._version_state(
+                current.version, candidate.target_version
+            )
+            if force:
+                if version_status not in {
+                    "update_available",
+                    "up_to_date",
+                    "local_newer",
+                }:
+                    raise ValueError("FORCE_UPDATE_VERSION_UNAVAILABLE")
+            elif not update_available:
+                raise ValueError("NO_UPDATE_AVAILABLE")
             snapshot = await self.adapter.update_plugin(
                 plugin_id,
                 source_kind="github",
@@ -1230,6 +1257,8 @@ class PagesAPIMixin:
             "plugin_id": plugin_id,
             "operation": operation,
             "success": True,
+            "forced": force,
+            "version_status": version_status,
             "version": snapshot.version,
             "lifecycle": self._lifecycle(operation, snapshot),
         }
@@ -1299,19 +1328,44 @@ class PagesAPIMixin:
 
     async def _pages_update(self):
         try:
-            plugin_id = await self._trusted_plugin_id()
-            result = await self._apply_recommended_plugin(plugin_id, "update")
+            plugin_id, force = await self._trusted_update_target()
+            result = await self._apply_recommended_plugin(
+                plugin_id, "update", force=force
+            )
             return json_response(
                 {
                     "success": True,
                     "plugin_id": plugin_id,
                     "updated": True,
+                    "forced": result["forced"],
+                    "version_status": result["version_status"],
                     "version": result["version"],
                     "lifecycle": result["lifecycle"],
                 }
             )
         except Exception as exc:
             return self._mutation_error(exc)
+
+    async def _trusted_update_target(self) -> tuple[str, bool]:
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        if set(data) not in (
+            {"plugin_id", "confirm"},
+            {"plugin_id", "confirm", "force"},
+        ):
+            raise ValueError("CONFIRMATION_REQUIRED")
+        if data.get("confirm") is not True:
+            raise ValueError("CONFIRMATION_REQUIRED")
+        force = data.get("force", False)
+        if not isinstance(force, bool):
+            raise ValueError("INVALID_FORCE_FLAG")
+        plugin_id = data.get("plugin_id")
+        if not isinstance(plugin_id, str) or plugin_id not in TRUSTED_BY_ID:
+            raise ValueError("PLUGIN_NOT_TRUSTED")
+        if plugin_id == PLUGIN_ID:
+            raise ValueError("SELF_UPDATE_BLOCKED")
+        return plugin_id, force
 
     async def _set_recommended_enabled(self, enabled: bool):
         try:

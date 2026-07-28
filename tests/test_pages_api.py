@@ -1256,6 +1256,11 @@ def test_update_action_requires_newer_version(monkeypatch, tmp_path):
     assert voice["update_available"] is True
     assert voice["version_status"] == "update_available"
     assert voice["actions"]["update"] is True
+    assert voice["actions"]["force_update"] is True
+    self_item = next(
+        item for item in payload["items"] if item["plugin_id"] == module.PLUGIN_NAME
+    )
+    assert self_item["actions"]["force_update"] is False
 
 
 def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch, tmp_path):
@@ -1278,13 +1283,14 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
         return SimpleNamespace(version="0.6.3", loaded=True, activated=True)
 
     async def get_plugin(plugin_id):
-        return SimpleNamespace(version="0.6.2")
+        return SimpleNamespace(version="0.6.2", loaded=True)
 
     async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
         assert plugin_id == "astrbot_plugin_voice_hub"
         assert current_version == "0.6.2"
         assert force_refresh is True
         return SimpleNamespace(
+            target_version="0.6.3",
             archive_url=(
                 "https://api.github.com/repos/qsbb/"
                 "astrbot_plugin_voice_hub/zipball/master"
@@ -1345,6 +1351,120 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
     monkeypatch.setattr(plugin, "_request_json", request_self)
     assert asyncio.run(plugin._pages_update())[1] == 403
     assert asyncio.run(plugin._pages_disable())[1] == 403
+
+
+def test_recommendation_force_update_allows_only_checked_version_states(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_voice_hub"
+    remote_version = "1.0.0"
+    calls = []
+
+    async def force_request():
+        return {"plugin_id": plugin_id, "confirm": True, "force": True}
+
+    async def get_plugin(requested_plugin_id):
+        assert requested_plugin_id == plugin_id
+        return SimpleNamespace(version="1.0.0", loaded=True)
+
+    async def latest(
+        requested_plugin_id, current_version, source_url, *, force_refresh=False
+    ):
+        assert requested_plugin_id == plugin_id
+        assert current_version == "1.0.0"
+        assert source_url == "https://github.com/qsbb/astrbot_plugin_voice_hub"
+        assert force_refresh is True
+        return SimpleNamespace(target_version=remote_version, archive_url="https://zip")
+
+    async def update(requested_plugin_id, *, source_kind, source_url, archive_url=None):
+        calls.append((requested_plugin_id, source_kind, source_url, archive_url))
+        return SimpleNamespace(version=remote_version, loaded=True, activated=True)
+
+    monkeypatch.setattr(plugin, "_request_json", force_request)
+    monkeypatch.setattr(plugin.adapter, "get_plugin", get_plugin)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+
+    same = unwrap(asyncio.run(plugin._pages_update()))
+    assert same["forced"] is True
+    assert same["version_status"] == "up_to_date"
+
+    remote_version = "0.9.0"
+    older = unwrap(asyncio.run(plugin._pages_update()))
+    assert older["forced"] is True
+    assert older["version_status"] == "local_newer"
+
+    remote_version = "1.1.0"
+    newer = unwrap(asyncio.run(plugin._pages_update()))
+    assert newer["forced"] is True
+    assert newer["version_status"] == "update_available"
+    assert len(calls) == 3
+
+    remote_version = "not-a-version"
+    error, status = asyncio.run(plugin._pages_update())
+    assert status == 409
+    assert error["error"] == "FORCE_UPDATE_VERSION_UNAVAILABLE"
+    assert len(calls) == 3
+
+
+def test_recommendation_update_validates_force_and_keeps_normal_version_gate(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_voice_hub"
+    calls = []
+
+    async def get_plugin(_plugin_id):
+        return SimpleNamespace(version="1.0.0", loaded=True)
+
+    async def latest(*_args, **_kwargs):
+        return SimpleNamespace(target_version="1.0.0", archive_url="https://zip")
+
+    async def update(*_args, **_kwargs):
+        calls.append("update")
+        return SimpleNamespace(version="1.0.0", loaded=True, activated=True)
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin", get_plugin)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+
+    cases = (
+        (
+            {"plugin_id": plugin_id, "confirm": True, "force": "yes"},
+            "INVALID_FORCE_FLAG",
+            400,
+        ),
+        (
+            {"plugin_id": module.PLUGIN_NAME, "confirm": True, "force": True},
+            "SELF_UPDATE_BLOCKED",
+            403,
+        ),
+        (
+            {"plugin_id": "evil", "confirm": True, "force": True},
+            "PLUGIN_NOT_TRUSTED",
+            403,
+        ),
+    )
+    for request_payload, code, expected_status in cases:
+        async def request(request_payload=request_payload):
+            return request_payload
+
+        monkeypatch.setattr(plugin, "_request_json", request)
+        error, status = asyncio.run(plugin._pages_update())
+        assert status == expected_status
+        assert error["error"] == code
+
+    async def normal_request():
+        return {"plugin_id": plugin_id, "confirm": True}
+
+    monkeypatch.setattr(plugin, "_request_json", normal_request)
+    error, status = asyncio.run(plugin._pages_update())
+    assert status == 409
+    assert error["error"] == "NO_UPDATE_AVAILABLE"
+    assert calls == []
 
 
 def test_apply_all_recommendations_runs_serially_and_reports_partial_failure(
