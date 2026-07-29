@@ -25,6 +25,13 @@
 - `github_token` 等敏感配置按只写方式处理：只显示“是否已配置”，敏感 token 不回显到页面、接口响应或审计。
 - `enabled=false` 时统一门禁全部命令与调度。
 
+## 版本与发布边界
+
+- 核只读取各插件 `metadata.yaml` 的版本并比较远端，不替插件作者生成或改写版本号。
+- 普通更新要求远端版本更高；强制更新只改变安装动作的许可，不改变语义化版本判断，也不会替本地代码升版。
+- 版本选择遵循语义化版本：兼容新增功能升次版本，兼容缺陷修复升修订号，不兼容公开接口或配置迁移升主版本。
+- 发布前应先完成实现、README、CHANGELOG、配置说明和测试，再由发布者确认具体版本号；同一发布提交中同步 metadata 与代码版本常量。
+
 ## 安装
 
 将本插件目录放入 AstrBot 的 `plugins/` 目录，或通过插件市场安装。要求 AstrBot `>=4.16,<5`。
@@ -89,6 +96,13 @@ python -m pytest astrbot_plugin_update_manager/tests -q
 python -m ruff check astrbot_plugin_update_manager
 node --check astrbot_plugin_update_manager/pages/manager/app.js
 ```
+
+系列功能变更还应从 `astrbot/plugin/` 运行公共契约测试，确认钩子优先级和六份统一请求上下文没有漂移。
+
+## 维护约定
+
+任何可观察功能、配置项或安全边界的增删改，必须在同一批变更中同步 README、CHANGELOG 的
+`Unreleased`、配置 schema 与回归测试。版本号在实现、文档和验证完成后由发布者确认。
 
 ## 许可证
 
