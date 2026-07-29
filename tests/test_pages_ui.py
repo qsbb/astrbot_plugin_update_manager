@@ -289,8 +289,9 @@ def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
         "await copyInstalledPageUrl(link, internalRouteUrl(route))"
     )
     # iframe 自身的 hash/location 不能被当作宿主导航成功；兜底必须指向顶层 Dashboard。
-    assert "window.location.assign" not in helper
-    assert "window.top.location.assign" not in helper
+    assert "topWindow.location.assign(targetUrl)" in helper
+    assert 'if (!bridge || typeof bridge.navigate !== "function") return;' in js
+    assert 'link.target = "_top"' in js
 
 
 def test_restricted_host_reveals_and_copies_update_page_url_with_prompt_fallback():

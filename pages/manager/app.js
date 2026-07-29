@@ -172,8 +172,18 @@ async function openInternalRoute(route) {
   if (!targetUrl) return false;
   if (await invokeBridgeNavigation("navigate", target)) return true;
 
-  // 官方 bridge 暂未暴露 navigate。旧版/定制宿主若允许用户手势触发顶层导航，
-  // 用完整 Dashboard URL 返回已安装插件页；受限 sandbox 会返回 null 或抛错。
+  // bridge 已提供但调用失败时，尝试直接驱动顶层 Dashboard；受限 sandbox 会抛错。
+  try {
+    const topWindow = window.top || window;
+    if (topWindow.location && typeof topWindow.location.assign === "function") {
+      topWindow.location.assign(targetUrl);
+      return true;
+    }
+  } catch (error) {
+    console.warn("Top-level Dashboard navigation blocked", error);
+  }
+
+  // 兼容允许弹出窗口但不允许直接改写顶层 location 的旧版宿主。
   try {
     const opened = window.open(targetUrl, "_top");
     return Boolean(opened);
@@ -945,6 +955,9 @@ function bindEvents() {
     if (!link || !document.contains(link)) return;
     const route = link.dataset.internalRoute || "";
     if (route) {
+      // 没有导航 bridge 时保留 <a target="_top"> 的原生行为，
+      // 让用户手势直接完成跨 iframe 的 Dashboard 跳转。
+      if (!bridge || typeof bridge.navigate !== "function") return;
       event.preventDefault();
       await openSelfUpdateTarget(link, route);
       return;
