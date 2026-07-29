@@ -907,7 +907,15 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     )
     monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
     payload = unwrap(asyncio.run(plugin._pages_recommendations()))
-    assert [item["key"] for item in payload["items"]] == ["知", "言", "序", "情", "声", "核"]
+    assert [item["key"] for item in payload["items"]] == [
+        "知",
+        "言",
+        "序",
+        "情",
+        "境",
+        "声",
+        "核",
+    ]
     assert all(
         item["repo_url"].startswith("https://github.com/qsbb/astrbot_plugin_")
         for item in payload["items"]
@@ -917,6 +925,18 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     )
     assert relationship["name"] == "凝心溯溪-情"
     assert relationship["repo_url"] == "https://github.com/qsbb/astrbot_plugin_relationship"
+    environment = next(
+        item
+        for item in payload["items"]
+        if item["plugin_id"] == "astrbot_plugin_environment_awareness"
+    )
+    assert environment["name"] == "凝心溯溪-境"
+    assert environment["repo_url"] == (
+        "https://github.com/qsbb/astrbot_plugin_environment_awareness"
+    )
+    assert environment["description_zh"] == (
+        "按需感知当地日历、天气、空气质量、官方预警和相关自然事件；免 API Key。"
+    )
     assert all(item["description_zh"] for item in payload["items"])
     assert payload["items"][0]["description_zh"] == (
         "主动学习对话知识，支持检索、验证与持续积累。"
@@ -1007,9 +1027,9 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert len(payload["items"]) == 6
+    assert len(payload["items"]) == 7
     assert peak > 1
-    assert force_values == [True] * 6
+    assert force_values == [True] * 7
     failed = next(
         item
         for item in payload["items"]
@@ -1040,7 +1060,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(monkeypatch, t
     monkeypatch.setattr(plugin, "_request_json", cached_payload)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert force_values == [False] * 6
+    assert force_values == [False] * 7
 
     # 缺省仍是手动强制刷新语义。
     force_values.clear()
@@ -1050,7 +1070,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(monkeypatch, t
 
     monkeypatch.setattr(plugin, "_request_json", empty_payload)
     assert unwrap(asyncio.run(plugin._pages_check_recommendations()))["success"] is True
-    assert force_values == [True] * 6
+    assert force_values == [True] * 7
 
     # 非布尔值必须拒绝，不能被静默当成真值。
     force_values.clear()
@@ -1358,7 +1378,7 @@ def test_recommendation_force_update_allows_only_checked_version_states(
 ):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
-    plugin_id = "astrbot_plugin_voice_hub"
+    plugin_id = "astrbot_plugin_environment_awareness"
     remote_version = "1.0.0"
     calls = []
 
@@ -1374,7 +1394,9 @@ def test_recommendation_force_update_allows_only_checked_version_states(
     ):
         assert requested_plugin_id == plugin_id
         assert current_version == "1.0.0"
-        assert source_url == "https://github.com/qsbb/astrbot_plugin_voice_hub"
+        assert source_url == (
+            "https://github.com/qsbb/astrbot_plugin_environment_awareness"
+        )
         assert force_refresh is True
         return SimpleNamespace(target_version=remote_version, archive_url="https://zip")
 

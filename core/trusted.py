@@ -44,6 +44,13 @@ TRUSTED_SERIES = (
         "统一管理短期情绪、长期好感、信任与熟悉度，并输出结构化行为建议。",
     ),
     TrustedPlugin(
+        "境",
+        "astrbot_plugin_environment_awareness",
+        "凝心溯溪-境",
+        "https://github.com/qsbb/astrbot_plugin_environment_awareness",
+        "按需感知当地日历、天气、空气质量、官方预警和相关自然事件；免 API Key。",
+    ),
+    TrustedPlugin(
         "声",
         "astrbot_plugin_voice_hub",
         "凝心溯溪-声",

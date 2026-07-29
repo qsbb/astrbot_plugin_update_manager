@@ -41,7 +41,7 @@ from .core.transaction import PluginTransaction
 from .pages_api import PagesAPIMixin
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -465,7 +465,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("diag")
     async def aup_diag(self, event: AstrMessageEvent):
-        """诊断知、言、序、情、声、核六个系列插件。"""
+        """诊断知、言、序、情、境、声、核七个系列插件。"""
         report = await diagnose_series(self.adapter)
         request_context = ensure_context(event, PHASE_COMMAND)
         set_artifact(

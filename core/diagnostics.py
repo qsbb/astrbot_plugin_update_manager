@@ -6,15 +6,11 @@ import inspect
 from typing import Any
 
 from .health import HEALTH_CONTRACT, HealthChecker
+from .trusted import TRUSTED_SERIES
 
 
-SERIES_MEMBERS: tuple[tuple[str, str], ...] = (
-    ("astrbot_plugin_active_learner", "知"),
-    ("astrbot_plugin_conversation_flow", "言"),
-    ("astrbot_plugin_identity_guardian", "序"),
-    ("astrbot_plugin_relationship", "情"),
-    ("astrbot_plugin_voice_hub", "声"),
-    ("astrbot_plugin_update_manager", "核"),
+SERIES_MEMBERS: tuple[tuple[str, str], ...] = tuple(
+    (item.plugin_id, item.key) for item in TRUSTED_SERIES
 )
 
 

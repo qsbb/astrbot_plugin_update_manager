@@ -20,7 +20,7 @@
 - 更新前自动备份，更新后执行加载/版本/启用状态检查；声明 `plugin.health@1.0` 的插件还会执行业务健康检查，失败自动回滚。
 - 持久化每日规则、审计记录与备份清理策略（按数量、天数、容量）。
 - 提供 AstrBot Plugin Page 便捷设置页面，可查看总览、修改常用配置、浏览插件目录并管理固定可信系列推荐。
-- 固定可信系列清单仅包含 qsbb GitHub 仓库：知 `active_learner`、言 `conversation_flow`、序 `identity_guardian`、情 `relationship`、声 `voice_hub`、核 `update_manager`；核禁止自更新和自停用。
+- 固定可信系列清单仅包含 qsbb GitHub 仓库：知 `active_learner`、言 `conversation_flow`、序 `identity_guardian`、情 `relationship`、境 `environment_awareness`、声 `voice_hub`、核 `update_manager`；核禁止自更新和自停用。
 - Plugin Page API 采用运行时能力探测；旧版 AstrBot 不支持页面能力时自动降级，不影响命令与调度功能。
 - `github_token` 等敏感配置按只写方式处理：只显示“是否已配置”，敏感 token 不回显到页面、接口响应或审计。
 - `enabled=false` 时统一门禁全部命令与调度。
@@ -57,7 +57,7 @@
 在支持 Plugin Page 的 AstrBot 版本中，可从插件详情进入“更新管理”页面：
 
 - **总览**：查看插件状态、AstrBot 版本、更新能力探测结果与每日规则。
-- **系列推荐**：查看知、言、序、情、声、核固定可信清单；按运行时能力显示“安装/已安装”“更新”“强制更新”“启用/停用”，并提供“一键全部安装/更新”。普通更新仅在远端版本更高时可用；强制更新可用远端版本覆盖同版本或本地更高版本，并有独立二次警告。批量操作仍只执行普通更新，会先检查最新状态，再串行安装未安装项、更新确有新版本的已安装项；核始终跳过自更新。完成后汇总成功/失败并刷新推荐状态、总览和目录。核有新版本时，“前往已安装插件页”优先使用宿主 bridge 跳到 `/extension#installed`；bridge 不支持时保留链接的原生 `target="_top"` 跳转，只有宿主仍不允许顶层导航时才会显示并复制更新页 URL，复制失败则弹出 URL 供手动复制。
+- **系列推荐**：查看知、言、序、情、境、声、核固定可信清单；按运行时能力显示“安装/已安装”“更新”“强制更新”“启用/停用”，并提供“一键全部安装/更新”。普通更新仅在远端版本更高时可用；强制更新可用远端版本覆盖同版本或本地更高版本，并有独立二次警告；境与其他非核插件使用完全相同的安装、更新和安全门禁。批量操作仍只执行普通更新，会先检查最新状态，再串行安装未安装项、更新确有新版本的已安装项；核始终跳过自更新。完成后汇总成功/失败并刷新推荐状态、总览和目录。核有新版本时，“前往已安装插件页”优先使用宿主 bridge 跳到 `/extension#installed`；bridge 不支持时保留链接的原生 `target="_top"` 跳转，只有宿主仍不允许顶层导航时才会显示并复制更新页 URL，复制失败则弹出 URL 供手动复制。
 - **设置**：修改常用配置并即时应用；配置仍会持久化到 AstrBot `data` 目录。
 - **镜像加速**：列出内置与自定义 GitHub 加速站，单选启用、一键并发测速查看毫秒延迟、添加或移除自定义站点，保存即热应用。
 - **插件目录**：查看已安装插件、当前版本、来源与自动更新资格；右上角「检查更新」按需探测全部有 GitHub 来源的插件。普通「更新」仅在检测到远端新版本时可用；「强制更新」支持以远端版本覆盖本地版本，可用于同版本重装、恢复已回退插件，或将本地更高版本覆盖为远端版本，并使用独立二次确认。进入页面或切到该 tab 都不会自动检查，避免全量探测拖慢首屏并耗尽 GitHub 匿名配额。
@@ -78,6 +78,7 @@
 | `auto_update_enabled` | bool | false | 允许每日规则执行更新 |
 | `network_timeout_seconds` | int | 15 | 候选查询总超时 |
 | `cache_ttl_seconds` | int | 300 | 候选与条件请求缓存时长 |
+| `version_check_concurrency` | int | 7 | 版本检查并发上限；默认允许七个可信仓库同时探测，避免新增境后多等一轮 |
 | `github_mirror` | string | "" | GitHub 加速站前缀（留空直连；镜像失败自动回退直连，不会导致检查失败） |
 | `github_mirror_candidates` | string | "" | 自定义加速站列表（换行或逗号分隔，必须 https，非法项忽略） |
 | `mirror_benchmark_timeout_seconds` | float | 5.0 | 单个加速站测速超时；仅用于诊断，超时判为不可用 |
@@ -97,7 +98,7 @@ python -m ruff check astrbot_plugin_update_manager
 node --check astrbot_plugin_update_manager/pages/manager/app.js
 ```
 
-系列功能变更还应从 `astrbot/plugin/` 运行公共契约测试，确认钩子优先级和六份统一请求上下文没有漂移。
+系列功能变更还应从 `astrbot/plugin/` 运行公共契约测试，确认包含境在内的钩子优先级和现有六份统一请求上下文没有漂移。
 
 ## 维护约定
 

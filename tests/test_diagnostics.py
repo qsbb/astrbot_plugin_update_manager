@@ -32,6 +32,20 @@ class _Adapter:
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_environment_awareness_is_a_series_member(self):
+        self.assertEqual(
+            SERIES_MEMBERS,
+            (
+                ("astrbot_plugin_active_learner", "知"),
+                ("astrbot_plugin_conversation_flow", "言"),
+                ("astrbot_plugin_identity_guardian", "序"),
+                ("astrbot_plugin_relationship", "情"),
+                ("astrbot_plugin_environment_awareness", "境"),
+                ("astrbot_plugin_voice_hub", "声"),
+                ("astrbot_plugin_update_manager", "核"),
+            ),
+        )
+
     def test_legacy_members_are_reported_as_compatible(self):
         report = asyncio.run(diagnose_series(_Adapter()))
         self.assertEqual(report["status"], "ok")
