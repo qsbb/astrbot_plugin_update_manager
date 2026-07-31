@@ -132,6 +132,20 @@ def test_adapter_accepts_public_star_manager_alias():
     assert adapter.plugin_manager is manager
 
 
+def test_get_plugin_instance_reads_astrbot_4_star_cls():
+    instance = SimpleNamespace(diagnostic_log_contract=lambda: {})
+    metadata = star("astrbot_plugin_conversation_flow")
+    metadata.star_cls = instance
+
+    resolved = asyncio.run(
+        AstrBotAdapter(FakeContext([metadata])).get_plugin_instance(
+            "astrbot_plugin_conversation_flow"
+        )
+    )
+
+    assert resolved is instance
+
+
 def test_snapshot_preserves_source_reserved_and_disabled(monkeypatch):
     install_shared_preferences(
         monkeypatch,

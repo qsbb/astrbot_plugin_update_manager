@@ -167,6 +167,65 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch
     assert member["next_seq"] == 4
 
 
+def test_series_diagnostics_reads_astrbot_4_star_cls_without_adapter_stub(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        def diagnostic_events(self, *, after_seq, limit):
+            assert after_seq == 0
+            assert limit == 20
+            return {
+                "events": [
+                    {
+                        "seq": 1,
+                        "timestamp": "2026-07-31T10:00:00+00:00",
+                        "level": "INFO",
+                        "code": "plugin.ready",
+                        "summary": "对话流插件初始化完成",
+                        "details": {},
+                    }
+                ],
+                "next_seq": 1,
+                "dropped_before": 0,
+                "stream_id": "conversation-flow-stream",
+            }
+
+    ctx = context(tmp_path)
+    ctx.get_all_stars = lambda: [
+        SimpleNamespace(
+            name="astrbot_plugin_conversation_flow",
+            root_dir_name="astrbot_plugin_conversation_flow",
+            star_cls=Provider(),
+        )
+    ]
+    plugin = module.UpdateManagerPlugin(ctx, {})
+
+    async def request_json():
+        return {"cursors": {}, "limit": 20}
+
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+    payload = unwrap(asyncio.run(plugin._pages_diagnostic_logs()))
+    member = next(
+        item
+        for item in payload["members"]
+        if item["plugin_id"] == "astrbot_plugin_conversation_flow"
+    )
+
+    assert member["status"] == "ready"
+    assert member["next_seq"] == 1
+    event = next(
+        item
+        for item in payload["events"]
+        if item["plugin_id"] == "astrbot_plugin_conversation_flow"
+    )
+    assert event["code"] == "plugin.ready"
+
+
 def test_series_diagnostics_recovers_after_provider_sequence_reset(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})

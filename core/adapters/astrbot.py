@@ -503,7 +503,16 @@ class AstrBotAdapter:
                 continue
             if callable(getattr(star, "plugin_health", None)):
                 return star
-            for attribute in ("star", "instance", "star_instance", "plugin"):
+            # AstrBot 4.x stores the running plugin instance on
+            # StarMetadata.star_cls. Keep the older aliases for compatible
+            # wrappers used by integrations and tests.
+            for attribute in (
+                "star_cls",
+                "star",
+                "instance",
+                "star_instance",
+                "plugin",
+            ):
                 instance = getattr(star, attribute, None)
                 if instance is not None:
                     return instance
