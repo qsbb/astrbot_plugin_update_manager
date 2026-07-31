@@ -119,4 +119,4 @@ node --check astrbot_plugin_update_manager/pages/manager/app.js
 
 ## 许可证
 
-[MIT](LICENSE)。当前维护者：凌溪；原始版权归属见 LICENSE。
+[MIT](LICENSE)。作者：凌溪；英文版权署名：`qsbb`。
