@@ -481,7 +481,7 @@ class PagesAPIMixin:
                 {"success": False, "error": "INVALID_DIAGNOSTIC_STREAMS"}, status=400
             )
         try:
-            limit = min(300, max(1, int(data.get("limit", 300))))
+            limit = min(1000, max(1, int(data.get("limit", 1000))))
             normalized_cursors = {
                 item.plugin_id: max(0, int(cursors.get(item.plugin_id, 0)))
                 for item in TRUSTED_SERIES

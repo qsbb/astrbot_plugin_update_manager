@@ -994,7 +994,7 @@ function renderDiagnostics() {
   const events = filteredDiagnosticEvents();
   list.innerHTML = events.length ? events.map((event) => (
     `<article class="diagnostic-event level-${escapeHtml(event.level.toLowerCase())}">`
-      + `<div class="diagnostic-meta"><time>${escapeHtml(diagnosticTime(event.timestamp))}</time><span class="diagnostic-plugin">${escapeHtml(event.plugin_name)}</span><span class="diagnostic-level">${escapeHtml(event.level)}</span><code>${escapeHtml(event.code || "event")}</code></div>`
+      + `<div class="diagnostic-meta"><span class="diagnostic-plugin">${escapeHtml(event.plugin_name)}</span><time>${escapeHtml(diagnosticTime(event.timestamp))}</time><span class="diagnostic-level">${escapeHtml(event.level)}</span><code>${escapeHtml(event.code || "event")}</code></div>`
       + `<p>${escapeHtml(event.summary || "—")}</p>${diagnosticDetails(event.details)}</article>`
   )).join("") : `<p class="diagnostic-empty">${escapeHtml(t("diagnosticEmpty"))}</p>`;
   if (shouldStick) list.scrollTop = list.scrollHeight;
@@ -1026,7 +1026,7 @@ async function loadDiagnostics(reset = false) {
     const data = await apiPost("diagnostics/logs", {
       cursors: state.diagnosticCursors,
       streams: state.diagnosticStreams,
-      limit: 300
+      limit: 1000
     });
     if (generation !== state.diagnosticGeneration) return;
     state.diagnosticMembers = data.members || [];
@@ -1057,7 +1057,7 @@ async function loadDiagnostics(reset = false) {
       }
     });
     state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
-    if (state.diagnosticEvents.length > 1200) state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 1200);
+    if (state.diagnosticEvents.length > 10000) state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
     state.diagnosticLoaded = true;
     renderDiagnostics();
   } finally {

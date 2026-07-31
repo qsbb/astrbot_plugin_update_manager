@@ -71,6 +71,7 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert "resetPluginIds" in js
     assert "!resetPluginIds.has(event.plugin_id)" in js
     assert "escapeHtml(event.summary" in js
+    assert "diagnostic-plugin" in js
     assert "JSON.stringify(event.details || {})" in js
     assert ".diagnostic-log-list" in css
     assert "max-height:560px" in css

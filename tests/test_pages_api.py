@@ -385,7 +385,7 @@ def test_series_diagnostics_reports_first_read_buffer_gap(monkeypatch, tmp_path)
 
         def diagnostic_events(self, *, after_seq, limit):
             assert after_seq == 0
-            assert limit == 300
+            assert limit == 1000
             return {
                 "events": [],
                 "next_seq": 305,
@@ -398,7 +398,7 @@ def test_series_diagnostics_reports_first_read_buffer_gap(monkeypatch, tmp_path)
         return None
 
     async def request_json():
-        return {"cursors": {}, "limit": 300}
+        return {"cursors": {}, "limit": 1000}
 
     monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
     monkeypatch.setattr(plugin, "_request_json", request_json)
