@@ -181,7 +181,7 @@ def test_metadata_contract_matches_code(monkeypatch, tmp_path):
     assert meta["name"] == module.PLUGIN_NAME
     assert meta["name"].startswith("astrbot_plugin_")
     assert str(meta["version"]) == module.__version__
-    assert meta["author"] == "Justice-ocr"
+    assert meta["author"] == "凌溪"
     assert meta["repo"].startswith("https://github.com/")
     assert meta["repo"].endswith("/" + module.PLUGIN_NAME)
     assert not meta["repo"].endswith(".git")

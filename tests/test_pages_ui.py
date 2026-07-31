@@ -35,11 +35,45 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="config"' in html
     assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
+    assert 'data-tab="logs"' in html
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
     assert '"zh-CN"' in js and '"en-US"' in js
     assert "async function resolveBridge" in js
     assert "waitForAstrBotBridge" in js
+
+
+def test_manager_page_has_incremental_series_diagnostic_console():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    for element_id in (
+        "diagnostic-pause",
+        "diagnostic-refresh",
+        "diagnostic-clear",
+        "diagnostic-plugin-filter",
+        "diagnostic-level-filter",
+        "diagnostic-search",
+        "diagnostic-members",
+        "diagnostic-log-list",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'apiPost("diagnostics/logs", {' in js
+    assert "cursors: state.diagnosticCursors" in js
+    assert "streams: state.diagnosticStreams" in js
+    assert 'apiPost("diagnostics/clear", { confirm: true })' in js
+    assert "startDiagnosticPolling" in js
+    assert "stopDiagnosticPolling" in js
+    assert "state.diagnosticPaused" in js
+    assert "state.diagnosticGeneration" in js
+    assert "state.diagnosticRefreshPending" in js
+    assert "generation !== state.diagnosticGeneration" in js
+    assert "resetPluginIds" in js
+    assert "!resetPluginIds.has(event.plugin_id)" in js
+    assert "escapeHtml(event.summary" in js
+    assert "JSON.stringify(event.details || {})" in js
+    assert ".diagnostic-log-list" in css
+    assert "max-height:560px" in css
 
 
 def test_manager_page_waits_for_bridge_before_binding_events():

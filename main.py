@@ -7,7 +7,6 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
@@ -39,15 +38,21 @@ from .core.request_context import (
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
 from .pages_api import PagesAPIMixin
+from .series_diagnostics import (
+    diagnostic_clear as clear_diagnostic_events,
+    diagnostic_event,
+    diagnostic_events as read_diagnostic_events,
+    logger,
+)
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
 @register(
     PLUGIN_NAME,
-    "Justice-ocr",
+    "凌溪",
     "凝心溯溪-核，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
@@ -59,6 +64,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         global _current_instance
         _current_instance = self
         self.context, self._config = context, config
+        diagnostic_event("plugin.init", "更新管理插件开始初始化")
         self._native_config = config if callable(getattr(config, "save_config", None)) else None
         self._config_overrides: dict[str, Any] = {}
         data_root = self._resolve_data_root()
@@ -107,13 +113,22 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self.scheduler = ScheduleService(
             getattr(context, "cron_manager", None), self.store, self._scheduled_run
         )
-        self._register_pages_web_api()
+        pages_registered = self._register_pages_web_api()
         interrupted = self.coordinator.recover_interrupted()
         logger.info(
             "[update-manager] v%s loaded; recovered=%d; automatic=%s",
             __version__,
             interrupted,
             self.auto_update_enabled,
+        )
+        diagnostic_event(
+            "plugin.ready",
+            "更新管理插件初始化完成",
+            details={
+                "recovered_count": interrupted,
+                "automatic_update_enabled": self.auto_update_enabled,
+                "pages_registered": pages_registered,
+            },
         )
 
     def plugin_health(self) -> dict[str, object]:
@@ -130,6 +145,22 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "reasons": reasons,
             "version": __version__,
         }
+
+    def diagnostic_log_contract(self) -> dict[str, object]:
+        return {
+            "name": "series.diagnostics",
+            "version": "1.0",
+            "plugin": PLUGIN_NAME,
+            "capabilities": ("read", "clear", "aggregate"),
+            "storage": "memory_only",
+            "astrbot_log_propagation": False,
+        }
+
+    def diagnostic_events(self, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:
+        return read_diagnostic_events(after_seq=after_seq, limit=limit)
+
+    def diagnostic_clear(self) -> None:
+        clear_diagnostic_events()
 
     def _get(self, key: str, default: Any) -> Any:
         if key in self._config_overrides:
@@ -168,7 +199,11 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     @staticmethod
     def _apply_log_level(level_name: str) -> None:
         level = getattr(logging, level_name.upper(), None)
-        underlying = getattr(logger, "_logger", None) or getattr(logger, "logger", None)
+        underlying = (
+            logger
+            if callable(getattr(logger, "setLevel", None))
+            else getattr(logger, "_logger", None) or getattr(logger, "logger", None)
+        )
         if (
             isinstance(level, int)
             and underlying is not None
@@ -612,4 +647,5 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 self._terminated = True
                 if _current_instance is self:
                     _current_instance = None
+        diagnostic_event("plugin.terminated", "更新管理插件已卸载")
         logger.info("[update-manager] terminated")

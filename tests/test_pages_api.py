@@ -35,6 +35,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/catalog/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog/enable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/catalog/disable", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/diagnostics/logs", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/diagnostics/clear", ("POST",)),
         (f"/{module.PLUGIN_NAME}/recommendations", ("GET",)),
         (f"/{module.PLUGIN_NAME}/recommendations/check-latest", ("POST",)),
         (f"/{module.PLUGIN_NAME}/recommendations/apply-all", ("POST",)),
@@ -95,6 +97,303 @@ def test_pages_request_json_prefers_astrbot_web_contract(monkeypatch, tmp_path):
 
     assert asyncio.run(plugin._request_json()) == {"enabled": False}
     assert calls == [{}]
+
+
+def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        def diagnostic_events(self, *, after_seq, limit):
+            assert after_seq == 3
+            assert limit == 20
+            return {
+                "events": [
+                    {
+                        "seq": 4,
+                        "timestamp": "2026-07-31T10:00:00+00:00",
+                        "plugin_id": "untrusted",
+                        "plugin_name": "伪造",
+                        "level": "WARN",
+                        "code": "tool.timeout",
+                        "summary": (
+                            "request 123456789 timed out "
+                            "authorization=secret message='private text' "
+                            "alice@example.com Abcdef1234567890Ghijkl"
+                        ),
+                        "details": {"duration_ms": 6000, "user_id": "123456789"},
+                    }
+                ],
+                "next_seq": 4,
+                "dropped_before": 0,
+            }
+
+    provider = Provider()
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_conversation_flow":
+            return provider
+        return None
+
+    async def request_json():
+        return {
+            "cursors": {"astrbot_plugin_conversation_flow": 3},
+            "limit": 20,
+        }
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+    payload = unwrap(asyncio.run(plugin._pages_diagnostic_logs()))
+    event = next(
+        item
+        for item in payload["events"]
+        if item["plugin_id"] == "astrbot_plugin_conversation_flow"
+    )
+    assert payload["contract"] == "series.diagnostics.aggregate@1.0"
+    assert event["plugin_id"] == "astrbot_plugin_conversation_flow"
+    assert event["plugin_name"] == "言"
+    assert event["level"] == "WARNING"
+    assert "123456789" not in event["summary"]
+    assert "authorization=secret" not in event["summary"]
+    assert "private text" not in event["summary"]
+    assert "alice@example.com" not in event["summary"]
+    assert "Abcdef1234567890Ghijkl" not in event["summary"]
+    assert event["details"] == {"duration_ms": 6000}
+    member = next(item for item in payload["members"] if item["plugin_name"] == "言")
+    assert member["status"] == "ready"
+    assert member["next_seq"] == 4
+
+
+def test_series_diagnostics_recovers_after_provider_sequence_reset(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    calls = []
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        def diagnostic_events(self, *, after_seq, limit):
+            calls.append((after_seq, limit))
+            return {
+                "events": []
+                if after_seq
+                else [
+                    {
+                        "seq": 2,
+                        "timestamp": "2026-07-31T10:00:00+00:00",
+                        "level": "INFO",
+                        "code": "plugin.ready",
+                        "summary": "reloaded",
+                    }
+                ],
+                "next_seq": 2,
+                "dropped_before": 0,
+            }
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_conversation_flow":
+            return Provider()
+        return None
+
+    from astrbot_plugin_update_manager.core.trusted import TRUSTED_SERIES
+
+    item = next(
+        candidate
+        for candidate in TRUSTED_SERIES
+        if candidate.plugin_id == "astrbot_plugin_conversation_flow"
+    )
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    member, events = asyncio.run(
+        plugin._read_plugin_diagnostics(item, after_seq=10, limit=20)
+    )
+
+    assert calls == [(10, 20), (0, 20)]
+    assert member["status"] == "ready"
+    assert member["reset"] is True
+    assert member["next_seq"] == 2
+    assert [event["seq"] for event in events] == [2]
+
+
+def test_series_diagnostics_resets_when_stream_changes_at_equal_cursor(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    calls = []
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        def diagnostic_events(self, *, after_seq, limit):
+            calls.append((after_seq, limit))
+            return {
+                "stream_id": "new-stream",
+                "events": []
+                if after_seq
+                else [
+                    {
+                        "seq": 2,
+                        "timestamp": "2026-07-31T10:00:00+00:00",
+                        "level": "INFO",
+                        "code": "plugin.ready",
+                        "summary": "reloaded",
+                    }
+                ],
+                "next_seq": 2,
+                "dropped_before": 0,
+            }
+
+    provider = Provider()
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_conversation_flow":
+            return provider
+        return None
+
+    from astrbot_plugin_update_manager.core.trusted import TRUSTED_SERIES
+
+    item = next(
+        candidate
+        for candidate in TRUSTED_SERIES
+        if candidate.plugin_id == "astrbot_plugin_conversation_flow"
+    )
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    member, events = asyncio.run(
+        plugin._read_plugin_diagnostics(
+            item,
+            after_seq=2,
+            limit=20,
+            expected_stream_id="old-stream",
+        )
+    )
+
+    assert calls == [(2, 20), (0, 20)]
+    assert member["reset"] is True
+    assert member["stream_id"] == "new-stream"
+    assert [event["seq"] for event in events] == [2]
+
+
+def test_series_diagnostics_times_out_one_provider_without_blocking_page(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(pages_api, "DIAGNOSTIC_READ_TIMEOUT_SECONDS", 0.01)
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        async def diagnostic_events(self, *, after_seq, limit):
+            await asyncio.sleep(0.05)
+            return {"events": [], "next_seq": 0, "dropped_before": 0}
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_conversation_flow":
+            return Provider()
+        return None
+
+    from astrbot_plugin_update_manager.core.trusted import TRUSTED_SERIES
+
+    item = next(
+        candidate
+        for candidate in TRUSTED_SERIES
+        if candidate.plugin_id == "astrbot_plugin_conversation_flow"
+    )
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    member, events = asyncio.run(
+        plugin._read_plugin_diagnostics(item, after_seq=0, limit=20)
+    )
+
+    assert member["status"] == "timeout"
+    assert member["reason"] == "DIAGNOSTIC_READ_TIMEOUT"
+    assert events == []
+
+
+def test_series_diagnostics_reports_first_read_buffer_gap(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+        def diagnostic_events(self, *, after_seq, limit):
+            assert after_seq == 0
+            assert limit == 300
+            return {
+                "events": [],
+                "next_seq": 305,
+                "dropped_before": 5,
+            }
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_conversation_flow":
+            return Provider()
+        return None
+
+    async def request_json():
+        return {"cursors": {}, "limit": 300}
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+    payload = unwrap(asyncio.run(plugin._pages_diagnostic_logs()))
+    member = next(
+        item
+        for item in payload["members"]
+        if item["plugin_id"] == "astrbot_plugin_conversation_flow"
+    )
+    assert member["status"] == "ready"
+    assert member["gap"] is True
+    assert member["dropped_before"] == 5
+
+
+def test_series_diagnostics_clear_validates_scope_and_degrades_missing(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    calls = []
+
+    class Provider:
+        def diagnostic_clear(self):
+            calls.append("cleared")
+
+    async def get_instance(plugin_id):
+        return Provider() if plugin_id == "astrbot_plugin_voice_hub" else None
+
+    async def clear_without_confirmation():
+        return {}
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin, "_request_json", clear_without_confirmation)
+    payload, status = asyncio.run(plugin._pages_clear_diagnostic_logs())
+    assert status == 400
+    assert payload["error"] == "CONFIRMATION_REQUIRED"
+    assert calls == []
+
+    async def clear_voice():
+        return {"confirm": True, "plugin_ids": ["astrbot_plugin_voice_hub"]}
+
+    monkeypatch.setattr(plugin, "_request_json", clear_voice)
+    payload = unwrap(asyncio.run(plugin._pages_clear_diagnostic_logs()))
+    assert payload["cleared"] == ["astrbot_plugin_voice_hub"]
+    assert calls == ["cleared"]
+
+    async def clear_untrusted():
+        return {
+            "confirm": True,
+            "plugin_ids": ["astrbot_plugin_orchestration_hub"],
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", clear_untrusted)
+    payload, status = asyncio.run(plugin._pages_clear_diagnostic_logs())
+    assert status == 403
+    assert payload["error"] == "PLUGIN_NOT_TRUSTED"
 
 
 def test_pages_save_config_validates_and_preserves_empty_token(monkeypatch, tmp_path):

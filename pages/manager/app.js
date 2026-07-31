@@ -1,7 +1,7 @@
 const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
-    refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", loading: "加载中…",
+    refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…",
     startupFailed: "页面启动失败",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
@@ -21,11 +21,12 @@ const messages = {
     mirrorsTitle: "GitHub 镜像加速", mirrorsHint: "加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。", mirrorDirect: "直连 GitHub（不使用加速站）", mirrorBuiltin: "内置", mirrorCustom: "自定义",
     mirrorBenchmark: "一键测速", mirrorBenchmarking: "正在测速…", mirrorBenchmarkDone: "测速完成", mirrorLatency: "延迟", mirrorUnreachable: "不可用", mirrorUntested: "未测速",
     mirrorApply: "使用该加速站", mirrorApplied: "加速站已切换", mirrorAddTitle: "添加自定义加速站", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "添加", mirrorAdded: "自定义加速站已添加", mirrorInvalid: "加速站必须是合法的 https 前缀", mirrorDuplicate: "该加速站已在列表中", mirrorRemove: "移除", mirrorRemoved: "自定义加速站已移除", mirrorProbeHint: "测速探针",
-    ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）"
+    ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）",
+    diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码或摘要", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticCount: "显示 {shown} 条，共缓存 {total} 条", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
-    refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", loading: "Loading…",
+    refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…",
     startupFailed: "Page startup failed",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
@@ -45,7 +46,8 @@ const messages = {
     mirrorsTitle: "GitHub mirror acceleration", mirrorsHint: "Mirrors only proxy by prefix. An unavailable mirror falls back to a direct connection and never fails the check.", mirrorDirect: "Direct GitHub connection (no mirror)", mirrorBuiltin: "Built-in", mirrorCustom: "Custom",
     mirrorBenchmark: "Run benchmark", mirrorBenchmarking: "Benchmarking…", mirrorBenchmarkDone: "Benchmark completed", mirrorLatency: "Latency", mirrorUnreachable: "Unavailable", mirrorUntested: "Not tested",
     mirrorApply: "Use this mirror", mirrorApplied: "Mirror switched", mirrorAddTitle: "Add a custom mirror", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "Add", mirrorAdded: "Custom mirror added", mirrorInvalid: "A mirror must be a valid https prefix", mirrorDuplicate: "This mirror is already listed", mirrorRemove: "Remove", mirrorRemoved: "Custom mirror removed", mirrorProbeHint: "Benchmark probe",
-    ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)"
+    ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)",
+    diagnosticTitle: "Series diagnostic logs", pauseLogs: "Pause", resumeLogs: "Resume", refreshLogs: "Refresh logs", clearLogs: "Clear", pluginFilter: "Plugin", levelFilter: "Level", searchLogs: "Search", searchLogsPlaceholder: "Event code or summary", allPlugins: "All plugins", allLevels: "All levels", diagnosticReady: "Ready", diagnosticMissing: "Not loaded", diagnosticUnsupported: "Unsupported", diagnosticFailed: "Read failed", diagnosticCount: "Showing {shown} of {total} cached events", diagnosticPaused: "Paused", diagnosticEmpty: "No matching events", clearDiagnosticsConfirm: "Clear all in-memory series diagnostic logs?", diagnosticsCleared: "Diagnostic logs cleared", diagnosticGap: "Some older events were overwritten by the ring buffer"
   }
 };
 
@@ -89,7 +91,17 @@ const state = {
   catalogCheckBusy: false,
   catalogBusy: null,
   catalogItems: [],
-  catalogDiagnostics: []
+  catalogDiagnostics: [],
+  diagnosticEvents: [],
+  diagnosticMembers: [],
+  diagnosticCursors: {},
+  diagnosticStreams: {},
+  diagnosticLoaded: false,
+  diagnosticBusy: false,
+  diagnosticGeneration: 0,
+  diagnosticRefreshPending: false,
+  diagnosticPaused: false,
+  diagnosticTimer: null
 };
 const t = (key) => messages[state.locale][key] || key;
 
@@ -923,8 +935,174 @@ async function runCatalogAction(input) {
   }
 }
 
+function diagnosticStatusKey(status) {
+  if (status === "ready") return "diagnosticReady";
+  if (status === "missing") return "diagnosticMissing";
+  if (status === "unsupported" || status === "incompatible") return "diagnosticUnsupported";
+  return "diagnosticFailed";
+}
+
+function diagnosticStatusClass(status) {
+  if (status === "ready") return "ok";
+  if (status === "missing" || status === "unsupported") return "off";
+  return "warn";
+}
+
+function syncDiagnosticPluginFilter() {
+  const select = document.getElementById("diagnostic-plugin-filter");
+  const selected = select.value;
+  select.innerHTML = `<option value="">${escapeHtml(t("allPlugins"))}</option>` + state.diagnosticMembers.map((member) => (
+    `<option value="${escapeHtml(member.plugin_id)}">${escapeHtml(member.plugin_name)} · ${escapeHtml(member.display_name)}</option>`
+  )).join("");
+  if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+}
+
+function diagnosticDetails(details) {
+  const entries = Object.entries(details || {});
+  if (!entries.length) return "";
+  return `<div class="diagnostic-details">${entries.map(([key, value]) => (
+    `<span><code>${escapeHtml(key)}</code>${escapeHtml(Array.isArray(value) ? value.join(", ") : value)}</span>`
+  )).join("")}</div>`;
+}
+
+function diagnosticTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value || "—");
+  return parsed.toLocaleString(state.locale, { hour12: false });
+}
+
+function filteredDiagnosticEvents() {
+  const pluginId = document.getElementById("diagnostic-plugin-filter").value;
+  const level = document.getElementById("diagnostic-level-filter").value;
+  const query = document.getElementById("diagnostic-search").value.trim().toLocaleLowerCase();
+  return state.diagnosticEvents.filter((event) => {
+    if (pluginId && event.plugin_id !== pluginId) return false;
+    if (level && event.level !== level) return false;
+    if (!query) return true;
+    return `${event.plugin_name} ${event.code} ${event.summary} ${JSON.stringify(event.details || {})}`.toLocaleLowerCase().includes(query);
+  });
+}
+
+function renderDiagnostics() {
+  syncDiagnosticPluginFilter();
+  const memberNode = document.getElementById("diagnostic-members");
+  memberNode.innerHTML = state.diagnosticMembers.map((member) => (
+    `<span class="diagnostic-member ${diagnosticStatusClass(member.status)}" title="${escapeHtml(member.reason || "")}"><strong>${escapeHtml(member.plugin_name)}</strong>${escapeHtml(t(diagnosticStatusKey(member.status)))}</span>`
+  )).join("");
+  const list = document.getElementById("diagnostic-log-list");
+  const shouldStick = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  const events = filteredDiagnosticEvents();
+  list.innerHTML = events.length ? events.map((event) => (
+    `<article class="diagnostic-event level-${escapeHtml(event.level.toLowerCase())}">`
+      + `<div class="diagnostic-meta"><time>${escapeHtml(diagnosticTime(event.timestamp))}</time><span class="diagnostic-plugin">${escapeHtml(event.plugin_name)}</span><span class="diagnostic-level">${escapeHtml(event.level)}</span><code>${escapeHtml(event.code || "event")}</code></div>`
+      + `<p>${escapeHtml(event.summary || "—")}</p>${diagnosticDetails(event.details)}</article>`
+  )).join("") : `<p class="diagnostic-empty">${escapeHtml(t("diagnosticEmpty"))}</p>`;
+  if (shouldStick) list.scrollTop = list.scrollHeight;
+  const hasGap = state.diagnosticMembers.some((member) => member.gap);
+  const summary = t("diagnosticCount")
+    .replace("{shown}", String(events.length))
+    .replace("{total}", String(state.diagnosticEvents.length));
+  document.getElementById("diagnostic-summary").textContent = [summary, state.diagnosticPaused ? t("diagnosticPaused") : "", hasGap ? t("diagnosticGap") : ""].filter(Boolean).join(" · ");
+  document.getElementById("diagnostic-pause").textContent = t(state.diagnosticPaused ? "resumeLogs" : "pauseLogs");
+}
+
+async function loadDiagnostics(reset = false) {
+  if (state.diagnosticBusy) {
+    if (reset) {
+      state.diagnosticGeneration += 1;
+      state.diagnosticRefreshPending = true;
+    }
+    return;
+  }
+  if (reset) state.diagnosticGeneration += 1;
+  const generation = state.diagnosticGeneration;
+  state.diagnosticBusy = true;
+  if (reset) {
+    state.diagnosticEvents = [];
+    state.diagnosticCursors = {};
+    state.diagnosticStreams = {};
+  }
+  try {
+    const data = await apiPost("diagnostics/logs", {
+      cursors: state.diagnosticCursors,
+      streams: state.diagnosticStreams,
+      limit: 300
+    });
+    if (generation !== state.diagnosticGeneration) return;
+    state.diagnosticMembers = data.members || [];
+    const resetPluginIds = new Set(
+      state.diagnosticMembers.filter((member) => member.reset).map((member) => member.plugin_id)
+    );
+    if (resetPluginIds.size) {
+      state.diagnosticEvents = state.diagnosticEvents.filter(
+        (event) => !resetPluginIds.has(event.plugin_id)
+      );
+    }
+    state.diagnosticMembers.forEach((member) => {
+      if (member.status === "ready") {
+        state.diagnosticCursors[member.plugin_id] = member.next_seq || 0;
+        if (member.stream_id) {
+          state.diagnosticStreams[member.plugin_id] = member.stream_id;
+        } else {
+          delete state.diagnosticStreams[member.plugin_id];
+        }
+      }
+    });
+    const seen = new Set(state.diagnosticEvents.map((event) => `${event.plugin_id}:${event.seq}`));
+    (data.events || []).forEach((event) => {
+      const key = `${event.plugin_id}:${event.seq}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        state.diagnosticEvents.push(event);
+      }
+    });
+    state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
+    if (state.diagnosticEvents.length > 1200) state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 1200);
+    state.diagnosticLoaded = true;
+    renderDiagnostics();
+  } finally {
+    state.diagnosticBusy = false;
+    if (state.diagnosticRefreshPending) {
+      state.diagnosticRefreshPending = false;
+      await loadDiagnostics(true);
+    }
+  }
+}
+
+function stopDiagnosticPolling() {
+  if (state.diagnosticTimer !== null) window.clearInterval(state.diagnosticTimer);
+  state.diagnosticTimer = null;
+}
+
+function startDiagnosticPolling() {
+  stopDiagnosticPolling();
+  if (state.diagnosticPaused) return;
+  state.diagnosticTimer = window.setInterval(() => {
+    if (document.getElementById("logs").classList.contains("active")) {
+      loadDiagnostics().catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
+    }
+  }, 2000);
+}
+
+async function clearDiagnostics() {
+  if (!await showConfirmation(t("clearDiagnosticsConfirm"))) return;
+  state.diagnosticGeneration += 1;
+  await apiPost("diagnostics/clear", { confirm: true });
+  state.diagnosticEvents = [];
+  state.diagnosticMembers = [];
+  state.diagnosticCursors = {};
+  state.diagnosticStreams = {};
+  state.diagnosticLoaded = true;
+  renderDiagnostics();
+  await loadDiagnostics(true);
+  toast(t("diagnosticsCleared"));
+}
+
 async function refreshAll() {
-  try { await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadMirrors(), loadCatalog()]); }
+  try {
+    await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadMirrors(), loadCatalog()]);
+    if (state.diagnosticLoaded) await loadDiagnostics(true);
+  }
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
 }
 
@@ -943,10 +1121,15 @@ function bindEvents() {
     document.querySelectorAll("[data-tab], .panel").forEach((node) => node.classList.remove("active"));
     button.classList.add("active");
     document.getElementById(button.dataset.tab).classList.add("active");
+    if (button.dataset.tab !== "logs") stopDiagnosticPolling();
     if (button.dataset.tab === "recommendations") {
       autoCheckRecommendations().catch((error) => {
         console.warn("Automatic recommendation version check failed", error);
       });
+    }
+    if (button.dataset.tab === "logs") {
+      loadDiagnostics(!state.diagnosticLoaded).catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
+      startDiagnosticPolling();
     }
   }));
   // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
@@ -1008,6 +1191,21 @@ function bindEvents() {
       removeCustomMirror(button.dataset.mirrorRemove);
     }
   });
+  document.getElementById("diagnostic-pause").addEventListener("click", () => {
+    state.diagnosticPaused = !state.diagnosticPaused;
+    if (state.diagnosticPaused) stopDiagnosticPolling();
+    else startDiagnosticPolling();
+    renderDiagnostics();
+  });
+  document.getElementById("diagnostic-refresh").addEventListener("click", () => {
+    loadDiagnostics(true).catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
+  });
+  document.getElementById("diagnostic-clear").addEventListener("click", () => {
+    clearDiagnostics().catch((error) => toast(`${t("operationFailed")}: ${error.message}`, true));
+  });
+  document.getElementById("diagnostic-plugin-filter").addEventListener("change", renderDiagnostics);
+  document.getElementById("diagnostic-level-filter").addEventListener("change", renderDiagnostics);
+  document.getElementById("diagnostic-search").addEventListener("input", renderDiagnostics);
   document.getElementById("check-latest").addEventListener("click", async () => {
     // 与自动检查共享同一把锁：任一方在跑时忽略新的手动点击。
     if (state.versionCheckBusy) return;

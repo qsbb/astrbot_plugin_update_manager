@@ -26,6 +26,7 @@
       <button data-tab="config" data-i18n="config">配置</button>
       <button data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
       <button data-tab="catalog" data-i18n="catalog">目录</button>
+      <button data-tab="logs" data-i18n="logs">日志</button>
     </nav>
 
     <section id="overview" class="panel active">
@@ -77,6 +78,29 @@
     <section id="catalog" class="panel">
       <div id="catalog-rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
       <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
+    </section>
+
+    <section id="logs" class="panel">
+      <article class="card diagnostic-card">
+        <div class="section-heading">
+          <div>
+            <h2 data-i18n="diagnosticTitle">系列诊断日志</h2>
+            <p id="diagnostic-summary" class="diagnostic-summary" aria-live="polite"></p>
+          </div>
+          <div class="section-actions">
+            <button id="diagnostic-pause" type="button" data-i18n="pauseLogs">暂停</button>
+            <button id="diagnostic-refresh" type="button" data-i18n="refreshLogs">刷新日志</button>
+            <button id="diagnostic-clear" type="button" data-i18n="clearLogs">清空</button>
+          </div>
+        </div>
+        <div class="diagnostic-filters">
+          <label><span data-i18n="pluginFilter">插件</span><select id="diagnostic-plugin-filter"><option value="" data-i18n="allPlugins">全部插件</option></select></label>
+          <label><span data-i18n="levelFilter">级别</span><select id="diagnostic-level-filter"><option value="" data-i18n="allLevels">全部级别</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
+          <label class="diagnostic-search"><span data-i18n="searchLogs">搜索</span><input id="diagnostic-search" type="search" data-i18n-placeholder="searchLogsPlaceholder" placeholder="事件码或摘要" /></label>
+        </div>
+        <div id="diagnostic-members" class="diagnostic-members" aria-label="Plugin diagnostic status"></div>
+        <div id="diagnostic-log-list" class="diagnostic-log-list" role="log" aria-live="off"><p data-i18n="loading">加载中…</p></div>
+      </article>
     </section>
     <div id="startup-error" class="startup-error" role="alert" hidden></div>
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>

@@ -60,6 +60,34 @@ except ImportError:  # AstrBot < 4.26
 PLUGIN_ID = "astrbot_plugin_update_manager"
 SENSITIVE_KEYS = frozenset({"github_token"})
 READ_ONLY_KEYS = frozenset({"data_dir", "plugin_root"})
+DIAGNOSTIC_CONTRACT_NAME = "series.diagnostics"
+DIAGNOSTIC_CONTRACT_MAJOR = "1"
+DIAGNOSTIC_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+DIAGNOSTIC_READ_TIMEOUT_SECONDS = 1.0
+_DIAGNOSTIC_STREAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_DIAGNOSTIC_SENSITIVE_KEY = re.compile(
+    r"(?:token|api[_-]?key|secret|password|authorization|cookie|umo|user[_-]?id|group[_-]?id|platform[_-]?id)",
+    re.IGNORECASE,
+)
+_DIAGNOSTIC_LONG_NUMBER = re.compile(r"(?<![\w.])[0-9]{6,}(?![\w.])")
+_DIAGNOSTIC_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]+", re.IGNORECASE)
+_DIAGNOSTIC_EMAIL = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE
+)
+_DIAGNOSTIC_OPAQUE_VALUE = re.compile(
+    r"(?<![\w])(?=[A-Za-z0-9_-]{20,}(?![\w]))"
+    r"(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*[0-9])"
+    r"[A-Za-z0-9_-]+"
+)
+_DIAGNOSTIC_SECRET_VALUE = re.compile(
+    r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|umo|"
+    r"user[_-]?id|group[_-]?id|platform[_-]?id)\s*[:=]\s*"
+    r"(?:bearer\s+)?([^,\s]+)"
+)
+_DIAGNOSTIC_PRIVATE_VALUE = re.compile(
+    r"(?i)(user_text|prompt|response|reply|query|topic|content|scope|message|"
+    r"new_settings)\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^,\s]+)"
+)
 RULE_WRITABLE_KEYS = frozenset(
     {
         "enabled",
@@ -117,6 +145,18 @@ class PagesAPIMixin:
             ("catalog/update", self._pages_catalog_update, ["POST"], "更新目录插件"),
             ("catalog/enable", self._pages_catalog_enable, ["POST"], "启用目录插件"),
             ("catalog/disable", self._pages_catalog_disable, ["POST"], "停用目录插件"),
+            (
+                "diagnostics/logs",
+                self._pages_diagnostic_logs,
+                ["POST"],
+                "读取系列插件内部诊断日志",
+            ),
+            (
+                "diagnostics/clear",
+                self._pages_clear_diagnostic_logs,
+                ["POST"],
+                "清空系列插件内部诊断日志",
+            ),
             ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
             (
                 "recommendations/check-latest",
@@ -217,6 +257,316 @@ class PagesAPIMixin:
                 schema[key] = {**schema[key], "write_only": True}
         return json_response(
             {"success": True, "config": self._public_config(), "schema": schema}
+        )
+
+    @staticmethod
+    def _diagnostic_text(value: Any, limit: int) -> str:
+        text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+        text = _DIAGNOSTIC_SECRET_VALUE.sub(r"\1=<已隐藏>", text)
+        text = _DIAGNOSTIC_PRIVATE_VALUE.sub(r"\1=<已隐藏>", text)
+        text = _DIAGNOSTIC_EMAIL.sub("<已隐藏邮箱>", text)
+        text = _DIAGNOSTIC_OPAQUE_VALUE.sub("<已隐藏随机标识>", text)
+        text = _DIAGNOSTIC_URL_QUERY.sub(r"\1?[已隐藏参数]", text)
+        text = _DIAGNOSTIC_LONG_NUMBER.sub("<已隐藏标识>", text)
+        return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
+
+    @classmethod
+    def _diagnostic_details(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        details: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = cls._diagnostic_text(raw_key, 64)
+            if not key or _DIAGNOSTIC_SENSITIVE_KEY.search(key):
+                continue
+            if isinstance(raw_value, (bool, int, float)) or raw_value is None:
+                details[key] = raw_value
+            elif isinstance(raw_value, str):
+                details[key] = cls._diagnostic_text(raw_value, 160)
+            elif isinstance(raw_value, (list, tuple)):
+                details[key] = [cls._diagnostic_text(item, 80) for item in raw_value[:8]]
+        return details
+
+    @classmethod
+    def _normalize_diagnostic_event(
+        cls, value: Any, *, plugin_id: str, plugin_name: str
+    ) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            sequence = max(0, int(value.get("seq", 0)))
+        except (TypeError, ValueError):
+            return None
+        level = str(value.get("level") or "INFO").upper()
+        if level == "WARN":
+            level = "WARNING"
+        if level not in DIAGNOSTIC_LEVELS:
+            level = "INFO"
+        return {
+            "seq": sequence,
+            "timestamp": cls._diagnostic_text(value.get("timestamp"), 40),
+            "plugin_id": plugin_id,
+            "plugin_name": plugin_name,
+            "level": level,
+            "code": cls._diagnostic_text(value.get("code"), 80),
+            "summary": cls._diagnostic_text(value.get("summary"), 320),
+            "details": cls._diagnostic_details(value.get("details")),
+        }
+
+    async def _diagnostic_instance(self, plugin_id: str) -> Any | None:
+        if plugin_id == PLUGIN_ID:
+            return self
+        getter = getattr(self.adapter, "get_plugin_instance", None)
+        if not callable(getter):
+            return None
+        value = getter(plugin_id)
+        return await value if inspect.isawaitable(value) else value
+
+    @staticmethod
+    async def _diagnostic_call(
+        callback: Any, /, *args: Any, **kwargs: Any
+    ) -> Any:
+        if inspect.iscoroutinefunction(callback):
+            pending = callback(*args, **kwargs)
+        else:
+            pending = asyncio.to_thread(callback, *args, **kwargs)
+        value = await asyncio.wait_for(
+            pending, timeout=DIAGNOSTIC_READ_TIMEOUT_SECONDS
+        )
+        if inspect.isawaitable(value):
+            value = await asyncio.wait_for(
+                value, timeout=DIAGNOSTIC_READ_TIMEOUT_SECONDS
+            )
+        return value
+
+    async def _read_plugin_diagnostics(
+        self,
+        item: Any,
+        *,
+        after_seq: int,
+        limit: int,
+        expected_stream_id: str = "",
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        member = {
+            "plugin_id": item.plugin_id,
+            "plugin_name": item.key,
+            "display_name": item.display_name,
+            "status": "missing",
+            "next_seq": after_seq,
+            "dropped_before": 0,
+            "gap": False,
+            "reset": False,
+            "stream_id": "",
+        }
+        try:
+            instance = await self._diagnostic_instance(item.plugin_id)
+        except Exception as exc:
+            member.update(status="lookup_failed", reason=type(exc).__name__)
+            return member, []
+        if instance is None:
+            return member, []
+        declaration = getattr(instance, "diagnostic_log_contract", None)
+        reader = getattr(instance, "diagnostic_events", None)
+        if not callable(declaration) or not callable(reader):
+            member.update(status="unsupported", reason="CONTRACT_NOT_DECLARED")
+            return member, []
+        try:
+            contract = await self._diagnostic_call(declaration)
+            version = str(contract.get("version") or "") if isinstance(contract, dict) else ""
+            if (
+                not isinstance(contract, dict)
+                or contract.get("name") != DIAGNOSTIC_CONTRACT_NAME
+                or version.split(".", 1)[0] != DIAGNOSTIC_CONTRACT_MAJOR
+            ):
+                member.update(status="incompatible", reason="CONTRACT_INCOMPATIBLE")
+                return member, []
+            payload = await self._diagnostic_call(
+                reader, after_seq=after_seq, limit=limit
+            )
+        except TimeoutError:
+            member.update(status="timeout", reason="DIAGNOSTIC_READ_TIMEOUT")
+            return member, []
+        except Exception as exc:
+            member.update(status="read_failed", reason=type(exc).__name__)
+            return member, []
+        if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
+            member.update(status="invalid", reason="INVALID_PAYLOAD")
+            return member, []
+        raw_stream_id = payload.get("stream_id", "")
+        if raw_stream_id in (None, ""):
+            stream_id = ""
+        elif not isinstance(raw_stream_id, str) or not _DIAGNOSTIC_STREAM_ID.fullmatch(
+            raw_stream_id
+        ):
+            member.update(status="invalid", reason="INVALID_STREAM_ID")
+            return member, []
+        else:
+            stream_id = raw_stream_id
+        try:
+            next_seq = max(0, int(payload.get("next_seq", after_seq)))
+            dropped_before = max(0, int(payload.get("dropped_before", 0)))
+        except (TypeError, ValueError):
+            member.update(status="invalid", reason="INVALID_CURSOR")
+            return member, []
+        reset = bool(
+            (
+                expected_stream_id
+                and stream_id
+                and expected_stream_id != stream_id
+            )
+            or next_seq < after_seq
+        )
+        if reset:
+            try:
+                payload = await self._diagnostic_call(
+                    reader, after_seq=0, limit=limit
+                )
+            except TimeoutError:
+                member.update(status="timeout", reason="DIAGNOSTIC_READ_TIMEOUT")
+                return member, []
+            except Exception as exc:
+                member.update(status="read_failed", reason=type(exc).__name__)
+                return member, []
+            if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
+                member.update(status="invalid", reason="INVALID_PAYLOAD")
+                return member, []
+            raw_stream_id = payload.get("stream_id", "")
+            if raw_stream_id in (None, ""):
+                stream_id = ""
+            elif not isinstance(
+                raw_stream_id, str
+            ) or not _DIAGNOSTIC_STREAM_ID.fullmatch(raw_stream_id):
+                member.update(status="invalid", reason="INVALID_STREAM_ID")
+                return member, []
+            else:
+                stream_id = raw_stream_id
+            try:
+                next_seq = max(0, int(payload.get("next_seq", 0)))
+                dropped_before = max(0, int(payload.get("dropped_before", 0)))
+            except (TypeError, ValueError):
+                member.update(status="invalid", reason="INVALID_CURSOR")
+                return member, []
+        events = [
+            normalized
+            for raw_event in payload["events"][:limit]
+            if (
+                normalized := self._normalize_diagnostic_event(
+                    raw_event, plugin_id=item.plugin_id, plugin_name=item.key
+                )
+            )
+        ]
+        member.update(
+            status="ready",
+            stream_id=stream_id,
+            next_seq=next_seq,
+            dropped_before=dropped_before,
+            gap=bool(not reset and after_seq < dropped_before),
+            reset=reset,
+            count=len(events),
+        )
+        return member, events
+
+    async def _pages_diagnostic_logs(self):
+        data = await self._request_json()
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return json_response({"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400)
+        cursors = data.get("cursors", {})
+        if not isinstance(cursors, dict):
+            return json_response({"success": False, "error": "INVALID_DIAGNOSTIC_CURSORS"}, status=400)
+        streams = data.get("streams", {})
+        if not isinstance(streams, dict):
+            return json_response(
+                {"success": False, "error": "INVALID_DIAGNOSTIC_STREAMS"}, status=400
+            )
+        try:
+            limit = min(300, max(1, int(data.get("limit", 300))))
+            normalized_cursors = {
+                item.plugin_id: max(0, int(cursors.get(item.plugin_id, 0)))
+                for item in TRUSTED_SERIES
+            }
+        except (TypeError, ValueError):
+            return json_response({"success": False, "error": "INVALID_DIAGNOSTIC_CURSOR"}, status=400)
+        normalized_streams: dict[str, str] = {}
+        for item in TRUSTED_SERIES:
+            value = streams.get(item.plugin_id, "")
+            if value in (None, ""):
+                normalized_streams[item.plugin_id] = ""
+            elif isinstance(value, str) and _DIAGNOSTIC_STREAM_ID.fullmatch(value):
+                normalized_streams[item.plugin_id] = value
+            else:
+                return json_response(
+                    {"success": False, "error": "INVALID_DIAGNOSTIC_STREAM"}, status=400
+                )
+        rows = await asyncio.gather(
+            *(
+                self._read_plugin_diagnostics(
+                    item,
+                    after_seq=normalized_cursors[item.plugin_id],
+                    limit=limit,
+                    expected_stream_id=normalized_streams[item.plugin_id],
+                )
+                for item in TRUSTED_SERIES
+            )
+        )
+        members = [row[0] for row in rows]
+        order = {item.plugin_id: index for index, item in enumerate(TRUSTED_SERIES)}
+        events = [event for _, chunk in rows for event in chunk]
+        events.sort(
+            key=lambda event: (
+                str(event.get("timestamp") or ""),
+                order.get(str(event.get("plugin_id") or ""), len(order)),
+                int(event.get("seq") or 0),
+            )
+        )
+        return json_response(
+            {
+                "success": True,
+                "contract": "series.diagnostics.aggregate@1.0",
+                "events": events,
+                "members": members,
+                "count": len(events),
+            }
+        )
+
+    async def _pages_clear_diagnostic_logs(self):
+        data = await self._request_json()
+        if (
+            not isinstance(data, dict)
+            or not set(data).issubset({"confirm", "plugin_ids"})
+            or data.get("confirm") is not True
+        ):
+            return json_response({"success": False, "error": "CONFIRMATION_REQUIRED"}, status=400)
+        requested = data.get("plugin_ids")
+        if requested is None:
+            selected = [item.plugin_id for item in TRUSTED_SERIES]
+        elif isinstance(requested, list) and all(isinstance(item, str) for item in requested):
+            selected = list(dict.fromkeys(requested))
+        else:
+            return json_response({"success": False, "error": "INVALID_PLUGIN_IDS"}, status=400)
+        unknown = [plugin_id for plugin_id in selected if plugin_id not in TRUSTED_BY_ID]
+        if unknown:
+            return json_response({"success": False, "error": "PLUGIN_NOT_TRUSTED"}, status=403)
+        cleared: list[str] = []
+        unavailable: list[str] = []
+        for plugin_id in selected:
+            try:
+                instance = await self._diagnostic_instance(plugin_id)
+                clearer = getattr(instance, "diagnostic_clear", None) if instance is not None else None
+                if not callable(clearer):
+                    unavailable.append(plugin_id)
+                    continue
+                await self._diagnostic_call(clearer)
+                cleared.append(plugin_id)
+            except Exception:
+                unavailable.append(plugin_id)
+        return json_response(
+            {
+                "success": True,
+                "cleared": cleared,
+                "unavailable": unavailable,
+            }
         )
 
     async def _request_json(self) -> Any:
