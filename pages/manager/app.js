@@ -1120,10 +1120,10 @@ async function clearDiagnostics() {
   toast(t("diagnosticsCleared"));
 }
 
-async function refreshAll() {
+async function refreshAll(includeDiagnostics = true) {
   try {
     await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadMirrors(), loadCatalog()]);
-    if (state.diagnosticLoaded) await loadDiagnostics(true);
+    if (includeDiagnostics && state.diagnosticLoaded) await loadDiagnostics(true);
   }
   catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
 }
@@ -1258,13 +1258,15 @@ async function init() {
   await bridge.ready();
   bindEvents();
   applyI18n();
-  await refreshAll();
+  const initialDiagnostics = loadDiagnostics(true);
+  const initialPageData = refreshAll(false);
   try {
-    await loadDiagnostics(true);
+    await initialDiagnostics;
   } catch (error) {
     toast(`${t("loadFailed")}: ${error.message}`, true);
   }
   startDiagnosticPolling();
+  await initialPageData;
 }
 
 init().catch(showStartupError);

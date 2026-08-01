@@ -84,6 +84,8 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert "JSON.stringify(event.details || {})" in js
     assert ".diagnostic-log-list" in css
     assert ".diagnostic-log-detail" in css
+    assert "content-visibility:auto" in css
+    assert "contain-intrinsic-size:auto 88px" in css
     assert "max-height:560px" in css
 
 
@@ -93,6 +95,10 @@ def test_manager_page_waits_for_bridge_before_binding_events():
     assert "bridge = await resolveBridge();" in init_body
     assert "await bridge.ready();" in init_body
     assert "bindEvents();" in init_body
+    assert "const initialDiagnostics = loadDiagnostics(true);" in init_body
+    assert "const initialPageData = refreshAll(false);" in init_body
+    assert "await initialDiagnostics;" in init_body
+    assert "await initialPageData;" in init_body
     assert init_body.index("bridge = await resolveBridge();") < init_body.index(
         "await bridge.ready();"
     )
@@ -539,7 +545,7 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     # 自定义输入框的占位文案同样跟随语言切换。
     assert "[data-i18n-placeholder]" in js
     assert "t(node.dataset.i18nPlaceholder)" in js
-    assert "loadMirrors()" in js[js.index("async function refreshAll()") : js.index("function showStartupError")]
+    assert "loadMirrors()" in js[js.index("async function refreshAll(") : js.index("function showStartupError")]
 
 
 def test_manager_page_is_responsive_and_accessible():

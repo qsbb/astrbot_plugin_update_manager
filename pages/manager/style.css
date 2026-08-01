@@ -29,7 +29,7 @@ button { cursor:pointer; } button:hover { border-color:var(--accent); }
 .diagnostic-member.ok { color:var(--accent);background:rgba(93,214,192,.12); }
 .diagnostic-member.warn { color:#ffb5b0;background:rgba(255,123,114,.12); }
 .diagnostic-log-list { min-height:320px;max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#081522;scrollbar-gutter:stable; }
-.diagnostic-event { padding:0 14px;border-bottom:1px solid var(--line);border-left:3px solid transparent; }
+.diagnostic-event { padding:0 14px;border-bottom:1px solid var(--line);border-left:3px solid transparent;content-visibility:auto;contain-intrinsic-size:auto 88px; }
 .diagnostic-event:last-child { border-bottom:0; }
 .diagnostic-event.level-warning { border-left-color:var(--warn); }
 .diagnostic-event.level-error,.diagnostic-event.level-critical { border-left-color:#ff7b72; }
