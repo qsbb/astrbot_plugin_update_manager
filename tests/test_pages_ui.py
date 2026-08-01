@@ -36,6 +36,10 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
     assert 'data-tab="logs"' in html
+    assert '<button class="active" data-tab="logs"' in html
+    assert '<section id="logs" class="panel active">' in html
+    assert '<section id="overview" class="panel">' in html
+    assert html.index('data-tab="logs"') < html.index('data-tab="overview"')
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
     assert '"zh-CN"' in js and '"en-US"' in js
@@ -72,8 +76,14 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert "!resetPluginIds.has(event.plugin_id)" in js
     assert "escapeHtml(event.summary" in js
     assert "diagnostic-plugin" in js
+    assert '<details class="diagnostic-event' in js
+    assert "state.diagnosticExpanded" in js
+    assert 'details["log_detail"]' not in js
+    assert "data.log_detail" in js
+    assert "await loadDiagnostics(true)" in js
     assert "JSON.stringify(event.details || {})" in js
     assert ".diagnostic-log-list" in css
+    assert ".diagnostic-log-detail" in css
     assert "max-height:560px" in css
 
 

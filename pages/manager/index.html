@@ -21,15 +21,15 @@
     </header>
 
     <nav class="tabs" aria-label="Manager sections">
-      <button class="active" data-tab="overview" data-i18n="overview">总览</button>
+      <button class="active" data-tab="logs" data-i18n="logs">日志</button>
       <button data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
       <button data-tab="config" data-i18n="config">配置</button>
       <button data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
       <button data-tab="catalog" data-i18n="catalog">目录</button>
-      <button data-tab="logs" data-i18n="logs">日志</button>
+      <button data-tab="overview" data-i18n="overview">总览</button>
     </nav>
 
-    <section id="overview" class="panel active">
+    <section id="overview" class="panel">
       <div id="summary" class="cards"><p data-i18n="loading">加载中…</p></div>
       <article class="card"><h2 data-i18n="capabilities">运行时能力</h2><div id="capabilities" class="capability-list"></div></article>
     </section>
@@ -80,7 +80,7 @@
       <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
     </section>
 
-    <section id="logs" class="panel">
+    <section id="logs" class="panel active">
       <article class="card diagnostic-card">
         <div class="section-heading">
           <div>

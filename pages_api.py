@@ -70,6 +70,9 @@ _DIAGNOSTIC_SENSITIVE_KEY = re.compile(
     re.IGNORECASE,
 )
 _DIAGNOSTIC_LONG_NUMBER = re.compile(r"(?<![\w.])[0-9]{6,}(?![\w.])")
+_DIAGNOSTIC_ACTOR_ID = re.compile(
+    r"(?i)\b(?:user|group|account|person|session)[-_:][A-Za-z0-9_-]+\b"
+)
 _DIAGNOSTIC_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]+", re.IGNORECASE)
 _DIAGNOSTIC_EMAIL = re.compile(
     r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE
@@ -81,7 +84,7 @@ _DIAGNOSTIC_OPAQUE_VALUE = re.compile(
 )
 _DIAGNOSTIC_SECRET_VALUE = re.compile(
     r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|umo|"
-    r"user[_-]?id|group[_-]?id|platform[_-]?id)\s*[:=]\s*"
+    r"user[_-]?id|group[_-]?id|platform[_-]?id)(?:\s*[:=]\s*|\s+)"
     r"(?:bearer\s+)?([^,\s]+)"
 )
 _DIAGNOSTIC_PRIVATE_VALUE = re.compile(
@@ -266,6 +269,7 @@ class PagesAPIMixin:
         text = _DIAGNOSTIC_PRIVATE_VALUE.sub(r"\1=<已隐藏>", text)
         text = _DIAGNOSTIC_EMAIL.sub("<已隐藏邮箱>", text)
         text = _DIAGNOSTIC_OPAQUE_VALUE.sub("<已隐藏随机标识>", text)
+        text = _DIAGNOSTIC_ACTOR_ID.sub("<已隐藏标识>", text)
         text = _DIAGNOSTIC_URL_QUERY.sub(r"\1?[已隐藏参数]", text)
         text = _DIAGNOSTIC_LONG_NUMBER.sub("<已隐藏标识>", text)
         return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
@@ -282,7 +286,9 @@ class PagesAPIMixin:
             if isinstance(raw_value, (bool, int, float)) or raw_value is None:
                 details[key] = raw_value
             elif isinstance(raw_value, str):
-                details[key] = cls._diagnostic_text(raw_value, 160)
+                details[key] = cls._diagnostic_text(
+                    raw_value, 2000 if key.lower() == "log_detail" else 160
+                )
             elif isinstance(raw_value, (list, tuple)):
                 details[key] = [cls._diagnostic_text(item, 80) for item in raw_value[:8]]
         return details

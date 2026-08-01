@@ -124,7 +124,14 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch
                             "authorization=secret message='private text' "
                             "alice@example.com Abcdef1234567890Ghijkl"
                         ),
-                        "details": {"duration_ms": 6000, "user_id": "123456789"},
+                        "details": {
+                            "duration_ms": 6000,
+                            "user_id": "123456789",
+                            "log_detail": (
+                                "tool call failed for user-a token abcdefghijk "
+                                + "x" * 2500
+                            ),
+                        },
                     }
                 ],
                 "next_seq": 4,
@@ -161,7 +168,12 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch
     assert "private text" not in event["summary"]
     assert "alice@example.com" not in event["summary"]
     assert "Abcdef1234567890Ghijkl" not in event["summary"]
-    assert event["details"] == {"duration_ms": 6000}
+    assert event["details"]["duration_ms"] == 6000
+    detail = event["details"]["log_detail"]
+    assert detail.startswith("tool call failed for <已隐藏标识> token=<已隐藏>")
+    assert "user-a" not in detail
+    assert "abcdefghijk" not in detail
+    assert len(detail) == 2000
     member = next(item for item in payload["members"] if item["plugin_name"] == "言")
     assert member["status"] == "ready"
     assert member["next_seq"] == 4

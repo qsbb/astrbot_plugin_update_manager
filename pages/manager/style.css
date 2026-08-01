@@ -29,10 +29,15 @@ button { cursor:pointer; } button:hover { border-color:var(--accent); }
 .diagnostic-member.ok { color:var(--accent);background:rgba(93,214,192,.12); }
 .diagnostic-member.warn { color:#ffb5b0;background:rgba(255,123,114,.12); }
 .diagnostic-log-list { min-height:320px;max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#081522;scrollbar-gutter:stable; }
-.diagnostic-event { padding:10px 14px;border-bottom:1px solid var(--line);border-left:3px solid transparent; }
+.diagnostic-event { padding:0 14px;border-bottom:1px solid var(--line);border-left:3px solid transparent; }
 .diagnostic-event:last-child { border-bottom:0; }
 .diagnostic-event.level-warning { border-left-color:var(--warn); }
 .diagnostic-event.level-error,.diagnostic-event.level-critical { border-left-color:#ff7b72; }
+.diagnostic-event-summary { position:relative;display:block;padding:10px 30px 10px 0;list-style:none;cursor:pointer; }
+.diagnostic-event-summary::-webkit-details-marker { display:none; }
+.diagnostic-event-summary::after { content:"+";position:absolute;top:12px;right:4px;color:var(--accent);font-size:18px;font-weight:700;line-height:1; }
+.diagnostic-event[open]>.diagnostic-event-summary::after { content:"-"; }
+.diagnostic-event-summary:focus-visible { outline:2px solid var(--accent);outline-offset:3px;border-radius:4px; }
 .diagnostic-meta { display:grid;grid-template-columns:auto auto auto minmax(0,1fr);align-items:center;gap:8px;color:var(--muted);font-size:12px; }
 .diagnostic-meta time { font-variant-numeric:tabular-nums; }
 .diagnostic-plugin { display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:24px;padding:0 8px;border-radius:6px;background:rgba(93,214,192,.12);color:var(--accent);font-weight:700;white-space:nowrap; }
@@ -40,10 +45,14 @@ button { cursor:pointer; } button:hover { border-color:var(--accent); }
 .level-warning .diagnostic-level { color:var(--warn); }
 .level-error .diagnostic-level,.level-critical .diagnostic-level { color:#ff9a94; }
 .diagnostic-meta code { color:var(--muted);overflow-wrap:anywhere; }
-.diagnostic-event>p { margin:7px 0 0;overflow-wrap:anywhere; }
-.diagnostic-details { display:flex;gap:8px;flex-wrap:wrap;margin-top:8px; }
-.diagnostic-details span { display:inline-flex;gap:5px;max-width:100%;padding:3px 7px;border-radius:6px;background:#102236;color:var(--muted);font-size:12px;overflow-wrap:anywhere; }
+.diagnostic-event-summary-text { display:block;margin-top:7px;color:var(--text);overflow-wrap:anywhere; }
+.diagnostic-event-body { padding:0 0 12px;border-top:1px dashed var(--line); }
+.diagnostic-details { display:grid;gap:8px;margin-top:10px; }
+.diagnostic-detail-fields { display:flex;gap:8px;flex-wrap:wrap; }
+.diagnostic-detail-fields span { display:inline-flex;gap:5px;max-width:100%;padding:3px 7px;border-radius:6px;background:#102236;color:var(--muted);font-size:12px;overflow-wrap:anywhere; }
 .diagnostic-details code { color:var(--accent); }
+.diagnostic-log-detail { box-sizing:border-box;width:100%;max-height:320px;margin:0;padding:10px 12px;overflow:auto;border:1px solid rgba(93,214,192,.18);border-radius:6px;background:#050d15;color:#bfe8df;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; }
+.diagnostic-detail-empty { margin:10px 0 0;color:var(--muted);font-size:12px; }
 .diagnostic-empty { margin:0;padding:42px 18px;text-align:center;color:var(--muted); }
 dialog { width:min(460px,calc(100% - 32px));color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5); }dialog::backdrop { background:rgba(0,0,0,.65); }.dialog-actions { display:flex;justify-content:flex-end;gap:10px;margin-top:24px; }.dialog-actions .primary { border-color:var(--accent);color:var(--accent); }
 .startup-error { margin:16px 0; padding:14px 16px; border:1px solid #ff7b72; border-radius:12px; background:rgba(255,123,114,.12); color:#ffd8d5; white-space:pre-wrap; }
