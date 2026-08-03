@@ -22,7 +22,17 @@ from .core.adapters.storage import AtomicJsonStore, redact
 from .core.catalog import PluginCatalog
 from .core.concurrency import bounded_gather
 from .core.coordinator import UpdateCoordinator
-from .core.diagnostics import diagnose_series
+from .core.diagnostics import (
+    SERIES_RUNTIME_CAPABILITY,
+    SERIES_RUNTIME_CONTRACT_NAME,
+    SERIES_RUNTIME_CONTRACT_VERSION,
+    SERIES_RUNTIME_DEFAULT_TIMEOUT_SECONDS,
+    SERIES_RUNTIME_MAX_TIMEOUT_SECONDS,
+    SERIES_RUNTIME_MEMBER_STATUS_REASONS,
+    SERIES_RUNTIME_MIN_TIMEOUT_SECONDS,
+    diagnose_series,
+    read_series_runtime_snapshot,
+)
 from .core.health import HealthChecker
 from .core.mirrors import resolve_mirror
 from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
@@ -46,7 +56,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -145,6 +155,87 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "reasons": reasons,
             "version": __version__,
         }
+
+    def series_runtime_contract(self) -> dict[str, object]:
+        """Declare the bounded, read-only series runtime snapshot contract."""
+        return {
+            "name": SERIES_RUNTIME_CONTRACT_NAME,
+            "version": SERIES_RUNTIME_CONTRACT_VERSION,
+            "plugin": PLUGIN_NAME,
+            "capabilities": (SERIES_RUNTIME_CAPABILITY,),
+            "method": "get_series_runtime_snapshot",
+            "default_timeout_seconds": SERIES_RUNTIME_DEFAULT_TIMEOUT_SECONDS,
+            "read_only": True,
+            "network_access": False,
+            "update_side_effects": False,
+            "request_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": SERIES_RUNTIME_MIN_TIMEOUT_SECONDS,
+                        "maximum": SERIES_RUNTIME_MAX_TIMEOUT_SECONDS,
+                        "default": SERIES_RUNTIME_DEFAULT_TIMEOUT_SECONDS,
+                    }
+                },
+            },
+            "response_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": (
+                    "contract_name",
+                    "contract_version",
+                    "capability",
+                    "status",
+                    "reason",
+                    "members",
+                    "healthy",
+                    "total",
+                ),
+                "status_values": ("ok", "degraded", "unavailable", "error"),
+                "reason_values": (
+                    "HEALTHY",
+                    "MEMBERS_DEGRADED",
+                    "ADAPTER_UNAVAILABLE",
+                    "DIAGNOSTIC_TIMEOUT",
+                    "INVALID_REQUEST",
+                    "DIAGNOSTIC_FAILED",
+                    "DIAGNOSTIC_INVALID",
+                ),
+                "member_fields": (
+                    "plugin_id",
+                    "label",
+                    "installed",
+                    "loaded",
+                    "activated",
+                    "version",
+                    "health_status",
+                    "reason",
+                ),
+                "member_health_status_values": (
+                    "ok",
+                    "compatible",
+                    "degraded",
+                    "unhealthy",
+                    "missing",
+                ),
+                "member_reason_values": tuple(
+                    SERIES_RUNTIME_MEMBER_STATUS_REASONS
+                ),
+            },
+        }
+
+    async def get_series_runtime_snapshot(
+        self,
+        *,
+        timeout_seconds: float = SERIES_RUNTIME_DEFAULT_TIMEOUT_SECONDS,
+    ) -> dict[str, object]:
+        """Read installed/runtime/health state without update or network actions."""
+        return await read_series_runtime_snapshot(
+            self.adapter,
+            timeout_seconds=timeout_seconds,
+        )
 
     def diagnostic_log_contract(self) -> dict[str, object]:
         return {

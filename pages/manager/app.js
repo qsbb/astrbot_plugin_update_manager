@@ -2,7 +2,8 @@ const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
     refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…",
-    startupFailed: "页面启动失败",
+    startupFailed: "页面启动失败", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
+    retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
@@ -27,7 +28,8 @@ const messages = {
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
     refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…",
-    startupFailed: "Page startup failed",
+    startupFailed: "Page startup failed", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
+    retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
@@ -102,7 +104,8 @@ const state = {
   diagnosticRefreshPending: false,
   diagnosticPaused: false,
   diagnosticExpanded: new Set(),
-  diagnosticTimer: null
+  diagnosticTimer: null,
+  diagnosticSearchTimer: null
 };
 const t = (key) => messages[state.locale][key] || key;
 
@@ -268,6 +271,7 @@ function applyI18n() {
   document.documentElement.lang = state.locale;
   document.title = t("title");
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => { node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel)); });
   document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => { node.placeholder = t(node.dataset.i18nPlaceholder); });
   document.getElementById("locale").value = state.locale;
 }
@@ -331,8 +335,18 @@ async function loadRule() {
   document.getElementById("rule-plugins").innerHTML = (data.catalog || []).map((item) => `<label class="plugin-option"><input type="checkbox" value="${escapeHtml(item.plugin_id)}" ${selected.has(item.plugin_id) ? "checked" : ""}/><span><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code></span></label>`).join("") || `<span>${escapeHtml(t("empty"))}</span>`;
 }
 
+function setFormBusy(form, busy) {
+  const button = form.querySelector('button[type="submit"]');
+  if (!button) return;
+  button.disabled = busy;
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+  button.textContent = busy ? t("saving") : t(button.dataset.i18n);
+}
+
 async function saveRule(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  setFormBusy(form, true);
   const autoUpdateEnabled = document.getElementById("rule-auto-update-enabled").checked;
   const pluginIds = [...document.querySelectorAll("#rule-plugins input:checked")].map((input) => input.value);
   const payload = {
@@ -364,12 +378,15 @@ async function saveRule(event) {
     }
     toast(`${t("saveFailed")}: ${error.message}`, true);
   } finally {
-    await Promise.all([loadConfig(), loadRule(), loadOverview()]);
+    await Promise.allSettled([loadConfig(), loadRule(), loadOverview()]);
+    setFormBusy(form, false);
   }
 }
 
 async function saveConfig(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  setFormBusy(form, true);
   const payload = {};
   for (const [key, field] of Object.entries(state.config?.schema || {})) {
     const input = event.currentTarget.elements.namedItem(key);
@@ -383,8 +400,11 @@ async function saveConfig(event) {
   try {
     await apiPost("config", payload);
     toast(t("saved"));
-    await Promise.all([loadConfig(), loadOverview()]);
+    await Promise.allSettled([loadConfig(), loadOverview()]);
   } catch (error) { toast(`${t("saveFailed")}: ${error.message}`, true); }
+  finally {
+    setFormBusy(form, false);
+  }
 }
 
 function isValidMirror(value) {
@@ -693,7 +713,8 @@ function versionError(item) {
     context.token_hint_required ? t("errorTokenHint") : ""
   ].filter(Boolean);
   const reason = errorReason(item.error || item.error_detail);
-  return `<span class="version-error">${escapeHtml(reason)} · ${escapeHtml(details.join(" · "))}</span>`;
+  const message = [reason, ...details].filter(Boolean).join(" · ");
+  return `<span class="version-error">${escapeHtml(message)}</span>`;
 }
 
 function renderRateLimitNotice(rateLimit, nodeId = "rate-limit-notice") {
@@ -999,7 +1020,8 @@ function renderDiagnostics() {
   )).join("");
   const list = document.getElementById("diagnostic-log-list");
   const shouldStick = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
-  const events = filteredDiagnosticEvents();
+  const matchingEvents = filteredDiagnosticEvents();
+  const events = matchingEvents.slice(-500);
   list.innerHTML = events.length ? events.map((event) => {
     const eventKey = `${event.plugin_id}:${event.seq}`;
     const open = state.diagnosticExpanded.has(eventKey) ? " open" : "";
@@ -1050,10 +1072,13 @@ async function loadDiagnostics(reset = false) {
       limit: 1000
     });
     if (generation !== state.diagnosticGeneration) return;
-    state.diagnosticMembers = data.members || [];
+    const nextMembers = data.members || [];
+    const membersChanged = JSON.stringify(state.diagnosticMembers) !== JSON.stringify(nextMembers);
+    state.diagnosticMembers = nextMembers;
     const resetPluginIds = new Set(
       state.diagnosticMembers.filter((member) => member.reset).map((member) => member.plugin_id)
     );
+    let eventsChanged = reset || resetPluginIds.size > 0;
     if (resetPluginIds.size) {
       state.diagnosticEvents = state.diagnosticEvents.filter(
         (event) => !resetPluginIds.has(event.plugin_id)
@@ -1075,12 +1100,16 @@ async function loadDiagnostics(reset = false) {
       if (!seen.has(key)) {
         seen.add(key);
         state.diagnosticEvents.push(event);
+        eventsChanged = true;
       }
     });
     state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
-    if (state.diagnosticEvents.length > 10000) state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
+    if (state.diagnosticEvents.length > 10000) {
+      state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
+      eventsChanged = true;
+    }
     state.diagnosticLoaded = true;
-    renderDiagnostics();
+    if (membersChanged || eventsChanged) renderDiagnostics();
   } finally {
     state.diagnosticBusy = false;
     if (state.diagnosticRefreshPending) {
@@ -1120,12 +1149,90 @@ async function clearDiagnostics() {
   toast(t("diagnosticsCleared"));
 }
 
-async function refreshAll(includeDiagnostics = true) {
-  try {
-    await Promise.all([loadOverview(), loadRecommendations(), loadConfig(), loadRule(), loadMirrors(), loadCatalog()]);
-    if (includeDiagnostics && state.diagnosticLoaded) await loadDiagnostics(true);
+
+const sectionLoaders = {
+  overview: { targetId: "summary", labelKey: "overview", load: loadOverview },
+  recommendations: { targetId: "recommendations-list", labelKey: "recommendations", load: loadRecommendations },
+  config: { targetId: "config-fields", labelKey: "config", load: loadConfig },
+  rule: { targetId: "rule-plugins", labelKey: "ruleTitle", load: loadRule },
+  mirrors: { targetId: "mirror-list", labelKey: "mirrors", load: loadMirrors },
+  catalog: { targetId: "catalog-list", labelKey: "catalog", load: loadCatalog },
+  diagnostics: { targetId: "diagnostic-log-list", labelKey: "diagnosticTitle", load: () => loadDiagnostics(true) }
+};
+
+function renderSectionLoadError(name, error) {
+  const section = sectionLoaders[name];
+  const node = section ? document.getElementById(section.targetId) : null;
+  if (!node) return;
+  const label = t(section.labelKey);
+  const detail = error?.message || String(error || t("errorUnknown"));
+  node.innerHTML = `<div class="section-load-error" role="alert"><strong>${escapeHtml(`${label}：${t("sectionLoadFailed")}`)}</strong><span>${escapeHtml(detail)}</span><button type="button" data-retry-section="${escapeHtml(name)}">${escapeHtml(t("retry"))}</button></div>`;
+}
+
+async function retrySection(name, button = null) {
+  const section = sectionLoaders[name];
+  if (!section) return;
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
   }
-  catch (error) { toast(`${t("loadFailed")}: ${error.message}`, true); }
+  try {
+    await section.load();
+  } catch (error) {
+    renderSectionLoadError(name, error);
+  }
+}
+
+async function refreshPage(button) {
+  if (button.disabled) return;
+  const idleText = button.textContent;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = t("loading");
+  try {
+    await refreshAll();
+  } finally {
+    button.disabled = false;
+    button.setAttribute("aria-busy", "false");
+    button.textContent = idleText;
+  }
+}
+
+async function refreshAll(includeDiagnostics = true) {
+  const entries = Object.entries(sectionLoaders).filter(([name]) => (
+    name !== "diagnostics" || (includeDiagnostics && state.diagnosticLoaded)
+  ));
+  const results = await Promise.allSettled(entries.map(([, section]) => section.load()));
+  let failed = 0;
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") return;
+    failed += 1;
+    renderSectionLoadError(entries[index][0], result.reason);
+  });
+  if (failed) toast(`${t("loadFailed")}：${failed}`, true);
+}
+
+function activateTab(button, focus = false) {
+  document.querySelectorAll("[data-tab]").forEach((tab) => {
+    const active = tab === button;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll(".panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === button.dataset.tab);
+  });
+  if (focus) button.focus();
+  if (button.dataset.tab !== "logs") stopDiagnosticPolling();
+  if (button.dataset.tab === "recommendations") {
+    autoCheckRecommendations().catch((error) => {
+      console.warn("Automatic recommendation version check failed", error);
+    });
+  }
+  if (button.dataset.tab === "logs") {
+    loadDiagnostics(!state.diagnosticLoaded).catch((error) => renderSectionLoadError("diagnostics", error));
+    startDiagnosticPolling();
+  }
 }
 
 function showStartupError(error) {
@@ -1139,23 +1246,28 @@ function showStartupError(error) {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
-    document.querySelectorAll("[data-tab], .panel").forEach((node) => node.classList.remove("active"));
-    button.classList.add("active");
-    document.getElementById(button.dataset.tab).classList.add("active");
-    if (button.dataset.tab !== "logs") stopDiagnosticPolling();
-    if (button.dataset.tab === "recommendations") {
-      autoCheckRecommendations().catch((error) => {
-        console.warn("Automatic recommendation version check failed", error);
-      });
-    }
-    if (button.dataset.tab === "logs") {
-      loadDiagnostics(!state.diagnosticLoaded).catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
-      startDiagnosticPolling();
-    }
-  }));
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  tabs.forEach((button) => button.addEventListener("click", () => activateTab(button)));
+  document.querySelector(".tabs").addEventListener("keydown", (event) => {
+    const current = tabs.indexOf(event.target.closest("[data-tab]"));
+    if (current < 0) return;
+    let next = null;
+    if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+    if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = tabs.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    activateTab(tabs[next], true);
+  });
   // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
   document.addEventListener("click", async (event) => {
+    const retryButton = event.target.closest("[data-retry-section]");
+    if (retryButton) {
+      event.preventDefault();
+      await retrySection(retryButton.dataset.retrySection, retryButton);
+      return;
+    }
     const link = event.target.closest("a[data-external-url], a[data-internal-route]");
     if (!link || !document.contains(link)) return;
     const route = link.dataset.internalRoute || "";
@@ -1227,7 +1339,10 @@ function bindEvents() {
   });
   document.getElementById("diagnostic-plugin-filter").addEventListener("change", renderDiagnostics);
   document.getElementById("diagnostic-level-filter").addEventListener("change", renderDiagnostics);
-  document.getElementById("diagnostic-search").addEventListener("input", renderDiagnostics);
+  document.getElementById("diagnostic-search").addEventListener("input", () => {
+    window.clearTimeout(state.diagnosticSearchTimer);
+    state.diagnosticSearchTimer = window.setTimeout(renderDiagnostics, 200);
+  });
   document.getElementById("check-latest").addEventListener("click", async () => {
     // 与自动检查共享同一把锁：任一方在跑时忽略新的手动点击。
     if (state.versionCheckBusy) return;
@@ -1243,7 +1358,7 @@ function bindEvents() {
       clearVersionCheckBusy();
     }
   });
-  document.getElementById("refresh").addEventListener("click", refreshAll);
+  document.getElementById("refresh").addEventListener("click", (event) => refreshPage(event.currentTarget));
   document.getElementById("locale").addEventListener("change", async (event) => {
     state.locale = event.target.value;
     storeLocale(state.locale);
@@ -1263,7 +1378,7 @@ async function init() {
   try {
     await initialDiagnostics;
   } catch (error) {
-    toast(`${t("loadFailed")}: ${error.message}`, true);
+    renderSectionLoadError("diagnostics", error);
   }
   startDiagnosticPolling();
   await initialPageData;

@@ -107,6 +107,30 @@ def test_entry_identity_defaults_and_data_location(monkeypatch, tmp_path):
     assert plugin.store.root == (tmp_path / module.PLUGIN_NAME).resolve()
 
 
+def test_series_runtime_contract_declares_exact_read_only_boundary(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    contract = plugin.series_runtime_contract()
+
+    assert contract["name"] == "update_manager.series_runtime"
+    assert contract["version"] == "1.0"
+    assert contract["plugin"] == module.PLUGIN_NAME
+    assert contract["capabilities"] == ("read_runtime_snapshot",)
+    assert contract["method"] == "get_series_runtime_snapshot"
+    assert contract["default_timeout_seconds"] == 2.0
+    assert contract["read_only"] is True
+    assert contract["network_access"] is False
+    assert contract["update_side_effects"] is False
+    assert contract["request_schema"]["additionalProperties"] is False
+    assert contract["response_schema"]["status_values"] == (
+        "ok",
+        "degraded",
+        "unavailable",
+        "error",
+    )
+
+
 def test_input_validation_and_rule_default_off(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})

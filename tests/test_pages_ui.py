@@ -36,9 +36,9 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
     assert 'data-tab="logs"' in html
-    assert '<button class="active" data-tab="logs"' in html
-    assert '<section id="logs" class="panel active">' in html
-    assert '<section id="overview" class="panel">' in html
+    assert 'id="tab-logs" class="active" role="tab"' in html
+    assert 'id="logs" class="panel active" role="tabpanel"' in html
+    assert 'id="overview" class="panel" role="tabpanel"' in html
     assert html.index('data-tab="logs"') < html.index('data-tab="overview"')
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
@@ -426,7 +426,7 @@ def test_daily_rule_master_gate_uses_safe_save_order_and_refreshes_all_sources()
         'apiPost("config", { auto_update_enabled: true })'
     )
     assert 'apiPost("config", { auto_update_enabled: false })' in save_rule[save_rule.index("catch (error)") :]
-    assert "Promise.all([loadConfig(), loadRule(), loadOverview()])" in save_rule
+    assert "Promise.allSettled([loadConfig(), loadRule(), loadOverview()])" in save_rule
 
 
 def test_rule_policy_and_failure_options_have_bilingual_labels_and_keep_values():
@@ -545,7 +545,42 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     # 自定义输入框的占位文案同样跟随语言切换。
     assert "[data-i18n-placeholder]" in js
     assert "t(node.dataset.i18nPlaceholder)" in js
-    assert "loadMirrors()" in js[js.index("async function refreshAll(") : js.index("function showStartupError")]
+    resilient_refresh = js[js.index("const sectionLoaders") : js.index("function showStartupError")]
+    assert "load: loadMirrors" in resilient_refresh
+    assert "Promise.allSettled" in resilient_refresh
+
+
+def test_manager_page_has_resilient_accessible_loading_and_bounded_logs():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    readme = (PLUGIN_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert 'role="tablist"' in html
+    assert 'aria-selected="true"' in html
+    assert 'aria-controls="logs"' in html
+    assert 'aria-labelledby="tab-logs"' in html
+    assert 'data-i18n-aria-label="languageLabel"' in html
+    for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+        assert f'event.key === "{key}"' in js
+    assert "matchingEvents.slice(-500)" in js
+    assert "window.setTimeout(renderDiagnostics, 200)" in js
+    assert "if (membersChanged || eventsChanged) renderDiagnostics();" in js
+    assert 'data-retry-section="${escapeHtml(name)}"' in js
+    assert 'event.target.closest("[data-retry-section]")' in js
+    assert "async function refreshPage(button)" in js
+    assert "button:disabled" in css
+    assert ".section-load-error" in css
+    assert "flex-wrap:wrap" in css
+    assert "一次最多渲染最近 500 条" in readme
+    assert "其余区域继续可用" in readme
+
+
+def test_recommendation_version_error_has_no_empty_separator():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    block = js[js.index("function versionError") : js.index("function renderRateLimitNotice")]
+    assert '[reason, ...details].filter(Boolean).join(" · ")' in block
+    assert '${escapeHtml(reason)} · ${escapeHtml(details.join(" · "))}' not in block
 
 
 def test_manager_page_is_responsive_and_accessible():

@@ -10,37 +10,37 @@
   <main class="shell">
     <header class="hero">
       <div>
-        <p class="eyebrow">AstrBot Plugin Page</p>
+        <p class="eyebrow" data-i18n="eyebrow">AstrBot 插件管理页</p>
         <h1 data-i18n="heading">凝心溯溪-核</h1>
         <p data-i18n="subtitle">安全、串行、可回滚的插件更新控制台</p>
       </div>
       <div class="toolbar">
-        <select id="locale" aria-label="Language"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
+        <select id="locale" aria-label="语言" data-i18n-aria-label="languageLabel"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
         <button id="refresh" type="button" data-i18n="refresh">刷新</button>
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Manager sections">
-      <button class="active" data-tab="logs" data-i18n="logs">日志</button>
-      <button data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
-      <button data-tab="config" data-i18n="config">配置</button>
-      <button data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
-      <button data-tab="catalog" data-i18n="catalog">目录</button>
-      <button data-tab="overview" data-i18n="overview">总览</button>
+    <nav class="tabs" role="tablist" aria-label="管理页分区" data-i18n-aria-label="managerSectionsLabel">
+      <button id="tab-logs" class="active" role="tab" aria-selected="true" aria-controls="logs" tabindex="0" data-tab="logs" data-i18n="logs">日志</button>
+      <button id="tab-recommendations" role="tab" aria-selected="false" aria-controls="recommendations" tabindex="-1" data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
+      <button id="tab-config" role="tab" aria-selected="false" aria-controls="config" tabindex="-1" data-tab="config" data-i18n="config">配置</button>
+      <button id="tab-mirrors" role="tab" aria-selected="false" aria-controls="mirrors" tabindex="-1" data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
+      <button id="tab-catalog" role="tab" aria-selected="false" aria-controls="catalog" tabindex="-1" data-tab="catalog" data-i18n="catalog">目录</button>
+      <button id="tab-overview" role="tab" aria-selected="false" aria-controls="overview" tabindex="-1" data-tab="overview" data-i18n="overview">总览</button>
     </nav>
 
-    <section id="overview" class="panel">
+    <section id="overview" class="panel" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
       <div id="summary" class="cards"><p data-i18n="loading">加载中…</p></div>
       <article class="card"><h2 data-i18n="capabilities">运行时能力</h2><div id="capabilities" class="capability-list"></div></article>
     </section>
 
-    <section id="recommendations" class="panel">
+    <section id="recommendations" class="panel" role="tabpanel" aria-labelledby="tab-recommendations" tabindex="0">
       <div id="self-update-notice" class="self-update-notice" role="status" aria-live="polite" hidden></div>
       <div id="rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
       <article class="card"><div class="section-heading"><div><h2 data-i18n="recommendationsTitle">凝心溯溪系列推荐</h2><p data-i18n="recommendationsHint">官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。</p></div><div class="section-actions"><button id="apply-all-recommendations" type="button" data-i18n="applyAll">一键全部安装/更新</button><button id="check-latest" type="button" data-i18n="checkLatest">检查最新版本</button></div></div><div id="recommendations-list" class="recommendations-list"><p data-i18n="loading">加载中…</p></div></article>
     </section>
 
-    <section id="config" class="panel">
+    <section id="config" class="panel" role="tabpanel" aria-labelledby="tab-config" tabindex="0">
       <form id="config-form" class="card">
         <div class="section-heading"><div><h2 data-i18n="configTitle">配置读取与保存</h2><p data-i18n="tokenHint">敏感 token 仅显示是否已配置，留空不会覆盖。</p></div><button type="submit" data-i18n="save">保存</button></div>
         <div id="config-fields" class="form-grid"></div>
@@ -63,7 +63,7 @@
       </form>
     </section>
 
-    <section id="mirrors" class="panel">
+    <section id="mirrors" class="panel" role="tabpanel" aria-labelledby="tab-mirrors" tabindex="0">
       <article class="card">
         <div class="section-heading"><div><h2 data-i18n="mirrorsTitle">GitHub 镜像加速</h2><p data-i18n="mirrorsHint">加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。</p></div><button id="mirror-benchmark" type="button" data-i18n="mirrorBenchmark">一键测速</button></div>
         <div id="mirror-list" class="mirror-list"><p data-i18n="loading">加载中…</p></div>
@@ -75,12 +75,12 @@
       </form>
     </section>
 
-    <section id="catalog" class="panel">
+    <section id="catalog" class="panel" role="tabpanel" aria-labelledby="tab-catalog" tabindex="0">
       <div id="catalog-rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
       <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
     </section>
 
-    <section id="logs" class="panel active">
+    <section id="logs" class="panel active" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
       <article class="card diagnostic-card">
         <div class="section-heading">
           <div>
@@ -98,7 +98,7 @@
           <label><span data-i18n="levelFilter">级别</span><select id="diagnostic-level-filter"><option value="" data-i18n="allLevels">全部级别</option><option value="DEBUG">DEBUG</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
           <label class="diagnostic-search"><span data-i18n="searchLogs">搜索</span><input id="diagnostic-search" type="search" data-i18n-placeholder="searchLogsPlaceholder" placeholder="事件码或摘要" /></label>
         </div>
-        <div id="diagnostic-members" class="diagnostic-members" aria-label="Plugin diagnostic status"></div>
+        <div id="diagnostic-members" class="diagnostic-members" aria-label="插件诊断状态" data-i18n-aria-label="diagnosticStatusLabel"></div>
         <div id="diagnostic-log-list" class="diagnostic-log-list" role="log" aria-live="off"><p data-i18n="loading">加载中…</p></div>
       </article>
     </section>

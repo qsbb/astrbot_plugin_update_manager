@@ -70,9 +70,68 @@
 
 `github_token` 是只写敏感项：页面和 API 仅返回是否已配置，敏感 token 不回显原值；保存空值或占位符不会清除现有 token。如需替换 token，请输入新值后保存。
 
+### 跨插件系列运行态契约
+
+核为 Quest Bridge 等明确消费方提供纯只读契约 `update_manager.series_runtime@1.0`。消费方应先按插件 ID `astrbot_plugin_update_manager` 取得实例，再直接调用 `series_runtime_contract()`；只接受契约名完全一致且主版本为 `1`、能力包含 `read_runtime_snapshot` 的声明，不得通过猜测方法名或读取核的私有字段降级接入。
+
+声明中的调用方法固定为 `get_series_runtime_snapshot`。请求只允许一个可选关键字参数：
+
+```json
+{
+  "timeout_seconds": 2.0
+}
+```
+
+`timeout_seconds` 必须是 `0.05` 到 `5.0` 秒的数值，默认 `2.0`；未知参数不属于 1.0 契约。建议仅在 Bridge 启动、会话建立时的兼容检查或显式健康检查中调用，不要每轮对话调用。
+
+响应固定包含以下顶层字段：
+
+```json
+{
+  "contract_name": "update_manager.series_runtime",
+  "contract_version": "1.0",
+  "capability": "read_runtime_snapshot",
+  "status": "ok",
+  "reason": "HEALTHY",
+  "members": [
+    {
+      "plugin_id": "astrbot_plugin_active_learner",
+      "label": "知",
+      "installed": true,
+      "loaded": true,
+      "activated": true,
+      "version": "1.4.0",
+      "health_status": "ok",
+      "reason": "HEALTHY"
+    }
+  ],
+  "healthy": 7,
+  "total": 7
+}
+```
+
+`members` 始终按知、言、序、情、境、声、核排列。成员 `health_status` 可为 `ok`、`compatible`、`degraded`、`unhealthy` 或 `missing`；`compatible` 表示旧插件未声明 `plugin.health@1.0`，只能确认基础运行态。顶层状态及降级语义如下：
+
+成员状态与原因码是固定组合：`ok/HEALTHY`、`compatible/L0_ONLY`、`degraded/PLUGIN_NOT_ACTIVATED`、`missing/PLUGIN_NOT_FOUND`；`unhealthy` 对应 `PLUGIN_NOT_LOADED`、`HEALTH_CONTRACT_INCOMPATIBLE`、`HEALTH_CONTRACT_INVALID`、`HEALTH_PROBE_FAILED`、`HEALTH_VERSION_MISMATCH` 或 `BUSINESS_HEALTH_UNHEALTHY`。出现未声明组合时整个响应返回 `error/DIAGNOSTIC_INVALID`，消费方不得使用部分成员数据。
+
+| `status` | `reason` | 含义与消费方处理 |
+|---|---|---|
+| `ok` | `HEALTHY` | 全部成员健康或处于 L0 兼容模式，可读取各成员结果 |
+| `degraded` | `MEMBERS_DEGRADED` | 至少一个成员缺失、未加载、未激活、契约不兼容或健康失败；仍可读取其余成员 |
+| `unavailable` | `ADAPTER_UNAVAILABLE` | 核已终止或运行时 adapter 不可用；`members` 为空，消费方跳过诊断 |
+| `unavailable` | `DIAGNOSTIC_TIMEOUT` | 只读诊断超过请求时限；`members` 为空，消费方跳过诊断并可稍后重试 |
+| `error` | `INVALID_REQUEST` | 请求参数不符合 1.0 schema；消费方修正调用，不重试同一载荷 |
+| `error` | `DIAGNOSTIC_FAILED` | AstrBot 运行态读取异常；消费方跳过诊断，不阻断自身基础功能 |
+| `error` | `DIAGNOSTIC_INVALID` | 内部结果未通过严格 schema 校验；按不兼容处理，不消费部分数据 |
+
+该契约只封装现有 `diagnose_series(adapter)`：读取本地安装/加载/激活状态并调用各插件公开的 `plugin.health@1.0` 探针。它不访问 GitHub 或镜像，不检查新版本，不创建计划，不安装、更新、启停或重载插件，也不写数据库或配置。契约不可用或核未安装时，Quest Bridge 应继续隔离运行，只把系列诊断标记为不可用。
+
 ### 系列诊断日志
 
 - “日志”标签位于首位并作为页面默认视图。页面打开后会立即读取日志，并与总览、推荐、配置、镜像和目录数据并行加载，不再等待其他标签全部完成。诊断会捕获本系列插件自有 logger 的 `DEBUG` 到 `CRITICAL` 事件；每个插件最多保留 1000 条，页面单次读取最多 1000 条、浏览器最多暂存 10000 条。列表每行先显示插件中文名，再显示时间、级别和事件；大量折叠日志由浏览器延迟布局，但不会因此丢失缓存事件。
+- 页面一次最多渲染最近 500 条匹配日志，完整的 10000 条浏览器缓存仍可用于筛选；搜索输入会短暂防抖，轮询没有新增事件时不会重建整张日志列表。
+- 总览、推荐、配置、规则、镜像、目录或日志任一区域加载失败时，只在对应区域显示中文错误和“重试”按钮，其余区域继续可用；刷新和保存期间按钮会显示忙碌状态并阻止重复操作。
+- 页签支持键盘左右方向键、Home 和 End 切换，并同步 `aria-selected`，便于键盘和读屏用户定位当前区域。
 “日志”页只汇总固定可信系列，不读取枢、服务中心、第三方插件或 AstrBot 全局日志。各插件不会为了诊断额外读取聊天消息；如果插件自身已经产生的日志含有用户文本片段，该片段会在脱敏、截断后进入内存详情。日志只存在内存中，清空、热重载或 AstrBot 重启后自动消失。
 
 每条事件都可以点击展开，查看模块、函数、行号、异常类型和最长 2000 字符的脱敏日志正文。“核”在汇总时会再次脱敏；令牌、账号标识、邮箱、长数字和过长内容不会原样显示。搜索同时覆盖事件码、摘要和详情。
