@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,3 +68,35 @@ TRUSTED_SERIES = (
     ),
 )
 TRUSTED_BY_ID = {item.plugin_id: item for item in TRUSTED_SERIES}
+
+DIAGNOSTIC_SERIES_ID = "ningxin_suxi"
+DIAGNOSTIC_REPOSITORY_OWNER = "qsbb"
+_PLUGIN_ID = re.compile(r"^astrbot_plugin_[a-z0-9_]{1,96}$")
+
+
+def is_trusted_diagnostic_repository(plugin_id: str, repository: str) -> bool:
+    """Accept only an exact qsbb GitHub repository matching the plugin ID."""
+    if not _PLUGIN_ID.fullmatch(plugin_id):
+        return False
+    try:
+        parsed = urlsplit(repository)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) != 2:
+        return False
+    owner, repository_name = parts
+    if repository_name.endswith(".git"):
+        repository_name = repository_name[:-4]
+    return owner == DIAGNOSTIC_REPOSITORY_OWNER and repository_name == plugin_id

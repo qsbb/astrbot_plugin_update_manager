@@ -6,7 +6,8 @@ import asyncio
 import inspect
 import json
 import re
-from dataclasses import replace
+import time
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -40,7 +41,12 @@ from .core.mirrors import (
 )
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
-from .core.trusted import TRUSTED_BY_ID, TRUSTED_SERIES
+from .core.trusted import (
+    DIAGNOSTIC_SERIES_ID,
+    TRUSTED_BY_ID,
+    TRUSTED_SERIES,
+    is_trusted_diagnostic_repository,
+)
 
 try:
     from astrbot.api.web import json_response, request
@@ -63,8 +69,14 @@ READ_ONLY_KEYS = frozenset({"data_dir", "plugin_root"})
 DIAGNOSTIC_CONTRACT_NAME = "series.diagnostics"
 DIAGNOSTIC_CONTRACT_MAJOR = "1"
 DIAGNOSTIC_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+DIAGNOSTIC_PROVIDER_REASONS = {
+    "DIAGNOSTIC_DISABLED": "disabled",
+    "DIAGNOSTIC_UNAVAILABLE": "unavailable",
+}
 DIAGNOSTIC_READ_TIMEOUT_SECONDS = 1.0
+DIAGNOSTIC_DISCOVERY_CACHE_SECONDS = 10.0
 _DIAGNOSTIC_STREAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_DIAGNOSTIC_PLUGIN_NAME = re.compile(r"^[^\s<>]{1,16}$")
 _DIAGNOSTIC_SENSITIVE_KEY = re.compile(
     r"(?:token|api[_-]?key|secret|password|authorization|cookie|umo|user[_-]?id|group[_-]?id|platform[_-]?id)",
     re.IGNORECASE,
@@ -106,16 +118,69 @@ RULE_WRITABLE_KEYS = frozenset(
     }
 )
 CAPABILITY_META = {
-    "plugin_manager": ("插件管理器", "Plugin manager", "AstrBot 插件管理器实例", "AstrBot plugin manager instance"),
-    "list_plugins": ("插件列表", "Plugin catalog", "读取当前插件列表", "Read the current plugin list"),
-    "install_sources": ("安装来源", "Install sources", "识别插件安装来源", "Resolve plugin install sources"),
-    "install_plugin": ("安装插件", "Install plugin", "通过管理器安装插件", "Install plugins through the manager"),
-    "update_plugin": ("更新插件", "Update plugin", "通过管理器更新插件", "Update plugins through the manager"),
-    "turn_on_plugin": ("启用插件", "Enable plugin", "启用并热加载插件", "Enable and hot-load plugins"),
-    "turn_off_plugin": ("停用插件", "Disable plugin", "停用已加载插件", "Disable loaded plugins"),
-    "reload_plugin": ("重载插件", "Reload plugin", "重载插件运行时", "Reload plugin runtime"),
-    "cron": ("定时任务", "Cron scheduler", "注册每日规则任务", "Register the daily rule job"),
+    "plugin_manager": (
+        "插件管理器",
+        "Plugin manager",
+        "AstrBot 插件管理器实例",
+        "AstrBot plugin manager instance",
+    ),
+    "list_plugins": (
+        "插件列表",
+        "Plugin catalog",
+        "读取当前插件列表",
+        "Read the current plugin list",
+    ),
+    "install_sources": (
+        "安装来源",
+        "Install sources",
+        "识别插件安装来源",
+        "Resolve plugin install sources",
+    ),
+    "install_plugin": (
+        "安装插件",
+        "Install plugin",
+        "通过管理器安装插件",
+        "Install plugins through the manager",
+    ),
+    "update_plugin": (
+        "更新插件",
+        "Update plugin",
+        "通过管理器更新插件",
+        "Update plugins through the manager",
+    ),
+    "turn_on_plugin": (
+        "启用插件",
+        "Enable plugin",
+        "启用并热加载插件",
+        "Enable and hot-load plugins",
+    ),
+    "turn_off_plugin": (
+        "停用插件",
+        "Disable plugin",
+        "停用已加载插件",
+        "Disable loaded plugins",
+    ),
+    "reload_plugin": (
+        "重载插件",
+        "Reload plugin",
+        "重载插件运行时",
+        "Reload plugin runtime",
+    ),
+    "cron": (
+        "定时任务",
+        "Cron scheduler",
+        "注册每日规则任务",
+        "Register the daily rule job",
+    ),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticProvider:
+    plugin_id: str
+    key: str
+    display_name: str
+    self_declared: bool = False
 
 
 class PagesAPIMixin:
@@ -160,7 +225,12 @@ class PagesAPIMixin:
                 ["POST"],
                 "清空系列插件内部诊断日志",
             ),
-            ("recommendations", self._pages_recommendations, ["GET"], "查看可信系列推荐"),
+            (
+                "recommendations",
+                self._pages_recommendations,
+                ["GET"],
+                "查看可信系列推荐",
+            ),
             (
                 "recommendations/check-latest",
                 self._pages_check_recommendations,
@@ -231,13 +301,19 @@ class PagesAPIMixin:
                 "success": True,
                 "plugin": {
                     "id": PLUGIN_ID,
-                    "version": getattr(__import__(self.__module__, fromlist=["__version__"]), "__version__", ""),
+                    "version": getattr(
+                        __import__(self.__module__, fromlist=["__version__"]),
+                        "__version__",
+                        "",
+                    ),
                     "enabled": self.enabled,
                     "auto_update_enabled": self.auto_update_enabled,
                     "busy": self.coordinator.busy,
                 },
                 "runtime": {
-                    "plugin_pages": callable(getattr(self.context, "register_web_api", None)),
+                    "plugin_pages": callable(
+                        getattr(self.context, "register_web_api", None)
+                    ),
                     "astrbot_version": str(
                         getattr(self.context, "version", None)
                         or getattr(self.context, "astrbot_version", "")
@@ -290,7 +366,9 @@ class PagesAPIMixin:
                     raw_value, 2000 if key.lower() == "log_detail" else 160
                 )
             elif isinstance(raw_value, (list, tuple)):
-                details[key] = [cls._diagnostic_text(item, 80) for item in raw_value[:8]]
+                details[key] = [
+                    cls._diagnostic_text(item, 80) for item in raw_value[:8]
+                ]
         return details
 
     @classmethod
@@ -319,6 +397,132 @@ class PagesAPIMixin:
             "details": cls._diagnostic_details(value.get("details")),
         }
 
+    @staticmethod
+    def _legacy_diagnostic_providers() -> tuple[DiagnosticProvider, ...]:
+        return tuple(
+            DiagnosticProvider(
+                plugin_id=item.plugin_id,
+                key=item.key,
+                display_name=item.display_name,
+            )
+            for item in TRUSTED_SERIES
+        )
+
+    @staticmethod
+    def _self_declared_diagnostic_name(contract: Any, *, plugin_id: str) -> str | None:
+        if not isinstance(contract, dict):
+            return None
+        version = str(contract.get("version") or "")
+        plugin_name = str(contract.get("plugin_name") or "").strip()
+        capabilities = contract.get("capabilities")
+        if not isinstance(capabilities, (list, tuple, set, frozenset)):
+            return None
+        normalized_capabilities = {
+            str(capability)
+            for capability in capabilities
+            if isinstance(capability, str)
+        }
+        if (
+            contract.get("name") != DIAGNOSTIC_CONTRACT_NAME
+            or version.split(".", 1)[0] != DIAGNOSTIC_CONTRACT_MAJOR
+            or contract.get("series_id") != DIAGNOSTIC_SERIES_ID
+            or contract.get("plugin_id") != plugin_id
+            or not _DIAGNOSTIC_PLUGIN_NAME.fullmatch(plugin_name)
+            or not {"read_events", "clear_events"}.issubset(normalized_capabilities)
+            or contract.get("storage") != "memory_only"
+            or contract.get("astrbot_log_propagation") is not False
+        ):
+            return None
+        return plugin_name
+
+    async def _discover_diagnostic_provider(
+        self, snapshot: Any
+    ) -> DiagnosticProvider | None:
+        plugin_id = str(
+            getattr(snapshot, "name", "")
+            or getattr(snapshot, "root_dir_name", "")
+            or ""
+        ).strip()
+        repository = str(getattr(snapshot, "repo", "") or "").strip()
+        if not bool(getattr(snapshot, "loaded", False)) or not (
+            is_trusted_diagnostic_repository(plugin_id, repository)
+        ):
+            return None
+        try:
+            instance = await self._diagnostic_instance(plugin_id)
+            declaration = (
+                getattr(instance, "diagnostic_log_contract", None)
+                if instance is not None
+                else None
+            )
+            reader = (
+                getattr(instance, "diagnostic_events", None)
+                if instance is not None
+                else None
+            )
+            clearer = (
+                getattr(instance, "diagnostic_clear", None)
+                if instance is not None
+                else None
+            )
+            if not all(callable(value) for value in (declaration, reader, clearer)):
+                return None
+            contract = await self._diagnostic_call(declaration)
+        except Exception:
+            return None
+        plugin_name = self._self_declared_diagnostic_name(contract, plugin_id=plugin_id)
+        if plugin_name is None:
+            return None
+        display_name = self._diagnostic_text(
+            getattr(snapshot, "display_name", "") or plugin_id,
+            80,
+        )
+        return DiagnosticProvider(
+            plugin_id=plugin_id,
+            key=plugin_name,
+            display_name=display_name or plugin_id,
+            self_declared=True,
+        )
+
+    async def _diagnostic_providers(self) -> tuple[DiagnosticProvider, ...]:
+        now = time.monotonic()
+        cached = getattr(self, "_diagnostic_provider_cache", None)
+        if (
+            isinstance(cached, tuple)
+            and len(cached) == 2
+            and isinstance(cached[0], float)
+            and now - cached[0] < DIAGNOSTIC_DISCOVERY_CACHE_SECONDS
+        ):
+            return cached[1]
+
+        legacy = self._legacy_diagnostic_providers()
+        known_ids = {item.plugin_id for item in legacy}
+        try:
+            snapshots = await self.adapter.snapshot_plugins()
+        except Exception:
+            providers = legacy
+        else:
+            candidates = [
+                snapshot
+                for snapshot in snapshots
+                if str(
+                    getattr(snapshot, "name", "")
+                    or getattr(snapshot, "root_dir_name", "")
+                    or ""
+                ).strip()
+                not in known_ids
+            ][:64]
+            discovered = await asyncio.gather(
+                *(self._discover_diagnostic_provider(item) for item in candidates)
+            )
+            dynamic = sorted(
+                (item for item in discovered if item is not None),
+                key=lambda item: (item.key, item.plugin_id),
+            )
+            providers = legacy + tuple(dynamic)
+        self._diagnostic_provider_cache = (now, providers)
+        return providers
+
     async def _diagnostic_instance(self, plugin_id: str) -> Any | None:
         if plugin_id == PLUGIN_ID:
             return self
@@ -329,16 +533,12 @@ class PagesAPIMixin:
         return await value if inspect.isawaitable(value) else value
 
     @staticmethod
-    async def _diagnostic_call(
-        callback: Any, /, *args: Any, **kwargs: Any
-    ) -> Any:
+    async def _diagnostic_call(callback: Any, /, *args: Any, **kwargs: Any) -> Any:
         if inspect.iscoroutinefunction(callback):
             pending = callback(*args, **kwargs)
         else:
             pending = asyncio.to_thread(callback, *args, **kwargs)
-        value = await asyncio.wait_for(
-            pending, timeout=DIAGNOSTIC_READ_TIMEOUT_SECONDS
-        )
+        value = await asyncio.wait_for(pending, timeout=DIAGNOSTIC_READ_TIMEOUT_SECONDS)
         if inspect.isawaitable(value):
             value = await asyncio.wait_for(
                 value, timeout=DIAGNOSTIC_READ_TIMEOUT_SECONDS
@@ -378,11 +578,20 @@ class PagesAPIMixin:
             return member, []
         try:
             contract = await self._diagnostic_call(declaration)
-            version = str(contract.get("version") or "") if isinstance(contract, dict) else ""
+            version = (
+                str(contract.get("version") or "") if isinstance(contract, dict) else ""
+            )
             if (
                 not isinstance(contract, dict)
                 or contract.get("name") != DIAGNOSTIC_CONTRACT_NAME
                 or version.split(".", 1)[0] != DIAGNOSTIC_CONTRACT_MAJOR
+                or (
+                    bool(getattr(item, "self_declared", False))
+                    and self._self_declared_diagnostic_name(
+                        contract, plugin_id=item.plugin_id
+                    )
+                    != item.key
+                )
             ):
                 member.update(status="incompatible", reason="CONTRACT_INCOMPATIBLE")
                 return member, []
@@ -414,26 +623,43 @@ class PagesAPIMixin:
         except (TypeError, ValueError):
             member.update(status="invalid", reason="INVALID_CURSOR")
             return member, []
-        reset = bool(
-            (
-                expected_stream_id
-                and stream_id
-                and expected_stream_id != stream_id
+        provider_status = payload.get("status", "ready")
+        if provider_status in DIAGNOSTIC_PROVIDER_REASONS.values():
+            reason = payload.get("reason")
+            if (
+                not isinstance(reason, str)
+                or DIAGNOSTIC_PROVIDER_REASONS.get(reason) != provider_status
+            ):
+                member.update(status="invalid", reason="INVALID_PROVIDER_STATUS")
+                return member, []
+            member.update(
+                status=provider_status,
+                reason=reason,
+                stream_id=stream_id,
+                next_seq=next_seq,
+                dropped_before=dropped_before,
+                count=0,
             )
+            return member, []
+        if provider_status != "ready":
+            member.update(status="invalid", reason="INVALID_PROVIDER_STATUS")
+            return member, []
+        reset = bool(
+            (expected_stream_id and stream_id and expected_stream_id != stream_id)
             or next_seq < after_seq
         )
         if reset:
             try:
-                payload = await self._diagnostic_call(
-                    reader, after_seq=0, limit=limit
-                )
+                payload = await self._diagnostic_call(reader, after_seq=0, limit=limit)
             except TimeoutError:
                 member.update(status="timeout", reason="DIAGNOSTIC_READ_TIMEOUT")
                 return member, []
             except Exception as exc:
                 member.update(status="read_failed", reason=type(exc).__name__)
                 return member, []
-            if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("events"), list
+            ):
                 member.update(status="invalid", reason="INVALID_PAYLOAD")
                 return member, []
             raw_stream_id = payload.get("stream_id", "")
@@ -477,25 +703,32 @@ class PagesAPIMixin:
         if data is None:
             data = {}
         if not isinstance(data, dict):
-            return json_response({"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400)
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
         cursors = data.get("cursors", {})
         if not isinstance(cursors, dict):
-            return json_response({"success": False, "error": "INVALID_DIAGNOSTIC_CURSORS"}, status=400)
+            return json_response(
+                {"success": False, "error": "INVALID_DIAGNOSTIC_CURSORS"}, status=400
+            )
         streams = data.get("streams", {})
         if not isinstance(streams, dict):
             return json_response(
                 {"success": False, "error": "INVALID_DIAGNOSTIC_STREAMS"}, status=400
             )
+        providers = await self._diagnostic_providers()
         try:
             limit = min(1000, max(1, int(data.get("limit", 1000))))
             normalized_cursors = {
                 item.plugin_id: max(0, int(cursors.get(item.plugin_id, 0)))
-                for item in TRUSTED_SERIES
+                for item in providers
             }
         except (TypeError, ValueError):
-            return json_response({"success": False, "error": "INVALID_DIAGNOSTIC_CURSOR"}, status=400)
+            return json_response(
+                {"success": False, "error": "INVALID_DIAGNOSTIC_CURSOR"}, status=400
+            )
         normalized_streams: dict[str, str] = {}
-        for item in TRUSTED_SERIES:
+        for item in providers:
             value = streams.get(item.plugin_id, "")
             if value in (None, ""):
                 normalized_streams[item.plugin_id] = ""
@@ -513,11 +746,11 @@ class PagesAPIMixin:
                     limit=limit,
                     expected_stream_id=normalized_streams[item.plugin_id],
                 )
-                for item in TRUSTED_SERIES
+                for item in providers
             )
         )
         members = [row[0] for row in rows]
-        order = {item.plugin_id: index for index, item in enumerate(TRUSTED_SERIES)}
+        order = {item.plugin_id: index for index, item in enumerate(providers)}
         events = [event for _, chunk in rows for event in chunk]
         events.sort(
             key=lambda event: (
@@ -543,23 +776,39 @@ class PagesAPIMixin:
             or not set(data).issubset({"confirm", "plugin_ids"})
             or data.get("confirm") is not True
         ):
-            return json_response({"success": False, "error": "CONFIRMATION_REQUIRED"}, status=400)
+            return json_response(
+                {"success": False, "error": "CONFIRMATION_REQUIRED"}, status=400
+            )
+        providers = await self._diagnostic_providers()
+        provider_by_id = {item.plugin_id: item for item in providers}
         requested = data.get("plugin_ids")
         if requested is None:
-            selected = [item.plugin_id for item in TRUSTED_SERIES]
-        elif isinstance(requested, list) and all(isinstance(item, str) for item in requested):
+            selected = [item.plugin_id for item in providers]
+        elif isinstance(requested, list) and all(
+            isinstance(item, str) for item in requested
+        ):
             selected = list(dict.fromkeys(requested))
         else:
-            return json_response({"success": False, "error": "INVALID_PLUGIN_IDS"}, status=400)
-        unknown = [plugin_id for plugin_id in selected if plugin_id not in TRUSTED_BY_ID]
+            return json_response(
+                {"success": False, "error": "INVALID_PLUGIN_IDS"}, status=400
+            )
+        unknown = [
+            plugin_id for plugin_id in selected if plugin_id not in provider_by_id
+        ]
         if unknown:
-            return json_response({"success": False, "error": "PLUGIN_NOT_TRUSTED"}, status=403)
+            return json_response(
+                {"success": False, "error": "PLUGIN_NOT_TRUSTED"}, status=403
+            )
         cleared: list[str] = []
         unavailable: list[str] = []
         for plugin_id in selected:
             try:
                 instance = await self._diagnostic_instance(plugin_id)
-                clearer = getattr(instance, "diagnostic_clear", None) if instance is not None else None
+                clearer = (
+                    getattr(instance, "diagnostic_clear", None)
+                    if instance is not None
+                    else None
+                )
                 if not callable(clearer):
                     unavailable.append(plugin_id)
                     continue
@@ -733,7 +982,9 @@ class PagesAPIMixin:
         data = await self._request_json()
         requested = data.get("mirrors") if isinstance(data, dict) else None
         if requested is None:
-            targets = tuple(item["url"] for item in self._mirror_payload()["candidates"])
+            targets = tuple(
+                item["url"] for item in self._mirror_payload()["candidates"]
+            )
         elif isinstance(requested, list):
             targets = parse_mirror_candidates(requested)
         else:
@@ -862,7 +1113,9 @@ class PagesAPIMixin:
                 status=400,
             )
         expected_revision = data.get("expected_revision")
-        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        if isinstance(expected_revision, bool) or not isinstance(
+            expected_revision, int
+        ):
             return json_response(
                 {"success": False, "error": "EXPECTED_REVISION_REQUIRED"}, status=400
             )
@@ -885,9 +1138,7 @@ class PagesAPIMixin:
                 raise RuleValidationError(
                     "PLUGIN_NOT_CURRENTLY_ELIGIBLE_OR_LOADED:" + ",".join(invalid)
                 )
-            saved = self.scheduler.save(
-                candidate, expected_revision=expected_revision
-            )
+            saved = self.scheduler.save(candidate, expected_revision=expected_revision)
             if self.enabled and self.auto_update_enabled and saved.enabled:
                 await self.scheduler.rebuild()
                 schedule_action = "rebuilt"
@@ -1241,7 +1492,9 @@ class PagesAPIMixin:
         expected = {"plugin_id", "confirm"} if require_confirmation else {"plugin_id"}
         if set(data) != expected:
             raise ValueError(
-                "CONFIRMATION_REQUIRED" if require_confirmation else "INVALID_JSON_PAYLOAD"
+                "CONFIRMATION_REQUIRED"
+                if require_confirmation
+                else "INVALID_JSON_PAYLOAD"
             )
         if require_confirmation and data.get("confirm") is not True:
             raise ValueError("CONFIRMATION_REQUIRED")
@@ -1292,10 +1545,14 @@ class PagesAPIMixin:
         data = await self._request_json()
         if not isinstance(data, dict):
             raise ValueError("INVALID_JSON_PAYLOAD")
-        expected_keys = {"plugin_id", "confirm"} if require_confirmation else {"plugin_id"}
+        expected_keys = (
+            {"plugin_id", "confirm"} if require_confirmation else {"plugin_id"}
+        )
         if set(data) != expected_keys:
             raise ValueError(
-                "CONFIRMATION_REQUIRED" if require_confirmation else "INVALID_JSON_PAYLOAD"
+                "CONFIRMATION_REQUIRED"
+                if require_confirmation
+                else "INVALID_JSON_PAYLOAD"
             )
         if require_confirmation and data.get("confirm") is not True:
             raise ValueError("CONFIRMATION_REQUIRED")
@@ -1329,7 +1586,9 @@ class PagesAPIMixin:
             "UPDATE_CAPABILITY_UNAVAILABLE": 503,
         }
         code = str(exc) if str(exc) in known else type(exc).__name__.upper()
-        status = known.get(code, 503 if isinstance(exc, AdapterUnavailableError) else 500)
+        status = known.get(
+            code, 503 if isinstance(exc, AdapterUnavailableError) else 500
+        )
         return json_response(
             {"success": False, "error": code, "detail": redact(code)}, status=status
         )
@@ -1362,9 +1621,7 @@ class PagesAPIMixin:
             context.setdefault("token_configured", bool(self.registry.token))
             context["token_hint_required"] = not context["token_configured"]
         detail = redact(str(exc) or type(exc).__name__)
-        detail = re.sub(
-            r"(?i)\b(?:gh[pousr]_[a-z0-9_]+|bearer\s+\S+)", "***", detail
-        )
+        detail = re.sub(r"(?i)\b(?:gh[pousr]_[a-z0-9_]+|bearer\s+\S+)", "***", detail)
         return {
             "error": code,
             "error_detail": detail,
@@ -1443,17 +1700,21 @@ class PagesAPIMixin:
             else:
                 error_context = {}
                 error_detail = None
-            return trusted, snapshot, {
-                "latest_version": latest_version,
-                "update_available": update_available,
-                "version_status": version_status,
-                "download_url": download_url,
-                "default_branch": default_branch,
-                "checked_at": checked_at,
-                "error": error,
-                "error_detail": error_detail,
-                "error_context": error_context,
-            }
+            return (
+                trusted,
+                snapshot,
+                {
+                    "latest_version": latest_version,
+                    "update_available": update_available,
+                    "version_status": version_status,
+                    "download_url": download_url,
+                    "default_branch": default_branch,
+                    "checked_at": checked_at,
+                    "error": error,
+                    "error_detail": error_detail,
+                    "error_context": error_context,
+                },
+            )
 
         checked = await bounded_gather(
             [partial(inspect_latest, trusted) for trusted in TRUSTED_SERIES],
@@ -1575,7 +1836,9 @@ class PagesAPIMixin:
         if operation == "install":
             if force:
                 raise ValueError("INVALID_FORCE_FLAG")
-            snapshot = await self.adapter.install_plugin(plugin_id, repo_url=item.repo_url)
+            snapshot = await self.adapter.install_plugin(
+                plugin_id, repo_url=item.repo_url
+            )
             version_status = "not_installed"
         elif operation == "update":
             if plugin_id == PLUGIN_ID:
@@ -1638,10 +1901,16 @@ class PagesAPIMixin:
             results = []
             for plugin_id, operation in targets:
                 try:
-                    results.append(await self._apply_recommended_plugin(plugin_id, operation))
+                    results.append(
+                        await self._apply_recommended_plugin(plugin_id, operation)
+                    )
                 except Exception as exc:
                     error_response = self._mutation_error(exc)
-                    error_payload = error_response[0] if isinstance(error_response, tuple) else error_response
+                    error_payload = (
+                        error_response[0]
+                        if isinstance(error_response, tuple)
+                        else error_response
+                    )
                     results.append(
                         {
                             "plugin_id": plugin_id,

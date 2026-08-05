@@ -65,12 +65,18 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert 'apiPost("diagnostics/logs", {' in js
     assert "cursors: state.diagnosticCursors" in js
     assert "streams: state.diagnosticStreams" in js
+    assert "const activePluginIds = new Set(nextMembers.map" in js
+    assert "!activePluginIds.has(pluginId)" in js
+    assert "delete state.diagnosticCursors[pluginId]" in js
+    assert "delete state.diagnosticStreams[pluginId]" in js
     assert 'apiPost("diagnostics/clear", { confirm: true })' in js
     assert "startDiagnosticPolling" in js
     assert "stopDiagnosticPolling" in js
     assert "state.diagnosticPaused" in js
     assert "state.diagnosticGeneration" in js
     assert "state.diagnosticRefreshPending" in js
+    assert "diagnosticDisabled" in js
+    assert "diagnosticUnavailable" in js
     assert "generation !== state.diagnosticGeneration" in js
     assert "resetPluginIds" in js
     assert "!resetPluginIds.has(event.plugin_id)" in js

@@ -23,7 +23,7 @@ const messages = {
     mirrorBenchmark: "一键测速", mirrorBenchmarking: "正在测速…", mirrorBenchmarkDone: "测速完成", mirrorLatency: "延迟", mirrorUnreachable: "不可用", mirrorUntested: "未测速",
     mirrorApply: "使用该加速站", mirrorApplied: "加速站已切换", mirrorAddTitle: "添加自定义加速站", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "添加", mirrorAdded: "自定义加速站已添加", mirrorInvalid: "加速站必须是合法的 https 前缀", mirrorDuplicate: "该加速站已在列表中", mirrorRemove: "移除", mirrorRemoved: "自定义加速站已移除", mirrorProbeHint: "测速探针",
     ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）",
-    diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码、摘要或详情", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticCount: "显示 {shown} 条，共缓存 {total} 条", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", diagnosticNoDetails: "暂无更多详细信息", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
+    diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码、摘要或详情", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticDisabled: "已关闭", diagnosticUnavailable: "不可用", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticCount: "显示 {shown} 条，共缓存 {total} 条", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", diagnosticNoDetails: "暂无更多详细信息", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
@@ -49,7 +49,7 @@ const messages = {
     mirrorBenchmark: "Run benchmark", mirrorBenchmarking: "Benchmarking…", mirrorBenchmarkDone: "Benchmark completed", mirrorLatency: "Latency", mirrorUnreachable: "Unavailable", mirrorUntested: "Not tested",
     mirrorApply: "Use this mirror", mirrorApplied: "Mirror switched", mirrorAddTitle: "Add a custom mirror", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "Add", mirrorAdded: "Custom mirror added", mirrorInvalid: "A mirror must be a valid https prefix", mirrorDuplicate: "This mirror is already listed", mirrorRemove: "Remove", mirrorRemoved: "Custom mirror removed", mirrorProbeHint: "Benchmark probe",
     ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)",
-    diagnosticTitle: "Series diagnostic logs", pauseLogs: "Pause", resumeLogs: "Resume", refreshLogs: "Refresh logs", clearLogs: "Clear", pluginFilter: "Plugin", levelFilter: "Level", searchLogs: "Search", searchLogsPlaceholder: "Event code, summary, or details", allPlugins: "All plugins", allLevels: "All levels", diagnosticReady: "Ready", diagnosticMissing: "Not loaded", diagnosticUnsupported: "Unsupported", diagnosticFailed: "Read failed", diagnosticCount: "Showing {shown} of {total} cached events", diagnosticPaused: "Paused", diagnosticEmpty: "No matching events", diagnosticNoDetails: "No additional details", clearDiagnosticsConfirm: "Clear all in-memory series diagnostic logs?", diagnosticsCleared: "Diagnostic logs cleared", diagnosticGap: "Some older events were overwritten by the ring buffer"
+    diagnosticTitle: "Series diagnostic logs", pauseLogs: "Pause", resumeLogs: "Resume", refreshLogs: "Refresh logs", clearLogs: "Clear", pluginFilter: "Plugin", levelFilter: "Level", searchLogs: "Search", searchLogsPlaceholder: "Event code, summary, or details", allPlugins: "All plugins", allLevels: "All levels", diagnosticReady: "Ready", diagnosticMissing: "Not loaded", diagnosticDisabled: "Disabled", diagnosticUnavailable: "Unavailable", diagnosticUnsupported: "Unsupported", diagnosticFailed: "Read failed", diagnosticCount: "Showing {shown} of {total} cached events", diagnosticPaused: "Paused", diagnosticEmpty: "No matching events", diagnosticNoDetails: "No additional details", clearDiagnosticsConfirm: "Clear all in-memory series diagnostic logs?", diagnosticsCleared: "Diagnostic logs cleared", diagnosticGap: "Some older events were overwritten by the ring buffer"
   }
 };
 
@@ -960,13 +960,15 @@ async function runCatalogAction(input) {
 function diagnosticStatusKey(status) {
   if (status === "ready") return "diagnosticReady";
   if (status === "missing") return "diagnosticMissing";
+  if (status === "disabled") return "diagnosticDisabled";
+  if (status === "unavailable") return "diagnosticUnavailable";
   if (status === "unsupported" || status === "incompatible") return "diagnosticUnsupported";
   return "diagnosticFailed";
 }
 
 function diagnosticStatusClass(status) {
   if (status === "ready") return "ok";
-  if (status === "missing" || status === "unsupported") return "off";
+  if (status === "missing" || status === "disabled" || status === "unsupported") return "off";
   return "warn";
 }
 
@@ -1075,15 +1077,27 @@ async function loadDiagnostics(reset = false) {
     const nextMembers = data.members || [];
     const membersChanged = JSON.stringify(state.diagnosticMembers) !== JSON.stringify(nextMembers);
     state.diagnosticMembers = nextMembers;
+    const activePluginIds = new Set(nextMembers.map((member) => member.plugin_id));
+    const removedPluginIds = new Set(
+      state.diagnosticEvents
+        .map((event) => event.plugin_id)
+        .filter((pluginId) => !activePluginIds.has(pluginId))
+    );
     const resetPluginIds = new Set(
       state.diagnosticMembers.filter((member) => member.reset).map((member) => member.plugin_id)
     );
-    let eventsChanged = reset || resetPluginIds.size > 0;
-    if (resetPluginIds.size) {
+    let eventsChanged = reset || resetPluginIds.size > 0 || removedPluginIds.size > 0;
+    if (resetPluginIds.size || removedPluginIds.size) {
       state.diagnosticEvents = state.diagnosticEvents.filter(
-        (event) => !resetPluginIds.has(event.plugin_id)
+        (event) => !resetPluginIds.has(event.plugin_id) && !removedPluginIds.has(event.plugin_id)
       );
     }
+    Object.keys(state.diagnosticCursors).forEach((pluginId) => {
+      if (!activePluginIds.has(pluginId)) delete state.diagnosticCursors[pluginId];
+    });
+    Object.keys(state.diagnosticStreams).forEach((pluginId) => {
+      if (!activePluginIds.has(pluginId)) delete state.diagnosticStreams[pluginId];
+    });
     state.diagnosticMembers.forEach((member) => {
       if (member.status === "ready") {
         state.diagnosticCursors[member.plugin_id] = member.next_seq || 0;

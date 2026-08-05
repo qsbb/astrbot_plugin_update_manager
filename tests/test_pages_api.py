@@ -66,7 +66,9 @@ def test_pages_config_never_returns_secret(monkeypatch, tmp_path):
     assert payload["config"]["proxy"] == "http://proxy"
 
 
-def test_apply_page_runtime_config_clears_optional_network_values(monkeypatch, tmp_path):
+def test_apply_page_runtime_config_clears_optional_network_values(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(
         context(tmp_path), {"proxy": "http://proxy", "github_token": "secret"}
@@ -99,7 +101,9 @@ def test_pages_request_json_prefers_astrbot_web_contract(monkeypatch, tmp_path):
     assert calls == [{}]
 
 
-def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch, tmp_path):
+def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
 
@@ -179,6 +183,206 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(monkeypatch
     assert member["next_seq"] == 4
 
 
+def test_series_diagnostics_reads_quest_bridge_disabled_contract_without_blocking(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    class QuestProvider:
+        def diagnostic_log_contract(self):
+            return {
+                "name": "series.diagnostics",
+                "version": "1.0",
+                "series_id": "ningxin_suxi",
+                "plugin_id": "astrbot_plugin_quest_avatar_bridge",
+                "plugin_name": "临",
+                "capabilities": ("read_events", "clear_events"),
+                "storage": "memory_only",
+                "astrbot_log_propagation": False,
+            }
+
+        def diagnostic_events(self, *, after_seq, limit):
+            assert after_seq == 0
+            assert limit == 20
+            return {
+                "contract": "series.diagnostics@1.0",
+                "plugin_id": "astrbot_plugin_quest_avatar_bridge",
+                "plugin_name": "临",
+                "status": "disabled",
+                "reason": "DIAGNOSTIC_DISABLED",
+                "stream_id": "quest-stream",
+                "events": [],
+                "next_seq": 0,
+                "dropped_before": 0,
+            }
+
+        def diagnostic_clear(self):
+            return None
+
+    async def get_instance(plugin_id):
+        if plugin_id == "astrbot_plugin_quest_avatar_bridge":
+            return QuestProvider()
+        return None
+
+    async def request_json():
+        return {"cursors": {}, "limit": 20}
+
+    async def snapshot_plugins():
+        return (
+            SimpleNamespace(
+                name="astrbot_plugin_quest_avatar_bridge",
+                root_dir_name="astrbot_plugin_quest_avatar_bridge",
+                display_name="凝心溯溪-临",
+                repo=("https://github.com/qsbb/astrbot_plugin_quest_avatar_bridge"),
+                loaded=True,
+            ),
+        )
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin.adapter, "snapshot_plugins", snapshot_plugins)
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+    payload = unwrap(asyncio.run(plugin._pages_diagnostic_logs()))
+
+    member = next(
+        item
+        for item in payload["members"]
+        if item["plugin_id"] == "astrbot_plugin_quest_avatar_bridge"
+    )
+    assert member["plugin_name"] == "临"
+    assert member["display_name"] == "凝心溯溪-临"
+    assert member["status"] == "disabled"
+    assert member["reason"] == "DIAGNOSTIC_DISABLED"
+    assert not any(
+        event["plugin_id"] == "astrbot_plugin_quest_avatar_bridge"
+        for event in payload["events"]
+    )
+
+
+def test_series_diagnostics_rejects_untrusted_or_wrong_series_self_declarations(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    class Provider:
+        def __init__(self, plugin_id, series_id):
+            self.plugin_id = plugin_id
+            self.series_id = series_id
+
+        def diagnostic_log_contract(self):
+            return {
+                "name": "series.diagnostics",
+                "version": "1.0",
+                "series_id": self.series_id,
+                "plugin_id": self.plugin_id,
+                "plugin_name": "新",
+                "capabilities": ("read_events", "clear_events"),
+                "storage": "memory_only",
+                "astrbot_log_propagation": False,
+            }
+
+        def diagnostic_events(self, *, after_seq, limit):
+            return {"events": [], "next_seq": 0, "dropped_before": 0}
+
+        def diagnostic_clear(self):
+            return None
+
+    untrusted_id = "astrbot_plugin_untrusted_sample"
+    wrong_series_id = "astrbot_plugin_wrong_series"
+    providers = {
+        untrusted_id: Provider(untrusted_id, "ningxin_suxi"),
+        wrong_series_id: Provider(wrong_series_id, "another_series"),
+    }
+
+    async def get_instance(plugin_id):
+        return providers.get(plugin_id)
+
+    async def snapshot_plugins():
+        return (
+            SimpleNamespace(
+                name=untrusted_id,
+                root_dir_name=untrusted_id,
+                display_name="不可信",
+                repo=f"https://github.com/third-party/{untrusted_id}",
+                loaded=True,
+            ),
+            SimpleNamespace(
+                name=wrong_series_id,
+                root_dir_name=wrong_series_id,
+                display_name="错误系列",
+                repo=f"https://github.com/qsbb/{wrong_series_id}",
+                loaded=True,
+            ),
+        )
+
+    async def request_json():
+        return {"cursors": {}, "limit": 20}
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin.adapter, "snapshot_plugins", snapshot_plugins)
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+
+    payload = unwrap(asyncio.run(plugin._pages_diagnostic_logs()))
+    member_ids = {item["plugin_id"] for item in payload["members"]}
+    assert untrusted_id not in member_ids
+    assert wrong_series_id not in member_ids
+
+
+def test_series_diagnostics_clear_discovers_new_series_provider(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_future_series_feature"
+    calls = []
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {
+                "name": "series.diagnostics",
+                "version": "1.0",
+                "series_id": "ningxin_suxi",
+                "plugin_id": plugin_id,
+                "plugin_name": "新",
+                "capabilities": ("read_events", "clear_events"),
+                "storage": "memory_only",
+                "astrbot_log_propagation": False,
+            }
+
+        def diagnostic_events(self, *, after_seq, limit):
+            return {"events": [], "next_seq": 0, "dropped_before": 0}
+
+        def diagnostic_clear(self):
+            calls.append("cleared")
+
+    provider = Provider()
+
+    async def get_instance(requested_id):
+        return provider if requested_id == plugin_id else None
+
+    async def snapshot_plugins():
+        return (
+            SimpleNamespace(
+                name=plugin_id,
+                root_dir_name=plugin_id,
+                display_name="凝心溯溪-新",
+                repo=f"https://github.com/qsbb/{plugin_id}",
+                loaded=True,
+            ),
+        )
+
+    async def request_json():
+        return {"confirm": True, "plugin_ids": [plugin_id]}
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    monkeypatch.setattr(plugin.adapter, "snapshot_plugins", snapshot_plugins)
+    monkeypatch.setattr(plugin, "_request_json", request_json)
+
+    payload = unwrap(asyncio.run(plugin._pages_clear_diagnostic_logs()))
+    assert payload["cleared"] == [plugin_id]
+    assert payload["unavailable"] == []
+    assert calls == ["cleared"]
+
+
 def test_series_diagnostics_reads_astrbot_4_star_cls_without_adapter_stub(
     monkeypatch, tmp_path
 ):
@@ -238,7 +442,9 @@ def test_series_diagnostics_reads_astrbot_4_star_cls_without_adapter_stub(
     assert event["code"] == "plugin.ready"
 
 
-def test_series_diagnostics_recovers_after_provider_sequence_reset(monkeypatch, tmp_path):
+def test_series_diagnostics_recovers_after_provider_sequence_reset(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     calls = []
@@ -425,7 +631,9 @@ def test_series_diagnostics_reports_first_read_buffer_gap(monkeypatch, tmp_path)
     assert member["dropped_before"] == 5
 
 
-def test_series_diagnostics_clear_validates_scope_and_degrades_missing(monkeypatch, tmp_path):
+def test_series_diagnostics_clear_validates_scope_and_degrades_missing(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     calls = []
@@ -559,7 +767,9 @@ def test_pages_benchmark_mirrors_reports_latency_without_raising(monkeypatch, tm
     monkeypatch.setattr(plugin.registry, "probe_latency", probe_latency)
 
     async def requested():
-        return {"mirrors": ["https://gh-proxy.com", "https://hk.gh-proxy.com", "ftp://nope"]}
+        return {
+            "mirrors": ["https://gh-proxy.com", "https://hk.gh-proxy.com", "ftp://nope"]
+        }
 
     monkeypatch.setattr(plugin, "_request_json", requested)
     payload = unwrap(asyncio.run(plugin._pages_benchmark_mirrors()))
@@ -899,9 +1109,7 @@ def test_catalog_lifecycle_api_accepts_loaded_nontrusted_and_verifies_snapshot(
 
     async def set_enabled(plugin_id, enabled):
         calls.append((plugin_id, enabled))
-        return SimpleNamespace(
-            version="1.0.0", loaded=True, activated=enabled
-        )
+        return SimpleNamespace(version="1.0.0", loaded=True, activated=enabled)
 
     monkeypatch.setattr(plugin, "_request_json", request_enable)
     monkeypatch.setattr(plugin.adapter, "set_plugin_enabled", set_enabled)
@@ -995,9 +1203,7 @@ def test_catalog_check_updates_is_scoped_and_isolates_single_failures(
     good = _github_catalog_item("good")
     broken = _github_catalog_item("broken")
     market = _github_catalog_item("market", source_kind="market", source_url=None)
-    plugin.catalog.scan = lambda: asyncio.sleep(
-        0, result=(good, broken, market)
-    )
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(good, broken, market))
     monkeypatch.setattr(
         plugin.adapter,
         "probe_capabilities",
@@ -1052,9 +1258,7 @@ def test_catalog_update_requires_confirmation_source_and_new_version(
     target = _github_catalog_item("third_party")
     market = _github_catalog_item("market", source_kind="market", source_url=None)
     myself = _github_catalog_item(module.PLUGIN_NAME)
-    plugin.catalog.scan = lambda: asyncio.sleep(
-        0, result=(target, market, myself)
-    )
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(target, market, myself))
     monkeypatch.setattr(
         plugin.adapter,
         "probe_capabilities",
@@ -1121,7 +1325,9 @@ def test_catalog_update_requires_confirmation_source_and_new_version(
     assert len(calls) == 1
 
 
-def test_catalog_force_update_allows_supported_version_states_only(monkeypatch, tmp_path):
+def test_catalog_force_update_allows_supported_version_states_only(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     target = _github_catalog_item("third_party")
@@ -1175,7 +1381,9 @@ def test_catalog_force_update_allows_supported_version_states_only(monkeypatch, 
     assert len(calls) == 3
 
 
-def test_catalog_force_update_keeps_confirmation_and_safety_gates(monkeypatch, tmp_path):
+def test_catalog_force_update_keeps_confirmation_and_safety_gates(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     target = _github_catalog_item("third_party")
@@ -1206,6 +1414,7 @@ def test_catalog_force_update_keeps_confirmation_and_safety_gates(monkeypatch, t
         ),
     )
     for payload, code, expected_status in payloads:
+
         async def request(payload=payload):
             return payload
 
@@ -1291,10 +1500,15 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         for item in payload["items"]
     )
     relationship = next(
-        item for item in payload["items"] if item["plugin_id"] == "astrbot_plugin_relationship"
+        item
+        for item in payload["items"]
+        if item["plugin_id"] == "astrbot_plugin_relationship"
     )
     assert relationship["name"] == "凝心溯溪-情"
-    assert relationship["repo_url"] == "https://github.com/qsbb/astrbot_plugin_relationship"
+    assert (
+        relationship["repo_url"]
+        == "https://github.com/qsbb/astrbot_plugin_relationship"
+    )
     environment = next(
         item
         for item in payload["items"]
@@ -1412,7 +1626,9 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     assert all(item["checked_at"] for item in payload["items"])
 
 
-def test_check_latest_honours_cached_request_and_rejects_bad_flag(monkeypatch, tmp_path):
+def test_check_latest_honours_cached_request_and_rejects_bad_flag(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     force_values = []
@@ -1485,7 +1701,9 @@ def test_version_state_compares_across_v_prefix_and_segment_formats(
     assert plugin._version_state("", "1.0.0") == (False, "not_installed")
 
 
-def test_recommendation_failure_payload_keeps_safe_registry_context(monkeypatch, tmp_path):
+def test_recommendation_failure_payload_keeps_safe_registry_context(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
@@ -1640,7 +1858,9 @@ def test_update_action_requires_newer_version(monkeypatch, tmp_path):
     monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
     payload = unwrap(asyncio.run(plugin._pages_recommendations()))
     voice = next(
-        item for item in payload["items"] if item["plugin_id"] == "astrbot_plugin_voice_hub"
+        item
+        for item in payload["items"]
+        if item["plugin_id"] == "astrbot_plugin_voice_hub"
     )
     assert voice["latest_version"] == "1.0.1"
     assert voice["update_available"] is True
@@ -1653,7 +1873,9 @@ def test_update_action_requires_newer_version(monkeypatch, tmp_path):
     assert self_item["actions"]["force_update"] is False
 
 
-def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch, tmp_path):
+def test_recommendation_mutation_validates_trust_and_routes_adapter(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
     calls = []
@@ -1684,7 +1906,7 @@ def test_recommendation_mutation_validates_trust_and_routes_adapter(monkeypatch,
             archive_url=(
                 "https://api.github.com/repos/qsbb/"
                 "astrbot_plugin_voice_hub/zipball/master"
-            )
+            ),
         )
 
     async def enable(plugin_id, enabled):
@@ -1841,6 +2063,7 @@ def test_recommendation_update_validates_force_and_keeps_normal_version_gate(
         ),
     )
     for request_payload, code, expected_status in cases:
+
         async def request(request_payload=request_payload):
             return request_payload
 
@@ -1917,11 +2140,19 @@ def test_apply_all_recommendations_runs_serially_and_reports_partial_failure(
     assert payload["results"][1]["error"] == "RUNTIMEERROR"
 
 
-def test_apply_all_recommendations_requires_explicit_confirmation(monkeypatch, tmp_path):
+def test_apply_all_recommendations_requires_explicit_confirmation(
+    monkeypatch, tmp_path
+):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
 
-    for payload in ({}, {"confirm": False}, {"confirm": 1}, {"confirm": True, "extra": 1}):
+    for payload in (
+        {},
+        {"confirm": False},
+        {"confirm": 1},
+        {"confirm": True, "extra": 1},
+    ):
+
         async def request(payload=payload):
             return payload
 
@@ -1942,6 +2173,7 @@ def test_destructive_recommendation_mutations_require_explicit_confirmation(
         {"plugin_id": "astrbot_plugin_voice_hub", "confirm": False},
         {"plugin_id": "astrbot_plugin_voice_hub", "confirm": 1},
     ):
+
         async def request(payload=payload):
             return payload
 

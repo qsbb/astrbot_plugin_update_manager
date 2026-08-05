@@ -8,7 +8,13 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from astrbot_plugin_update_manager.core.diagnostics import SERIES_MEMBERS, diagnose_series
+from astrbot_plugin_update_manager.core.diagnostics import (
+    SERIES_MEMBERS,
+    diagnose_series,
+)
+from astrbot_plugin_update_manager.core.trusted import (
+    is_trusted_diagnostic_repository,
+)
 
 
 class _Adapter:
@@ -44,6 +50,39 @@ class DiagnosticsTests(unittest.TestCase):
                 ("astrbot_plugin_voice_hub", "声"),
                 ("astrbot_plugin_update_manager", "核"),
             ),
+        )
+
+    def test_dynamic_diagnostic_repository_requires_exact_owner_and_plugin_id(self):
+        plugin_id = "astrbot_plugin_quest_avatar_bridge"
+        self.assertTrue(
+            is_trusted_diagnostic_repository(
+                plugin_id,
+                f"https://github.com/qsbb/{plugin_id}",
+            )
+        )
+        self.assertTrue(
+            is_trusted_diagnostic_repository(
+                plugin_id,
+                f"https://github.com/qsbb/{plugin_id}.git",
+            )
+        )
+        self.assertFalse(
+            is_trusted_diagnostic_repository(
+                plugin_id,
+                f"https://github.com/third-party/{plugin_id}",
+            )
+        )
+        self.assertFalse(
+            is_trusted_diagnostic_repository(
+                plugin_id,
+                "https://github.com/qsbb/astrbot_plugin_other",
+            )
+        )
+        self.assertFalse(
+            is_trusted_diagnostic_repository(
+                plugin_id,
+                f"https://github.com/qsbb/{plugin_id}?ref=unsafe",
+            )
         )
 
     def test_legacy_members_are_reported_as_compatible(self):

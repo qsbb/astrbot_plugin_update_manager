@@ -56,7 +56,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.8.3"
+__version__ = "0.9.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -241,8 +241,16 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         return {
             "name": "series.diagnostics",
             "version": "1.0",
-            "plugin": PLUGIN_NAME,
-            "capabilities": ("read", "clear", "aggregate"),
+            "series_id": "ningxin_suxi",
+            "plugin_id": PLUGIN_NAME,
+            "plugin_name": "核",
+            "capabilities": (
+                "read",
+                "clear",
+                "aggregate",
+                "read_events",
+                "clear_events",
+            ),
             "storage": "memory_only",
             "astrbot_log_propagation": False,
         }
