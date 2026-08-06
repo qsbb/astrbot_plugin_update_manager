@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 import uuid
 from collections import deque
 from datetime import UTC, datetime
@@ -173,6 +174,121 @@ def diagnostic_event(
 ) -> dict[str, Any]:
     isolate_logger()
     return _buffer.append(level, code, summary, details)
+
+
+class DiagnosticOperation:
+    """Bounded breadcrumb-style timeline for one internal operation."""
+
+    def __init__(
+        self,
+        component: str,
+        operation: str,
+        summary: str,
+        *,
+        level: str = "INFO",
+        details: dict[str, Any] | None = None,
+        emit_start: bool = True,
+    ) -> None:
+        self.component = _safe_text(component, limit=40)
+        self.operation = _safe_text(operation, limit=80)
+        self.summary = _safe_text(summary, limit=240)
+        self.level = level
+        self.operation_ref = uuid.uuid4().hex[:12]
+        self.started = time.monotonic()
+        self.finished = False
+        self.details = dict(details or {})
+        if emit_start:
+            self.event("started", f"{self.summary}开始")
+
+    def _details(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            **self.details,
+            **(extra or {}),
+            "component": self.component,
+            "operation": self.operation,
+            "operation_ref": self.operation_ref,
+        }
+
+    def event(
+        self,
+        phase: str,
+        summary: str,
+        *,
+        level: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return diagnostic_event(
+            f"{self.component}.{self.operation}.{phase}",
+            summary,
+            level=level or self.level,
+            details=self._details(details),
+        )
+
+    def finish(
+        self,
+        *,
+        outcome: str = "success",
+        summary: str | None = None,
+        level: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if self.finished:
+            return None
+        self.finished = True
+        return self.event(
+            "completed",
+            summary or f"{self.summary}完成",
+            level=level,
+            details={
+                **(details or {}),
+                "outcome": outcome,
+                "duration_ms": round((time.monotonic() - self.started) * 1000, 3),
+            },
+        )
+
+    def fail(
+        self,
+        error: BaseException,
+        *,
+        summary: str | None = None,
+        reason: str = "OPERATION_FAILED",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if self.finished:
+            return None
+        self.finished = True
+        return self.event(
+            "failed",
+            summary or f"{self.summary}失败",
+            level="ERROR",
+            details={
+                **(details or {}),
+                "outcome": "failed",
+                "reason": reason,
+                "error_type": type(error).__name__,
+                "duration_ms": round((time.monotonic() - self.started) * 1000, 3),
+            },
+        )
+
+
+def diagnostic_operation(
+    component: str,
+    operation: str,
+    summary: str,
+    *,
+    level: str = "INFO",
+    details: dict[str, Any] | None = None,
+    emit_start: bool = True,
+) -> DiagnosticOperation:
+    isolate_logger()
+    return DiagnosticOperation(
+        component,
+        operation,
+        summary,
+        level=level,
+        details=details,
+        emit_start=emit_start,
+    )
 
 
 def diagnostic_events(*, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:

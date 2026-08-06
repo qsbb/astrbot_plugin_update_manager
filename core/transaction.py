@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
@@ -42,12 +43,42 @@ class PluginTransaction:
         *,
         plugin_root: Path,
         backup_root: Path,
+        diagnostic=None,
     ) -> None:
         self.adapter, self.health, self.store = adapter, health, store
+        self.diagnostic = diagnostic
         self.plugin_root = plugin_root.resolve()
         self.backup_root = backup_root.resolve()
         if not contained(self.backup_root, store.root):
             raise ValueError("备份根目录必须位于插件 data 范围")
+
+    def _emit(
+        self,
+        code: str,
+        summary: str,
+        *,
+        level: str = "INFO",
+        details: dict | None = None,
+    ) -> None:
+        if not callable(self.diagnostic):
+            return
+        try:
+            self.diagnostic(code, summary, level=level, details=details)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _state_level(state: TxState) -> str:
+        if state is TxState.ROLLBACK_FAILED:
+            return "ERROR"
+        if state in {
+            TxState.FAILED,
+            TxState.ROLLING_BACK,
+            TxState.ROLLED_BACK,
+            TxState.INTERRUPTED,
+        }:
+            return "WARNING"
+        return "INFO"
 
     def _record(self, record: dict, state: TxState, **extra) -> None:
         record.update(state=state.value, updated_at=utc_now().isoformat(), **extra)
@@ -60,6 +91,26 @@ class PluginTransaction:
                 "state": state.value,
                 **extra,
             }
+        )
+        health_result = extra.get("health_result")
+        reason = extra.get("error") or extra.get("warning")
+        if isinstance(health_result, dict):
+            reason = health_result.get("reason") or reason
+        self._emit(
+            "transaction.state",
+            f"{record['plugin_id']} 更新事务进入 {state.value}",
+            level=self._state_level(state),
+            details={
+                "component": "transaction",
+                "operation": "plugin_update",
+                "plugin_id": record["plugin_id"],
+                "from_version": record.get("from_version", ""),
+                "to_version": record.get("to_version", ""),
+                "state": state.value,
+                "tx_ref": str(record["tx_id"])[:12],
+                "run_ref": str(record.get("run_id", ""))[:12],
+                "reason": reason or state.value,
+            },
         )
 
     def _source(self, item: PlanItem) -> Path:
@@ -144,6 +195,7 @@ class PluginTransaction:
         return path
 
     async def execute(self, run_id: str, item: PlanItem) -> dict:
+        started = time.monotonic()
         tx_id = uuid4().hex
         record = {
             "tx_id": tx_id,
@@ -193,6 +245,7 @@ class PluginTransaction:
             if backup is None or digest is None:
                 record["finished_at"] = utc_now().isoformat()
                 self.store.write(f"tx-{record['tx_id']}.json", record)
+                self._emit_transaction_completed(record, started)
                 return record
             self._record(record, TxState.ROLLING_BACK)
             try:
@@ -210,14 +263,40 @@ class PluginTransaction:
                     finished_at=utc_now().isoformat(),
                     error=redact(rollback_exc),
                 )
+        self._emit_transaction_completed(record, started)
         return record
+
+    def _emit_transaction_completed(self, record: dict, started: float) -> None:
+        state = TxState(record["state"])
+        self._emit(
+            "transaction.completed",
+            f"{record['plugin_id']} 更新事务结束：{state.value}",
+            level=self._state_level(state),
+            details={
+                "component": "transaction",
+                "operation": "plugin_update",
+                "outcome": "success" if state is TxState.COMMITTED else "failed",
+                "plugin_id": record["plugin_id"],
+                "state": state.value,
+                "tx_ref": str(record["tx_id"])[:12],
+                "run_ref": str(record.get("run_id", ""))[:12],
+                "duration_ms": round(
+                    (time.monotonic() - started) * 1000,
+                    3,
+                ),
+            },
+        )
 
     async def manual_rollback(self, tx_id: str) -> dict:
         """按已提交事务记录恢复其更新前版本，且只接受本插件生成的备份。"""
+        started = time.monotonic()
         if not tx_id or len(tx_id) > 64 or not tx_id.isalnum():
             raise TransactionError("INVALID_TRANSACTION_ID")
         original = self.store.read(f"tx-{tx_id}.json", None)
-        if not isinstance(original, dict) or original.get("state") != TxState.COMMITTED.value:
+        if (
+            not isinstance(original, dict)
+            or original.get("state") != TxState.COMMITTED.value
+        ):
             raise TransactionError("TRANSACTION_NOT_ROLLBACKABLE")
         required = {
             "plugin_id",
@@ -273,6 +352,24 @@ class PluginTransaction:
                 finished_at=utc_now().isoformat(),
                 error=redact(exc),
             )
+        state = TxState(record["state"])
+        self._emit(
+            "rollback.manual.completed",
+            f"{record['plugin_id']} 人工回滚结束：{state.value}",
+            level=self._state_level(state),
+            details={
+                "component": "transaction",
+                "operation": "manual_rollback",
+                "outcome": ("success" if state is TxState.ROLLED_BACK else "failed"),
+                "plugin_id": record["plugin_id"],
+                "state": state.value,
+                "tx_ref": rollback_id[:12],
+                "duration_ms": round(
+                    (time.monotonic() - started) * 1000,
+                    3,
+                ),
+            },
+        )
         return record
 
     def cleanup(
@@ -298,6 +395,8 @@ class PluginTransaction:
         total = sum(
             sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) for p in entries
         )
+        removed_count = 0
+        removed_bytes = 0
         for path in reversed(entries):
             if path in protected:
                 continue
@@ -306,6 +405,23 @@ class PluginTransaction:
             if old or total > capacity_bytes:
                 shutil.rmtree(path)
                 total -= size
+                removed_count += 1
+                removed_bytes += size
+        self._emit(
+            "backup.cleanup.completed",
+            "备份清理完成",
+            level="DEBUG",
+            details={
+                "component": "backup",
+                "operation": "cleanup",
+                "outcome": "success",
+                "backup_count": len(entries),
+                "protected_count": len(protected),
+                "removed_count": removed_count,
+                "removed_bytes": removed_bytes,
+                "remaining_bytes": total,
+            },
+        )
 
 
 def tree_manifest_without_metadata(root: Path):

@@ -51,12 +51,13 @@ from .pages_api import PagesAPIMixin
 from .series_diagnostics import (
     diagnostic_clear as clear_diagnostic_events,
     diagnostic_event,
+    diagnostic_operation,
     diagnostic_events as read_diagnostic_events,
     logger,
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -75,7 +76,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         _current_instance = self
         self.context, self._config = context, config
         diagnostic_event("plugin.init", "更新管理插件开始初始化")
-        self._native_config = config if callable(getattr(config, "save_config", None)) else None
+        self._native_config = (
+            config if callable(getattr(config, "save_config", None)) else None
+        )
         self._config_overrides: dict[str, Any] = {}
         data_root = self._resolve_data_root()
         self.store = AtomicJsonStore(data_root)
@@ -116,9 +119,14 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             self.store,
             plugin_root=plugin_root,
             backup_root=data_root / "backups",
+            diagnostic=diagnostic_event,
         )
         self.coordinator = UpdateCoordinator(
-            self.catalog, self.planner, self.transaction, self.store
+            self.catalog,
+            self.planner,
+            self.transaction,
+            self.store,
+            diagnostic=diagnostic_event,
         )
         self.scheduler = ScheduleService(
             getattr(context, "cron_manager", None), self.store, self._scheduled_run
@@ -220,9 +228,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                     "unhealthy",
                     "missing",
                 ),
-                "member_reason_values": tuple(
-                    SERIES_RUNTIME_MEMBER_STATUS_REASONS
-                ),
+                "member_reason_values": tuple(SERIES_RUNTIME_MEMBER_STATUS_REASONS),
             },
         }
 
@@ -313,6 +319,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     async def initialize(self) -> None:
         """插件激活后恢复唯一 runtime job；配置关闭时不注册调度。"""
         if not self.enabled:
+            diagnostic_event(
+                "plugin.initialize.skipped",
+                "插件已禁用，跳过运行态初始化",
+                level="DEBUG",
+                details={"component": "plugin", "outcome": "disabled"},
+            )
             return
         try:
             if self.auto_update_enabled:
@@ -325,7 +337,23 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
                 * 1024**2,
             )
+            diagnostic_event(
+                "plugin.initialize.completed",
+                "运行态初始化完成",
+                details={
+                    "component": "plugin",
+                    "schedule_action": "rebuilt"
+                    if self.auto_update_enabled
+                    else "removed",
+                },
+            )
         except Exception as exc:
+            diagnostic_event(
+                "plugin.initialize.failed",
+                "运行态初始化失败",
+                level="ERROR",
+                details={"component": "plugin", "error_type": type(exc).__name__},
+            )
             logger.error("[update-manager] initialize failed: %s", type(exc).__name__)
 
     def _disabled_notice(self) -> str | None:
@@ -378,7 +406,30 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         yield event.plain_result("\n".join(lines))
 
     async def _candidates(self, selected: tuple[str, ...]) -> dict[str, Candidate]:
+        try:
+            return await self._resolve_candidates(selected)
+        except Exception as exc:
+            diagnostic_event(
+                "candidate.resolve.failed",
+                "更新候选解析失败",
+                level="ERROR",
+                details={
+                    "component": "candidate",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+
+    async def _resolve_candidates(
+        self, selected: tuple[str, ...]
+    ) -> dict[str, Candidate]:
         """并发（有上限）解析候选；单个仓库慢不再线性拖长整批检查。"""
+        tracker = diagnostic_operation(
+            "candidate",
+            "resolve",
+            "解析更新候选",
+            details={"requested_count": len(tuple(dict.fromkeys(selected)))},
+        )
         items = {item.plugin_id: item for item in await self.catalog.scan()}
         snapshots = {
             (item.name or item.root_dir_name or ""): item
@@ -415,6 +466,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             )
             for (plugin_id, _), candidate in zip(remote, resolved):
                 candidates[plugin_id] = candidate
+        tracker.finish(
+            details={
+                "candidate_count": len(candidates),
+                "remote_count": len(remote),
+            }
+        )
         return candidates
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -427,6 +484,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         if notice:
             yield event.plain_result(notice)
             return
+        tracker = diagnostic_operation(
+            "command",
+            "plan",
+            "生成更新计划命令",
+            details={"policy": policy},
+        )
         try:
             selected = self._parse_ids(plugins)
             rule = self.scheduler.load()
@@ -441,10 +504,17 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 minimum_release_age_hours=rule.minimum_release_age_hours,
             )
             self.store.write(f"plan-{plan.plan_id}.json", plan.to_dict())
+            tracker.finish(
+                details={
+                    "selected_count": len(selected),
+                    "item_count": len(plan.items),
+                }
+            )
             yield event.plain_result(
                 f"计划已冻结: {plan.plan_id}\n哈希: {plan.plan_hash}\n项目: {len(plan.items)}\n有效至: {plan.expires_at}"
             )
         except (ValueError, PlanError, RegistryError) as exc:
+            tracker.fail(exc, reason="PLAN_COMMAND_FAILED")
             yield event.plain_result(f"计划失败: {redact(exc)}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -455,6 +525,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         if notice:
             yield event.plain_result(notice)
             return
+        tracker = diagnostic_operation(
+            "command",
+            "run",
+            "执行更新计划命令",
+            details={"plan_ref": str(plan_id)[:12]},
+        )
         try:
             plan = self._load_plan(plan_id)
             rule = self.scheduler.load()
@@ -469,11 +545,17 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
                 * 1024**2,
             )
+            tracker.finish(
+                outcome="cancelled" if run.get("cancelled") else "success",
+                details={
+                    "result_count": len(run.get("results", [])),
+                    "cancelled": bool(run.get("cancelled")),
+                },
+            )
             yield event.plain_result(self._run_summary(run))
         except Exception as exc:
-            yield event.plain_result(
-                f"执行失败: {type(exc).__name__}: {redact(exc)}"
-            )
+            tracker.fail(exc, reason="RUN_COMMAND_FAILED")
+            yield event.plain_result(f"执行失败: {type(exc).__name__}: {redact(exc)}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @aup_group.command("rule")
@@ -638,6 +720,28 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         yield event.plain_result("\n".join(lines))
 
     async def _scheduled_run(self, rule: UpdateRule) -> None:
+        tracker = diagnostic_operation(
+            "schedule",
+            "run",
+            "定时更新检查",
+            details={"rule_revision": rule.revision},
+        )
+        try:
+            outcome = await self._scheduled_run_inner(rule)
+        except Exception as exc:
+            tracker.fail(
+                exc,
+                reason="SCHEDULED_RUN_FAILED",
+                details={"rule_revision": rule.revision},
+            )
+            raise
+        tracker.finish(
+            outcome=outcome,
+            level="DEBUG" if outcome.startswith("skipped") else "INFO",
+            details={"rule_revision": rule.revision},
+        )
+
+    async def _scheduled_run_inner(self, rule: UpdateRule) -> str:
         if self.coordinator.busy:
             self.store.append_audit(
                 {
@@ -646,7 +750,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                     "result": "SKIPPED_BUSY",
                 }
             )
-            return
+            return "skipped_busy"
         if not self.auto_update_enabled or rule.policy == Policy.CHECK_ONLY.value:
             self.store.append_audit(
                 {
@@ -655,7 +759,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                     "result": "CHECK_ONLY",
                 }
             )
-            return
+            return "skipped_check_only"
         catalog = await self.catalog.scan()
         candidates = await self._candidates(rule.plugin_ids)
         plan = self.planner.create(
@@ -678,9 +782,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self.transaction.cleanup(
             keep_success=max(1, int(self._get("backup_keep_success", 3))),
             failed_days=max(0, int(self._get("backup_failed_days", 7))),
-            capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048)))
-            * 1024**2,
+            capacity_bytes=max(1, int(self._get("backup_capacity_mb", 2048))) * 1024**2,
         )
+        return "success"
 
     def _astrbot_version(self) -> str:
         value = getattr(self.context, "version", None) or getattr(

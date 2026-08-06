@@ -47,6 +47,7 @@ from .core.trusted import (
     TRUSTED_SERIES,
     is_trusted_diagnostic_repository,
 )
+from .series_diagnostics import diagnostic_operation
 
 try:
     from astrbot.api.web import json_response, request
@@ -250,10 +251,82 @@ class PagesAPIMixin:
         )
         try:
             for name, handler, methods, description in routes:
-                register(f"/{PLUGIN_ID}/{name}", handler, methods, description)
+                tracked = self._diagnostic_page_handler(name, methods, handler)
+                register(f"/{PLUGIN_ID}/{name}", tracked, methods, description)
         except Exception:
             return False
         return True
+
+    @staticmethod
+    def _page_response_status(response: Any) -> int:
+        raw_status = None
+        if (
+            isinstance(response, tuple)
+            and len(response) >= 2
+            and isinstance(response[1], int)
+        ):
+            raw_status = response[1]
+        if raw_status is None:
+            raw_status = getattr(response, "status_code", None)
+        if raw_status is None:
+            raw_status = getattr(response, "status", None)
+        try:
+            return int(raw_status) if raw_status is not None else 200
+        except (TypeError, ValueError):
+            return 200
+
+    def _diagnostic_page_handler(self, route: str, methods: list[str], handler):
+        # This endpoint polls every two seconds. Tracking it would create a
+        # self-sustaining diagnostics loop that evicts useful events.
+        if route == "diagnostics/logs":
+            return handler
+        method = str(methods[0] if methods else "GET").upper()
+        operation = re.sub(r"[^a-z0-9]+", "_", route.lower()).strip("_")
+
+        async def tracked_handler():
+            details = {
+                "route": route,
+                "method": method,
+            }
+            tracker = diagnostic_operation(
+                "page",
+                operation or "root",
+                f"页面 {method} {route}",
+                level="DEBUG" if method == "GET" else "INFO",
+                details=details,
+                emit_start=method != "GET",
+            )
+            try:
+                response = handler()
+                if inspect.isawaitable(response):
+                    response = await response
+            except Exception as exc:
+                tracker.fail(
+                    exc,
+                    reason="PAGE_HANDLER_EXCEPTION",
+                    details=details,
+                )
+                raise
+            status = self._page_response_status(response)
+            outcome = (
+                "success" if status < 400 else "rejected" if status < 500 else "error"
+            )
+            tracker.finish(
+                outcome=outcome,
+                level=(
+                    "DEBUG"
+                    if method == "GET" and status < 400
+                    else "INFO"
+                    if status < 400
+                    else "WARNING"
+                    if status < 500
+                    else "ERROR"
+                ),
+                details={**details, "status": status},
+            )
+            return response
+
+        return tracked_handler
 
     @staticmethod
     def _schema() -> dict[str, dict[str, Any]]:
