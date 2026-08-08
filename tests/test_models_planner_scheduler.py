@@ -149,6 +149,101 @@ def test_catalog_rejects_github_lookalike_and_credentials():
     assert all("SOURCE_REQUIRED" in item.reasons for item in items)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/acme/demo/extra",
+        "https://github.com/acme//demo",
+        "https://github.com/acme/%64emo",
+        "https://github.com/acme/demo%2Fextra",
+        "https://github.com/acme/demo?tab=readme",
+        "https://github.com/acme/demo#readme",
+        "https://github.com/acme/demo?",
+        "https://github.com/acme/demo#",
+        "https://@github.com/acme/demo",
+        "https://github.com:443/acme/demo",
+        "https://github.com/acme/demo\\extra",
+        "https://github.com/acme/demo\tdetail",
+    ],
+)
+def test_catalog_rejects_malformed_github_repository_urls(url):
+    item = asyncio.run(
+        PluginCatalog(
+            Adapter(
+                [
+                    snap(
+                        "malformed",
+                        source={"install_method": "repository", "repo": url},
+                    )
+                ]
+            )
+        ).scan()
+    )[0]
+    assert item.source_kind == "repository"
+    assert item.source_url is None
+    assert "SOURCE_REQUIRED" in item.reasons
+
+
+def test_catalog_normalizes_astrbot_repository_sources_to_github():
+    repository = snap(
+        "repository",
+        source={
+            "source_kind": "repository",
+            "source_url": "https://github.com/acme/demo.git/",
+        },
+    )
+    inferred = snap("inferred", source={"source_kind": ""})
+
+    items = asyncio.run(PluginCatalog(Adapter([repository, inferred])).scan())
+    by_id = {item.plugin_id: item for item in items}
+
+    for plugin_id in ("repository", "inferred"):
+        assert by_id[plugin_id].source_kind == "github"
+        assert by_id[plugin_id].source_url == "https://github.com/acme/demo"
+        assert "SOURCE_REQUIRED" not in by_id[plugin_id].reasons
+        assert by_id[plugin_id].eligible
+
+
+def test_repository_compatibility_keeps_strict_url_and_identity_blocks():
+    invalid = snap(
+        "invalid",
+        source={
+            "install_method": "repository",
+            "repo": "https://evil.example/github.com/acme/demo",
+        },
+    )
+    self_plugin = snap(
+        "astrbot_plugin_update_manager",
+        source={
+            "install_method": "repository",
+            "repo": "https://github.com/qsbb/astrbot_plugin_update_manager",
+        },
+    )
+    reserved = snap(
+        "reserved_repository",
+        source={
+            "install_method": "repository",
+            "repo": "https://github.com/acme/demo",
+        },
+        reserved=True,
+    )
+
+    items = asyncio.run(
+        PluginCatalog(Adapter([invalid, self_plugin, reserved])).scan()
+    )
+    by_id = {item.plugin_id: item for item in items}
+
+    assert by_id["invalid"].source_kind == "repository"
+    assert by_id["invalid"].source_url is None
+    assert "SOURCE_REQUIRED" in by_id["invalid"].reasons
+    assert "SELF_UPDATE_BLOCKED" in by_id["astrbot_plugin_update_manager"].reasons
+    assert "SOURCE_REQUIRED" not in by_id["astrbot_plugin_update_manager"].reasons
+    assert "RESERVED_PLUGIN" in by_id["reserved_repository"].reasons
+    assert "SOURCE_REQUIRED" not in by_id["reserved_repository"].reasons
+    assert not by_id["astrbot_plugin_update_manager"].eligible
+    assert not by_id["reserved_repository"].eligible
+
+
 def test_plans_are_frozen_and_detect_catalog_change():
     catalog = asyncio.run(PluginCatalog(Adapter([snap()])).scan())
     candidate = Candidate(

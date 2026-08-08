@@ -3,6 +3,13 @@
 本项目遵循语义化版本（Semantic Versioning），版本号不带 `v` 前缀。
 
 ## [Unreleased]
+
+## 0.10.1 - 2026-08-09
+
+- 兼容 AstrBot 4.27.1 将 GitHub 安装来源标记为 `repository` 的变化；严格校验 GitHub 仓库 URL 后归一为 `github`，避免合法插件被误报 `SOURCE_REQUIRED`。
+- 安装来源类型缺失时，可从插件元数据中的合法 GitHub `repo` 推断来源；非 GitHub、带凭据、查询参数、片段或畸形路径继续拒绝。
+- `RESERVED_PLUGIN` 与 `SELF_UPDATE_BLOCKED` 的阻断规则保持不变，不因来源兼容而获得更新权限。
+
 ## 0.10.0 - 2026-08-06
 
 

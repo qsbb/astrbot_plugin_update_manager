@@ -2,12 +2,48 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit
 
 from .adapters.astrbot import PluginSnapshot, resolve_display_name
 from .models import CatalogItem, SELF_PLUGIN_NAME, parse_version, stable_hash
 
 _ALLOWED_SOURCE_KINDS = {"market", "github"}
+_GITHUB_REPOSITORY_PATH = re.compile(
+    r"^/([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)(?:\.git)?/?$"
+)
+
+
+def _normalize_github_repository_url(value: str) -> str | None:
+    candidate = value.strip()
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in candidate):
+        return None
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or (parsed.hostname or "").lower() != "github.com"
+        or "@" in parsed.netloc
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or "?" in candidate
+        or "#" in candidate
+        or parsed.path.count("/") < 2
+    ):
+        return None
+    match = _GITHUB_REPOSITORY_PATH.fullmatch(parsed.path)
+    if match is None:
+        return None
+    owner, repository = match.groups()
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if not repository:
+        return None
+    return f"https://github.com/{owner}/{repository}"
 
 
 def normalize_source(snapshot: PluginSnapshot) -> tuple[str | None, str | None]:
@@ -25,17 +61,13 @@ def normalize_source(snapshot: PluginSnapshot) -> tuple[str | None, str | None]:
         or snapshot.repo
         or ""
     ).strip()
-    if kind == "github" and url:
-        try:
-            parsed = urlsplit(url.removesuffix(".git").rstrip("/"))
-        except ValueError:
-            return kind, None
-        if parsed.scheme != "https" or parsed.hostname != "github.com":
-            return kind, None
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) != 2 or not all(parts) or parsed.username or parsed.password:
-            return kind, None
-        url = f"https://github.com/{parts[0]}/{parts[1]}"
+    github_url = _normalize_github_repository_url(url) if url else None
+    if kind in {"github", "repository"}:
+        if github_url:
+            return "github", github_url
+        return (kind or None), None
+    if not kind and github_url:
+        return "github", github_url
     return (kind or None), (url or None)
 
 

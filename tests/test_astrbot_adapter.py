@@ -158,6 +158,26 @@ def test_snapshot_preserves_source_reserved_and_disabled(monkeypatch):
     assert snapshots[0].activated is False
 
 
+def test_catalog_accepts_astrbot_427_repository_source(monkeypatch):
+    install_shared_preferences(
+        monkeypatch,
+        {
+            "demo": {
+                "source": "repository",
+                "url": "https://github.com/acme/demo",
+            }
+        },
+    )
+    adapter = AstrBotAdapter(FakeContext([star()]))
+
+    item = asyncio.run(PluginCatalog(adapter).scan())[0]
+
+    assert item.source_kind == "github"
+    assert item.source_url == "https://github.com/acme/demo"
+    assert "SOURCE_REQUIRED" not in item.reasons
+    assert item.eligible
+
+
 def test_mutation_rejects_self_reserved_and_unknown_source(monkeypatch):
     install_shared_preferences(monkeypatch, {})
     adapter = AstrBotAdapter(
