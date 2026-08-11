@@ -46,6 +46,7 @@ from .core.trusted import (
     TRUSTED_BY_ID,
     TRUSTED_SERIES,
     is_trusted_diagnostic_repository,
+    trusted_plugin_identities,
 )
 from .series_diagnostics import diagnostic_operation
 
@@ -569,7 +570,11 @@ class PagesAPIMixin:
             return cached[1]
 
         legacy = self._legacy_diagnostic_providers()
-        known_ids = {item.plugin_id for item in legacy}
+        known_ids = {
+            identity
+            for trusted in TRUSTED_SERIES
+            for identity in trusted_plugin_identities(trusted)
+        }
         try:
             snapshots = await self.adapter.snapshot_plugins()
         except Exception:
@@ -602,8 +607,23 @@ class PagesAPIMixin:
         getter = getattr(self.adapter, "get_plugin_instance", None)
         if not callable(getter):
             return None
-        value = getter(plugin_id)
-        return await value if inspect.isawaitable(value) else value
+        trusted = TRUSTED_BY_ID.get(plugin_id)
+        identities = (
+            trusted_plugin_identities(trusted) if trusted is not None else (plugin_id,)
+        )
+        last_error: Exception | None = None
+        for identity in identities:
+            try:
+                value = getter(identity)
+                instance = await value if inspect.isawaitable(value) else value
+            except Exception as exc:
+                last_error = exc
+                continue
+            if instance is not None:
+                return instance
+        if last_error is not None:
+            raise last_error
+        return None
 
     @staticmethod
     async def _diagnostic_call(callback: Any, /, *args: Any, **kwargs: Any) -> Any:
@@ -1588,6 +1608,14 @@ class PagesAPIMixin:
             raise ValueError("PLUGIN_STATE_UNCHANGED")
         return plugin_id
 
+    async def _installed_trusted_plugin(self, plugin_id: str):
+        trusted = TRUSTED_BY_ID[plugin_id]
+        for identity in trusted_plugin_identities(trusted):
+            snapshot = await self.adapter.get_plugin(identity)
+            if snapshot is not None:
+                return identity, snapshot
+        return trusted.plugin_id, None
+
     async def _set_catalog_enabled(self, enabled: bool):
         try:
             plugin_id = await self._catalog_plugin_id(
@@ -1632,7 +1660,7 @@ class PagesAPIMixin:
         plugin_id = data.get("plugin_id")
         if not isinstance(plugin_id, str) or plugin_id not in TRUSTED_BY_ID:
             raise ValueError("PLUGIN_NOT_TRUSTED")
-        return plugin_id
+        return TRUSTED_BY_ID[plugin_id].plugin_id
 
     @staticmethod
     def _mutation_error(exc: Exception):
@@ -1745,7 +1773,14 @@ class PagesAPIMixin:
         capabilities = self.adapter.probe_capabilities()
 
         async def inspect_latest(trusted):
-            snapshot = installed.get(trusted.plugin_id)
+            snapshot = next(
+                (
+                    installed.get(identity)
+                    for identity in trusted_plugin_identities(trusted)
+                    if installed.get(identity) is not None
+                ),
+                None,
+            )
             checked_at = datetime.now(timezone.utc).isoformat()
             try:
                 candidate = await self._check_latest_with_timeout(
@@ -1916,7 +1951,7 @@ class PagesAPIMixin:
         elif operation == "update":
             if plugin_id == PLUGIN_ID:
                 raise ValueError("SELF_UPDATE_BLOCKED")
-            current = await self.adapter.get_plugin(plugin_id)
+            runtime_plugin_id, current = await self._installed_trusted_plugin(plugin_id)
             if current is None or not current.loaded:
                 raise ValueError("PLUGIN_NOT_MANAGEABLE")
             candidate = await self.registry.github_latest(
@@ -1938,7 +1973,7 @@ class PagesAPIMixin:
             elif not update_available:
                 raise ValueError("NO_UPDATE_AVAILABLE")
             snapshot = await self.adapter.update_plugin(
-                plugin_id,
+                runtime_plugin_id,
                 source_kind="github",
                 source_url=item.repo_url,
                 archive_url=candidate.archive_url,
@@ -2063,14 +2098,17 @@ class PagesAPIMixin:
             raise ValueError("PLUGIN_NOT_TRUSTED")
         if plugin_id == PLUGIN_ID:
             raise ValueError("SELF_UPDATE_BLOCKED")
-        return plugin_id, force
+        return TRUSTED_BY_ID[plugin_id].plugin_id, force
 
     async def _set_recommended_enabled(self, enabled: bool):
         try:
             plugin_id = await self._trusted_plugin_id(require_confirmation=not enabled)
             if plugin_id == PLUGIN_ID and not enabled:
                 raise ValueError("SELF_DISABLE_BLOCKED")
-            snapshot = await self.adapter.set_plugin_enabled(plugin_id, enabled)
+            runtime_plugin_id, current = await self._installed_trusted_plugin(plugin_id)
+            if current is None:
+                raise ValueError("PLUGIN_NOT_FOUND")
+            snapshot = await self.adapter.set_plugin_enabled(runtime_plugin_id, enabled)
             operation = "enable" if enabled else "disable"
             return json_response(
                 {

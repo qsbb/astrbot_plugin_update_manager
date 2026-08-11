@@ -7,7 +7,7 @@ import inspect
 from typing import Any
 
 from .health import HEALTH_CONTRACT, HealthChecker
-from .trusted import TRUSTED_SERIES
+from .trusted import TRUSTED_BY_ID, TRUSTED_SERIES, trusted_plugin_identities
 
 
 SERIES_MEMBERS: tuple[tuple[str, str], ...] = tuple(
@@ -80,7 +80,15 @@ async def diagnose_series(adapter: Any) -> dict[str, object]:
 
     rows: list[dict[str, object]] = []
     for plugin_id, label in SERIES_MEMBERS:
-        snapshot = by_id.get(plugin_id)
+        trusted = TRUSTED_BY_ID[plugin_id]
+        snapshot = next(
+            (
+                by_id.get(identity)
+                for identity in trusted_plugin_identities(trusted)
+                if by_id.get(identity) is not None
+            ),
+            None,
+        )
         if snapshot is None:
             rows.append(_row(plugin_id, label, "missing", "PLUGIN_NOT_FOUND"))
             continue
@@ -90,7 +98,7 @@ async def diagnose_series(adapter: Any) -> dict[str, object]:
         if not snapshot.activated:
             rows.append(_row(plugin_id, label, "degraded", "PLUGIN_NOT_ACTIVATED", snapshot))
             continue
-        instance = await _instance(adapter, plugin_id)
+        instance = await _instance(adapter, *trusted_plugin_identities(trusted))
         if instance is None or getattr(instance, "PLUGIN_HEALTH_CONTRACT", None) is None:
             rows.append(_row(plugin_id, label, "compatible", "L0_ONLY", snapshot))
             continue
@@ -206,15 +214,19 @@ def _normalize_runtime_report(report: Any) -> dict[str, object] | None:
     }
 
 
-async def _instance(adapter: Any, plugin_id: str) -> Any | None:
+async def _instance(adapter: Any, *plugin_ids: str) -> Any | None:
     getter = getattr(adapter, "get_plugin_instance", None)
     if not callable(getter):
         return None
-    try:
-        value = getter(plugin_id)
-        return await value if inspect.isawaitable(value) else value
-    except Exception:
-        return None
+    for plugin_id in plugin_ids:
+        try:
+            value = getter(plugin_id)
+            instance = await value if inspect.isawaitable(value) else value
+        except Exception:
+            continue
+        if instance is not None:
+            return instance
+    return None
 
 
 def _row(

@@ -48,12 +48,13 @@ class DiagnosticsTests(unittest.TestCase):
                 ("astrbot_plugin_relationship", "情"),
                 ("astrbot_plugin_environment_awareness", "境"),
                 ("astrbot_plugin_voice_hub", "声"),
+                ("astrbot_plugin_embodiment_bridge", "临"),
                 ("astrbot_plugin_update_manager", "核"),
             ),
         )
 
     def test_dynamic_diagnostic_repository_requires_exact_owner_and_plugin_id(self):
-        plugin_id = "astrbot_plugin_quest_avatar_bridge"
+        plugin_id = "astrbot_plugin_embodiment_bridge"
         self.assertTrue(
             is_trusted_diagnostic_repository(
                 plugin_id,
@@ -90,6 +91,73 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["healthy"], len(SERIES_MEMBERS))
         self.assertTrue(all(row["status"] == "compatible" for row in report["members"]))
+
+    def test_legacy_embodiment_id_is_resolved_as_the_canonical_member(self):
+        legacy_id = "astrbot_plugin_quest_avatar_bridge"
+
+        class LegacyAdapter(_Adapter):
+            async def snapshot_plugins(self):
+                snapshots = list(await super().snapshot_plugins())
+                canonical_id = "astrbot_plugin_embodiment_bridge"
+                index = next(
+                    index
+                    for index, snapshot in enumerate(snapshots)
+                    if snapshot.name == canonical_id
+                )
+                snapshots[index] = types.SimpleNamespace(
+                    name=legacy_id,
+                    root_dir_name=legacy_id,
+                    version="1.0.0",
+                    loaded=True,
+                    activated=True,
+                )
+                return tuple(snapshots)
+
+            async def get_plugin_instance(self, plugin_id):
+                if plugin_id == legacy_id:
+                    return types.SimpleNamespace()
+                return None
+
+        report = asyncio.run(diagnose_series(LegacyAdapter()))
+        member = next(
+            item
+            for item in report["members"]
+            if item["plugin_id"] == "astrbot_plugin_embodiment_bridge"
+        )
+        self.assertEqual(member["status"], "compatible")
+
+    def test_canonical_embodiment_id_wins_when_legacy_copy_is_also_present(self):
+        canonical_id = "astrbot_plugin_embodiment_bridge"
+        legacy_id = "astrbot_plugin_quest_avatar_bridge"
+
+        class DuplicateAdapter(_Adapter):
+            async def snapshot_plugins(self):
+                snapshots = list(await super().snapshot_plugins())
+                snapshots.append(
+                    types.SimpleNamespace(
+                        name=legacy_id,
+                        root_dir_name=legacy_id,
+                        version="0.4.23",
+                        loaded=False,
+                        activated=False,
+                    )
+                )
+                return tuple(snapshots)
+
+            async def get_plugin_instance(self, plugin_id):
+                if plugin_id == canonical_id:
+                    return types.SimpleNamespace()
+                return None
+
+        report = asyncio.run(diagnose_series(DuplicateAdapter()))
+        members = [
+            item
+            for item in report["members"]
+            if item["plugin_id"] == canonical_id
+        ]
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0]["status"], "compatible")
+        self.assertEqual(members[0]["version"], "1.0.0")
 
     def test_declared_unhealthy_member_degrades_suite(self):
         adapter = _Adapter()

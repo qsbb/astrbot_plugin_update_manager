@@ -183,13 +183,13 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(
     assert member["next_seq"] == 4
 
 
-def test_series_diagnostics_reads_quest_bridge_disabled_contract_without_blocking(
+def test_series_diagnostics_reads_legacy_embodiment_disabled_contract_without_blocking(
     monkeypatch, tmp_path
 ):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
 
-    class QuestProvider:
+    class LegacyEmbodimentProvider:
         def diagnostic_log_contract(self):
             return {
                 "name": "series.diagnostics",
@@ -211,7 +211,7 @@ def test_series_diagnostics_reads_quest_bridge_disabled_contract_without_blockin
                 "plugin_name": "临",
                 "status": "disabled",
                 "reason": "DIAGNOSTIC_DISABLED",
-                "stream_id": "quest-stream",
+                "stream_id": "legacy-embodiment-stream",
                 "events": [],
                 "next_seq": 0,
                 "dropped_before": 0,
@@ -222,7 +222,7 @@ def test_series_diagnostics_reads_quest_bridge_disabled_contract_without_blockin
 
     async def get_instance(plugin_id):
         if plugin_id == "astrbot_plugin_quest_avatar_bridge":
-            return QuestProvider()
+            return LegacyEmbodimentProvider()
         return None
 
     async def request_json():
@@ -247,14 +247,14 @@ def test_series_diagnostics_reads_quest_bridge_disabled_contract_without_blockin
     member = next(
         item
         for item in payload["members"]
-        if item["plugin_id"] == "astrbot_plugin_quest_avatar_bridge"
+        if item["plugin_id"] == "astrbot_plugin_embodiment_bridge"
     )
     assert member["plugin_name"] == "临"
     assert member["display_name"] == "凝心溯溪-临"
     assert member["status"] == "disabled"
     assert member["reason"] == "DIAGNOSTIC_DISABLED"
     assert not any(
-        event["plugin_id"] == "astrbot_plugin_quest_avatar_bridge"
+        event["plugin_id"] == "astrbot_plugin_embodiment_bridge"
         for event in payload["events"]
     )
 
@@ -1493,6 +1493,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         "情",
         "境",
         "声",
+        "临",
         "核",
     ]
     assert all(
@@ -1588,6 +1589,112 @@ def test_self_update_check_reports_repository_update_without_self_action(
     assert core["actions"]["update"] is False
 
 
+def test_legacy_embodiment_install_uses_canonical_recommendation_and_updates_by_alias(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    canonical_id = "astrbot_plugin_embodiment_bridge"
+    legacy_id = "astrbot_plugin_quest_avatar_bridge"
+    canonical_repo = f"https://github.com/qsbb/{canonical_id}"
+    legacy_snapshot = SimpleNamespace(
+        name=legacy_id,
+        root_dir_name=legacy_id,
+        version="1.0.0",
+        loaded=True,
+        activated=True,
+    )
+    update_calls = []
+
+    async def snapshots():
+        return (legacy_snapshot,)
+
+    async def get_plugin(plugin_id):
+        return legacy_snapshot if plugin_id == legacy_id else None
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        if plugin_id == canonical_id:
+            assert current_version == "1.0.0"
+            assert source_url == canonical_repo
+            return SimpleNamespace(target_version="1.1.0", archive_url="https://example.invalid/archive")
+        return SimpleNamespace(target_version="1.0.0", archive_url="")
+
+    async def update(plugin_id, *, source_kind, source_url, archive_url=None):
+        update_calls.append((plugin_id, source_kind, source_url, archive_url))
+        return SimpleNamespace(version="1.1.0", loaded=True, activated=True)
+
+    async def request_legacy_update():
+        return {"plugin_id": legacy_id, "confirm": True}
+
+    plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.adapter, "get_plugin", get_plugin)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(
+        plugin.adapter,
+        "probe_capabilities",
+        lambda: SimpleNamespace(
+            install_plugin=True,
+            update_plugin=True,
+            turn_on_plugin=True,
+            turn_off_plugin=True,
+        ),
+    )
+
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    item = next(entry for entry in payload["items"] if entry["plugin_id"] == canonical_id)
+    assert item["installed"] is True
+    assert item["repo_url"] == canonical_repo
+    assert item["actions"]["update"] is True
+
+    monkeypatch.setattr(plugin, "_request_json", request_legacy_update)
+    updated = unwrap(asyncio.run(plugin._pages_update()))
+    assert updated["plugin_id"] == canonical_id
+    assert update_calls == [
+        (legacy_id, "github", canonical_repo, "https://example.invalid/archive")
+    ]
+
+
+def test_canonical_embodiment_install_wins_over_legacy_duplicate(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    canonical_id = "astrbot_plugin_embodiment_bridge"
+    legacy_id = "astrbot_plugin_quest_avatar_bridge"
+    canonical_snapshot = SimpleNamespace(
+        name=canonical_id,
+        root_dir_name=canonical_id,
+        version="1.0.0",
+        loaded=True,
+        activated=True,
+    )
+    legacy_snapshot = SimpleNamespace(
+        name=legacy_id,
+        root_dir_name=legacy_id,
+        version="0.4.23",
+        loaded=False,
+        activated=False,
+    )
+
+    async def snapshots():
+        return (legacy_snapshot, canonical_snapshot)
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        assert plugin_id == canonical_id
+        assert current_version == "1.0.0"
+        return SimpleNamespace(target_version="1.0.0", archive_url="")
+
+    plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    items = [item for item in payload["items"] if item["plugin_id"] == canonical_id]
+    assert len(items) == 1
+    assert items[0]["installed"] is True
+    assert items[0]["version"] == "1.0.0"
+    assert items[0]["loaded"] is True
+    assert items[0]["activated"] is True
+
+
 def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     monkeypatch, tmp_path
 ):
@@ -1611,9 +1718,9 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert len(payload["items"]) == 7
+    assert len(payload["items"]) == 8
     assert peak > 1
-    assert force_values == [True] * 7
+    assert force_values == [True] * 8
     failed = next(
         item
         for item in payload["items"]
@@ -1646,7 +1753,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
     monkeypatch.setattr(plugin, "_request_json", cached_payload)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert force_values == [False] * 7
+    assert force_values == [False] * 8
 
     # 缺省仍是手动强制刷新语义。
     force_values.clear()
@@ -1656,7 +1763,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
 
     monkeypatch.setattr(plugin, "_request_json", empty_payload)
     assert unwrap(asyncio.run(plugin._pages_check_recommendations()))["success"] is True
-    assert force_values == [True] * 7
+    assert force_values == [True] * 8
 
     # 非布尔值必须拒绝，不能被静默当成真值。
     force_values.clear()

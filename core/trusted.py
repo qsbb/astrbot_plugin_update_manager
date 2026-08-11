@@ -14,6 +14,7 @@ class TrustedPlugin:
     display_name: str
     repo_url: str
     description_zh: str
+    aliases: tuple[str, ...] = ()
 
 
 TRUSTED_SERIES = (
@@ -60,6 +61,14 @@ TRUSTED_SERIES = (
         "汇聚语音合成与音色管理能力，统一语音交互体验。",
     ),
     TrustedPlugin(
+        "临",
+        "astrbot_plugin_embodiment_bridge",
+        "凝心溯溪-临",
+        "https://github.com/qsbb/astrbot_plugin_embodiment_bridge",
+        "连接 AstrBot 与具身交互运行时，提供独立、可诊断的人格与事件桥接。",
+        aliases=("astrbot_plugin_quest_avatar_bridge",),
+    ),
+    TrustedPlugin(
         "核",
         "astrbot_plugin_update_manager",
         "凝心溯溪-核",
@@ -67,7 +76,16 @@ TRUSTED_SERIES = (
         "管理可信插件的安全更新、回滚与自动化调度。",
     ),
 )
-TRUSTED_BY_ID = {item.plugin_id: item for item in TRUSTED_SERIES}
+TRUSTED_BY_ID = {
+    identity: item
+    for item in TRUSTED_SERIES
+    for identity in (item.plugin_id, *item.aliases)
+}
+
+
+def trusted_plugin_identities(plugin: TrustedPlugin) -> tuple[str, ...]:
+    """Return the canonical ID followed by accepted legacy runtime aliases."""
+    return (plugin.plugin_id, *plugin.aliases)
 
 DIAGNOSTIC_SERIES_ID = "ningxin_suxi"
 DIAGNOSTIC_REPOSITORY_OWNER = "qsbb"
