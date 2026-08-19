@@ -20,6 +20,7 @@ def test_series_diagnostics_are_bounded_redacted_and_isolated():
         "planned 123456789",
         details={"eligible": True, "token": "secret"},
     )
+    diagnostic_event("page.webui.start", "页面 POST webui/start 完成")
     logger.warning(
         'failed authorization=secret message="private text" '
         "https://example.test/path?token=secret for 123456789 "
@@ -30,7 +31,8 @@ def test_series_diagnostics_are_bounded_redacted_and_isolated():
     serialized = str(payload["events"])
     assert payload["stream_id"]
     assert diagnostic_events()["stream_id"] == payload["stream_id"]
-    log_detail = payload["events"][1]["details"]["log_detail"]
+    assert payload["events"][1]["summary"] == "页面 POST webui/start 完成"
+    log_detail = payload["events"][2]["details"]["log_detail"]
     assert "private chat body" in log_detail
     assert "user-a" not in serialized
     assert "abcdefghijk" not in serialized
