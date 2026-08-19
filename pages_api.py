@@ -264,16 +264,7 @@ class PagesAPIMixin:
                 ["POST"],
                 "更新控制中心管理员",
             ),
-            ("webui/login", self._pages_webui_login, ["POST"], "登录控制中心"),
-            ("webui/logout", self._pages_webui_logout, ["POST"], "退出控制中心"),
-            ("webui/session", self._pages_webui_session, ["GET"], "读取控制中心会话"),
-            ("webui/modules", self._pages_webui_modules, ["GET"], "读取可信模块状态"),
-            (
-                "webui/diagnostics",
-                self._pages_webui_diagnostics,
-                ["POST"],
-                "读取控制中心诊断摘要",
-            ),
+            ("webui/url", self._pages_webui_url, ["GET"], "读取独立控制中心地址"),
         )
         try:
             for name, handler, methods, description in routes:
@@ -1095,9 +1086,7 @@ class PagesAPIMixin:
             }
         )
 
-    async def _pages_webui_modules(self):
-        if self._webui_current_session() is None:
-            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
+    async def _webui_modules_payload(self) -> dict[str, Any]:
         items = await self.catalog.scan()
         trusted_ids = set(TRUSTED_BY_ID)
         modules = []
@@ -1128,13 +1117,15 @@ class PagesAPIMixin:
                     "update_available": False,
                 }
             )
-        return json_response(
-            {
-                "success": True,
-                "source": "trusted_registry_and_qsbb_repository",
-                "modules": modules,
-            }
-        )
+        return {
+            "source": "trusted_registry_and_qsbb_repository",
+            "modules": modules,
+        }
+
+    async def _pages_webui_modules(self):
+        if self._webui_current_session() is None:
+            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
+        return json_response({"success": True, **await self._webui_modules_payload()})
 
     async def _webui_module_contracts(
         self, runtime_id: str, canonical_id: str
@@ -1184,21 +1175,32 @@ class PagesAPIMixin:
             "contract_source": "self_declared" if count else "unavailable",
         }
 
+    async def _webui_diagnostics_payload(self) -> dict[str, Any]:
+        providers = await self._diagnostic_providers()
+        return {
+            "providers": [
+                {
+                    "plugin_id": item.plugin_id,
+                    "display_name": item.display_name,
+                    "status": "ready" if item.self_declared else "available",
+                }
+                for item in providers
+            ]
+        }
+
     async def _pages_webui_diagnostics(self):
         if self._webui_current_session() is None:
             return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
-        providers = await self._diagnostic_providers()
+        return json_response({"success": True, **await self._webui_diagnostics_payload()})
+
+    async def _pages_webui_url(self):
+        server = getattr(self, "webui_server", None)
         return json_response(
             {
                 "success": True,
-                "providers": [
-                    {
-                        "plugin_id": item.plugin_id,
-                        "display_name": item.display_name,
-                        "status": "ready" if item.self_declared else "available",
-                    }
-                    for item in providers
-                ],
+                "enabled": bool(server is not None),
+                "ready": bool(server is not None and server.started),
+                "url": server.url if server is not None else "",
             }
         )
 

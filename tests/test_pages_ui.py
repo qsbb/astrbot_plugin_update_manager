@@ -603,11 +603,11 @@ def test_manager_page_is_responsive_and_accessible():
 
 
 def test_control_center_has_login_only_and_trusted_module_ui():
-    directory = PLUGIN_ROOT / "pages" / "control-center"
+    directory = PLUGIN_ROOT / "webui"
     html = (directory / "index.html").read_text(encoding="utf-8")
     js = (directory / "app.js").read_text(encoding="utf-8")
     css = (directory / "style.css").read_text(encoding="utf-8")
-    assert "/api/plugin/page/bridge-sdk.js" in html
+    assert "/api/plugin/page/bridge-sdk.js" not in html
     assert "login-form" in js
     assert "不提供注册入口" in js
     assert "注册账户" not in js

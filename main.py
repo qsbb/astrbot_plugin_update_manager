@@ -48,6 +48,7 @@ from .core.request_context import (
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
 from .core.webui_auth import WebUIAuth
+from .core.webui_server import WebUIServer
 from .pages_api import PagesAPIMixin
 from .series_diagnostics import (
     diagnostic_clear as clear_diagnostic_events,
@@ -58,7 +59,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -84,6 +85,26 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         data_root = self._resolve_data_root()
         self.store = AtomicJsonStore(data_root)
         self.webui_auth = WebUIAuth(self.store)
+        self.webui_enabled = self._get_bool("webui_enabled", False)
+        try:
+            webui_port = int(self._get("webui_port", 25528))
+        except (TypeError, ValueError):
+            webui_port = 25528
+        if not 1 <= webui_port <= 65535:
+            webui_port = 25528
+        self.webui_server = (
+            WebUIServer(
+                self.webui_auth,
+                static_root=Path(__file__).resolve().parent / "webui",
+                host=str(self._get("webui_host", "127.0.0.1")).strip() or "127.0.0.1",
+                port=webui_port,
+                public_url=str(self._get("webui_public_url", "")),
+                modules=self._webui_modules_payload,
+                diagnostics=self._webui_diagnostics_payload,
+            )
+            if self.webui_enabled
+            else None
+        )
         saved_overrides = self.store.read("manager-config.json", {})
         if isinstance(saved_overrides, dict):
             self._config_overrides = saved_overrides
@@ -329,6 +350,18 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             )
             return
         try:
+            if self.webui_server is not None:
+                try:
+                    await self.webui_server.start()
+                except Exception as exc:
+                    diagnostic_event(
+                        "webui.start.failed",
+                        "独立 WebUI 启动失败",
+                        level="ERROR",
+                        details={"component": "webui", "error_type": type(exc).__name__},
+                    )
+                    logger.error("[update-manager] standalone webui start failed: %s", type(exc).__name__)
+                    self.webui_server = None
             if self.auto_update_enabled:
                 await self.scheduler.rebuild()
             else:
@@ -843,6 +876,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         global _current_instance
         self.coordinator.cancel()
         try:
+            if self.webui_server is not None:
+                await self.webui_server.stop()
             await self.scheduler.close()
         finally:
             try:

@@ -47,11 +47,7 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/webui/admins", ("GET",)),
         (f"/{module.PLUGIN_NAME}/webui/admins/create", ("POST",)),
         (f"/{module.PLUGIN_NAME}/webui/admins/update", ("POST",)),
-        (f"/{module.PLUGIN_NAME}/webui/login", ("POST",)),
-        (f"/{module.PLUGIN_NAME}/webui/logout", ("POST",)),
-        (f"/{module.PLUGIN_NAME}/webui/session", ("GET",)),
-        (f"/{module.PLUGIN_NAME}/webui/modules", ("GET",)),
-        (f"/{module.PLUGIN_NAME}/webui/diagnostics", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/url", ("GET",)),
     ]
 
 

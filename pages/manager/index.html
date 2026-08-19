@@ -16,7 +16,7 @@
       </div>
       <div class="toolbar">
         <select id="locale" aria-label="语言" data-i18n-aria-label="languageLabel"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
-        <a class="page-link" href="../control-center/" data-i18n="controlCenter">模块运营中心</a>
+        <button class="page-link" id="open-webui" type="button" data-i18n="controlCenter">打开独立运营中心</button>
         <button id="refresh" type="button" data-i18n="refresh">刷新</button>
       </div>
     </header>
@@ -47,7 +47,7 @@
         <div id="config-fields" class="form-grid"></div>
       </form>
       <article class="card" id="webui-admins">
-        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button></div>
+        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><div class="section-actions"><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button><button id="open-webui-config" type="button" data-i18n="openWebUi">打开独立 WebUI</button></div></div>
         <form id="webui-admin-create-form" class="admin-form">
           <label><span data-i18n="adminUsername">用户名</span><input id="webui-admin-username" autocomplete="off" required /></label>
           <label><span data-i18n="adminPassword">初始密码</span><input id="webui-admin-password" type="password" autocomplete="new-password" minlength="8" required /></label>
