@@ -596,3 +596,7 @@ def test_manager_page_is_responsive_and_accessible():
     assert 'aria-live="polite"' in html
     assert "@media (max-width:760px)" in css
     assert "prefers-reduced-motion" in css
+    assert "transition:transform 140ms var(--ease-out)" in css
+    assert "button:active:not(:disabled)" in css
+    assert "@media (hover:hover) and (pointer:fine)" in css
+    assert "transition:.2s" not in css
