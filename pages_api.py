@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from packaging.version import InvalidVersion, Version
 
@@ -265,6 +266,12 @@ class PagesAPIMixin:
                 "更新控制中心管理员",
             ),
             ("webui/url", self._pages_webui_url, ["GET"], "读取独立控制中心地址"),
+            (
+                "webui/start",
+                self._pages_webui_start,
+                ["POST"],
+                "从管理页启动独立控制中心",
+            ),
         )
         try:
             for name, handler, methods, description in routes:
@@ -1195,12 +1202,52 @@ class PagesAPIMixin:
 
     async def _pages_webui_url(self):
         server = getattr(self, "webui_server", None)
+        request_host = self._webui_request_host(server)
         return json_response(
             {
                 "success": True,
                 "enabled": bool(server is not None),
                 "ready": bool(server is not None and server.started),
-                "url": server.url if server is not None else "",
+                "url": server.url_for_host(request_host) if server is not None else "",
+            }
+        )
+
+    @staticmethod
+    def _request_hostname() -> str:
+        try:
+            raw_host = str(getattr(request, "host", "") or "")
+        except (RuntimeError, AttributeError):
+            raw_host = ""
+        # 只取请求 hostname，避免把查询串、用户名或外部 URL 拼入跳转地址。
+        return urlsplit(f"//{raw_host}").hostname or ""
+
+    @classmethod
+    def _webui_request_host(cls, server: Any) -> str:
+        if server is None or getattr(server, "host", "") not in {"0.0.0.0", "::"}:
+            return ""
+        return cls._request_hostname()
+
+    async def _pages_webui_start(self):
+        starter = getattr(self, "_start_webui_from_page", None)
+        if not callable(starter):
+            return json_response({"success": False, "error": "WEBUI_UNAVAILABLE"}, status=503)
+        try:
+            server = await starter(self._request_hostname())
+        except Exception as exc:
+            diagnostic_operation(
+                "page",
+                "webui.start",
+                "独立 WebUI 启动",
+                emit_start=False,
+            ).fail(exc, summary="独立 WebUI 启动失败")
+            return json_response({"success": False, "error": "WEBUI_START_FAILED"}, status=503)
+        request_host = self._webui_request_host(server)
+        return json_response(
+            {
+                "success": True,
+                "enabled": True,
+                "ready": bool(server.started),
+                "url": server.url_for_host(request_host),
             }
         )
 

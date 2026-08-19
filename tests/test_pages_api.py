@@ -48,6 +48,7 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/webui/admins/create", ("POST",)),
         (f"/{module.PLUGIN_NAME}/webui/admins/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/webui/url", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/webui/start", ("POST",)),
     ]
 
 
@@ -161,6 +162,57 @@ def test_webui_modules_requires_session_and_filters_to_owned_contracts(
     }
     assert all(item["contracts"] == 1 for item in payload["modules"])
     assert all(item["contract_source"] == "self_declared" for item in payload["modules"])
+
+
+def test_webui_url_uses_current_dashboard_host_for_wildcard_listener(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(
+        pages_api, "request", SimpleNamespace(host="192.168.5.88:25520")
+    )
+    plugin.webui_server._started = True
+    payload = unwrap(asyncio.run(plugin._pages_webui_url()))
+    assert payload["enabled"] is True
+    assert payload["ready"] is True
+    assert payload["url"] == "http://192.168.5.88:25528"
+
+
+def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path), {"webui_enabled": False, "webui_host": "127.0.0.1"}
+    )
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(
+        pages_api, "request", SimpleNamespace(host="192.168.5.88:25520")
+    )
+
+    class StartedServer:
+        host = "0.0.0.0"
+        started = True
+
+        @staticmethod
+        def url_for_host(host=""):
+            return f"http://{host}:25528"
+
+    calls = []
+
+    async def start(request_host):
+        calls.append(request_host)
+        return StartedServer()
+
+    monkeypatch.setattr(plugin, "_start_webui_from_page", start)
+    payload = unwrap(asyncio.run(plugin._pages_webui_start()))
+    assert calls == ["192.168.5.88"]
+    assert payload == {
+        "success": True,
+        "enabled": True,
+        "ready": True,
+        "url": "http://192.168.5.88:25528",
+    }
 
 
 def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(

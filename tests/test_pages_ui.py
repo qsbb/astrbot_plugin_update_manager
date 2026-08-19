@@ -625,3 +625,4 @@ def test_manager_page_exposes_dashboard_protected_admin_management():
     assert 'apiGet("webui/admins")' in js
     assert 'apiPost("webui/admins/create"' in js
     assert 'apiPost("webui/admins/update"' in js
+    assert 'apiPost("webui/start"' in js

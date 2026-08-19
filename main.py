@@ -59,7 +59,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.12.1"
+__version__ = "0.12.2"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -84,30 +84,14 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self._config_overrides: dict[str, Any] = {}
         data_root = self._resolve_data_root()
         self.store = AtomicJsonStore(data_root)
-        self.webui_auth = WebUIAuth(self.store)
-        self.webui_enabled = self._get_bool("webui_enabled", False)
-        try:
-            webui_port = int(self._get("webui_port", 25528))
-        except (TypeError, ValueError):
-            webui_port = 25528
-        if not 1 <= webui_port <= 65535:
-            webui_port = 25528
-        self.webui_server = (
-            WebUIServer(
-                self.webui_auth,
-                static_root=Path(__file__).resolve().parent / "webui",
-                host=str(self._get("webui_host", "127.0.0.1")).strip() or "127.0.0.1",
-                port=webui_port,
-                public_url=str(self._get("webui_public_url", "")),
-                modules=self._webui_modules_payload,
-                diagnostics=self._webui_diagnostics_payload,
-            )
-            if self.webui_enabled
-            else None
-        )
+        # Page 保存的运行配置必须先于 WebUI 初始化读取，否则重载后监听器
+        # 仍会使用旧的默认值，页面看似保存成功但入口实际打不开。
         saved_overrides = self.store.read("manager-config.json", {})
         if isinstance(saved_overrides, dict):
             self._config_overrides = saved_overrides
+        self.webui_auth = WebUIAuth(self.store)
+        self.webui_enabled = self._get_bool("webui_enabled", True)
+        self.webui_server = self._new_webui_server() if self.webui_enabled else None
         self.enabled = self._get_bool("enabled", True)
         self.auto_update_enabled = self._get_bool("auto_update_enabled", False)
         self._terminated = False
@@ -338,6 +322,63 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             and callable(getattr(underlying, "setLevel", None))
         ):
             underlying.setLevel(level)
+
+    def _new_webui_server(self, *, host: str | None = None) -> WebUIServer:
+        try:
+            port = int(self._get("webui_port", 25528))
+        except (TypeError, ValueError):
+            port = 25528
+        if not 1 <= port <= 65535:
+            port = 25528
+        bind_host = str(
+            host if host is not None else self._get("webui_host", "0.0.0.0")
+        ).strip() or "0.0.0.0"
+        return WebUIServer(
+            self.webui_auth,
+            static_root=Path(__file__).resolve().parent / "webui",
+            host=bind_host,
+            port=port,
+            public_url=str(self._get("webui_public_url", "")),
+            modules=self._webui_modules_payload,
+            diagnostics=self._webui_diagnostics_payload,
+        )
+
+    async def _start_webui_from_page(self, request_host: str = "") -> WebUIServer:
+        """Start the listener after an explicit, already-authenticated Page action."""
+        server = self.webui_server
+        if server is not None:
+            await server.start()
+            return server
+        configured_host = str(self._get("webui_host", "0.0.0.0")).strip()
+        bind_host = configured_host or "0.0.0.0"
+        # 0.12.1 默认是 loopback；从远端 Dashboard 点击启动时，迁移到可访问绑定。
+        if request_host and bind_host in {"127.0.0.1", "localhost", "::1"}:
+            if request_host not in {"127.0.0.1", "localhost", "::1"}:
+                bind_host = "0.0.0.0"
+        overrides = {**self._config_overrides, "webui_enabled": True}
+        if bind_host != configured_host:
+            overrides["webui_host"] = bind_host
+        server = self._new_webui_server(host=bind_host)
+        await server.start()
+        try:
+            self.store.write("manager-config.json", overrides)
+        except Exception:
+            await server.stop()
+            raise
+        self._config_overrides = overrides
+        self.webui_enabled = True
+        self.webui_server = server
+        diagnostic_event(
+            "webui.start.completed",
+            "独立 WebUI 已由管理页启动",
+            details={
+                "component": "webui",
+                "host_kind": (
+                    "wildcard" if bind_host in {"0.0.0.0", "::"} else "local"
+                ),
+            },
+        )
+        return server
 
     async def initialize(self) -> None:
         """插件激活后恢复唯一 runtime job；配置关闭时不注册调度。"""

@@ -59,10 +59,29 @@ class WebUIServer:
 
     @property
     def url(self) -> str:
+        return self.url_for_host()
+
+    def url_for_host(self, host: str | None = None) -> str:
+        """Return a browser-reachable URL without exposing the wildcard bind address."""
         if self.public_url:
             return self.public_url
-        display_host = "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
-        return f"http://{display_host}:{self.port}"
+        display_host = (host or "").strip()
+        if not display_host:
+            display_host = (
+                "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
+            )
+        parsed = urlsplit(f"//{display_host}")
+        hostname = parsed.hostname
+        if not hostname:
+            hostname = (
+                "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
+            )
+        rendered_host = (
+            f"[{hostname}]"
+            if ":" in hostname and not hostname.startswith("[")
+            else hostname
+        )
+        return f"http://{rendered_host}:{self.port}"
 
     async def start(self) -> bool:
         async with self._lock:

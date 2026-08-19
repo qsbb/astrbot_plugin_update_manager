@@ -58,3 +58,19 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
         await server.stop()
 
     asyncio.run(exercise())
+
+
+def test_wildcard_webui_url_uses_dashboard_host_without_wildcard(tmp_path):
+    auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
+    server = WebUIServer(
+        auth,
+        static_root=tmp_path,
+        host="0.0.0.0",
+        port=25528,
+        modules=lambda: asyncio.sleep(0, result={}),
+        diagnostics=lambda: asyncio.sleep(0, result={}),
+    )
+    assert server.url == "http://127.0.0.1:25528"
+    assert server.url_for_host("192.168.5.88:25520") == "http://192.168.5.88:25528"
+    assert server.url_for_host("[::1]:25520") == "http://[::1]:25528"
+    assert "0.0.0.0" not in server.url_for_host("192.168.5.88:25520")

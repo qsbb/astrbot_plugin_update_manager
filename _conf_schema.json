@@ -18,8 +18,8 @@
   "backup_keep_success": {"type": "int", "description": "每次清理至少保留的最近恢复点数量", "default": 3},
   "backup_failed_days": {"type": "int", "description": "失败相关备份保留天数", "default": 7},
   "backup_capacity_mb": {"type": "int", "description": "备份总容量上限（MB），永不删除唯一恢复点", "default": 2048},
-  "webui_enabled": {"type": "bool", "description": "启用独立模块运营中心监听；默认关闭，修改后需单插件重载核", "default": false},
-  "webui_host": {"type": "string", "description": "独立 WebUI 监听地址；仅本机访问用 127.0.0.1，局域网访问可显式设为 0.0.0.0", "default": "127.0.0.1"},
+  "webui_enabled": {"type": "bool", "description": "启用独立模块运营中心监听；默认开启并要求管理员登录，修改后需单插件重载核", "default": true},
+  "webui_host": {"type": "string", "description": "独立 WebUI 监听地址；默认监听所有网卡并要求管理员登录，生产环境建议配合防火墙或 HTTPS 反向代理", "default": "0.0.0.0"},
   "webui_port": {"type": "int", "description": "独立 WebUI 监听端口；修改后需单插件重载核", "default": 25528},
   "webui_public_url": {"type": "string", "description": "核 Page 打开独立 WebUI 使用的完整公开地址；监听 0.0.0.0 时应显式填写", "default": ""},
   "log_level": {"type": "string", "description": "插件日志级别", "default": "INFO", "options": ["DEBUG", "INFO", "WARNING", "ERROR"]}

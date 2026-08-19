@@ -107,6 +107,29 @@ def test_entry_identity_defaults_and_data_location(monkeypatch, tmp_path):
     assert plugin.store.root == (tmp_path / module.PLUGIN_NAME).resolve()
 
 
+def test_webui_defaults_are_reachable_and_saved_overrides_load_before_server(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    assert plugin.webui_enabled is True
+    assert plugin.webui_server is not None
+    assert plugin.webui_server.host == "0.0.0.0"
+
+    override_root = tmp_path / "override"
+    override_data = override_root / module.PLUGIN_NAME
+    override_data.mkdir(parents=True)
+    (override_data / "manager-config.json").write_text(
+        '{"webui_enabled": false, "webui_host": "127.0.0.1"}',
+        encoding="utf-8",
+    )
+    overridden = module.UpdateManagerPlugin(
+        context(override_root), {"webui_enabled": True, "webui_host": "0.0.0.0"}
+    )
+    assert overridden.webui_enabled is False
+    assert overridden.webui_server is None
+
+
 def test_series_runtime_contract_declares_exact_read_only_boundary(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(context(tmp_path), {})
@@ -146,7 +169,7 @@ def test_input_validation_and_rule_default_off(monkeypatch, tmp_path):
 
 def test_commands_and_terminate_cleanup(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
-    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {"webui_enabled": False})
     event = SimpleNamespace(plain_result=lambda text: text)
 
     async def collect(generator):

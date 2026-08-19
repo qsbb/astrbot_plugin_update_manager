@@ -316,11 +316,9 @@ async function loadConfig() {
 
 async function openStandaloneWebUi() {
   try {
-    const data = await apiGet("webui/url");
-    if (!data.enabled || !data.ready || !data.url) {
-      toast("独立 WebUI 未启用或尚未启动，请先在配置中启用并重载核。", true);
-      return;
-    }
+    let data = await apiGet("webui/url");
+    if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
+    if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
     const target = window.open(data.url, "_blank", "noopener,noreferrer");
     if (!target) window.prompt("请复制独立 WebUI 地址", data.url);
   } catch (error) {
