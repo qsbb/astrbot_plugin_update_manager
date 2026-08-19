@@ -3,6 +3,10 @@
     "manager": {
       "title": "系列插件核心",
       "description": "推荐安装，统一管理系列插件的更新、启用停用、回滚与调度"
+    },
+    "control-center": {
+      "title": "模块运营中心",
+      "description": "凝心溯溪可信模块的统一状态、诊断与运维入口"
     }
   }
 }

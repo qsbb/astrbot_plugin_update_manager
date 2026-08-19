@@ -44,6 +44,14 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/update", ("POST",)),
         (f"/{module.PLUGIN_NAME}/enable", ("POST",)),
         (f"/{module.PLUGIN_NAME}/disable", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/admins", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/webui/admins/create", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/admins/update", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/login", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/logout", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/webui/session", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/webui/modules", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/webui/diagnostics", ("POST",)),
     ]
 
 
@@ -99,6 +107,64 @@ def test_pages_request_json_prefers_astrbot_web_contract(monkeypatch, tmp_path):
 
     assert asyncio.run(plugin._request_json()) == {"enabled": False}
     assert calls == [{}]
+
+
+def test_webui_modules_requires_session_and_filters_to_owned_contracts(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    assert asyncio.run(plugin._pages_webui_modules())[1] == 401
+
+    async def scan():
+        return (
+            SimpleNamespace(
+                plugin_id="astrbot_plugin_update_manager",
+                display_name="核",
+                current_version="0.12.0",
+                source_url="https://github.com/qsbb/astrbot_plugin_update_manager",
+                activated=True,
+                loaded=True,
+                eligible=True,
+            ),
+            SimpleNamespace(
+                plugin_id="astrbot_plugin_future_module",
+                display_name="未来模块",
+                current_version="1.0.0",
+                source_url="https://github.com/qsbb/astrbot_plugin_future_module",
+                activated=True,
+                loaded=True,
+                eligible=True,
+            ),
+            SimpleNamespace(
+                plugin_id="astrbot_plugin_third_party",
+                display_name="第三方",
+                current_version="1.0.0",
+                source_url="https://github.com/another/astrbot_plugin_third_party",
+                activated=True,
+                loaded=True,
+                eligible=True,
+            ),
+        )
+
+    class Provider:
+        def diagnostic_log_contract(self):
+            return {"name": "series.diagnostics", "version": "1.0"}
+
+    async def get_instance(plugin_id):
+        return Provider() if plugin_id != "astrbot_plugin_third_party" else None
+
+    monkeypatch.setattr(plugin, "_webui_current_session", lambda: object())
+    monkeypatch.setattr(plugin.catalog, "scan", scan)
+    monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
+    payload = unwrap(asyncio.run(plugin._pages_webui_modules()))
+    assert {item["plugin_id"] for item in payload["modules"]} == {
+        "astrbot_plugin_update_manager",
+        "astrbot_plugin_future_module",
+    }
+    assert all(item["contracts"] == 1 for item in payload["modules"])
+    assert all(item["contract_source"] == "self_declared" for item in payload["modules"])
 
 
 def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(

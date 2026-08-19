@@ -1,7 +1,7 @@
 const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
-    refresh: "刷新", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…",
+    refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
     startupFailed: "页面启动失败", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
     retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
@@ -27,7 +27,7 @@ const messages = {
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
-    refresh: "Refresh", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…",
+    refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
     startupFailed: "Page startup failed", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
     retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
@@ -311,6 +311,57 @@ async function loadConfig() {
   const data = await apiGet("config");
   state.config = data;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("config", error); }
+}
+
+function renderWebUiAdmins(admins) {
+  const node = document.getElementById("webui-admin-list");
+  if (!node) return;
+  if (!admins.length) {
+    node.innerHTML = `<p>${escapeHtml(t("notConfigured"))}</p>`;
+    return;
+  }
+  node.innerHTML = admins.map((admin) => {
+    const action = admin.enabled ? "adminDisable" : "adminEnable";
+    const label = admin.enabled ? t("adminDisable") : t("adminEnable");
+    return `<div class="admin-row"><strong>${escapeHtml(admin.username)}</strong><span>${escapeHtml(admin.role)}</span><small>${admin.enabled ? escapeHtml(t("active")) : escapeHtml(t("inactive"))}</small><div class="admin-actions"><button type="button" data-admin-action="password" data-admin-id="${escapeHtml(admin.id)}">${escapeHtml(t("adminResetPassword"))}</button><button type="button" data-admin-action="${action === "adminDisable" ? "disable" : "enable"}" data-admin-id="${escapeHtml(admin.id)}">${escapeHtml(label)}</button></div></div>`;
+  }).join("");
+}
+
+async function loadWebUiAdmins() {
+  const data = await apiGet("webui/admins");
+  renderWebUiAdmins(data.admins || []);
+}
+
+async function createWebUiAdmin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const username = document.getElementById("webui-admin-username").value;
+  const password = document.getElementById("webui-admin-password").value;
+  const role = document.getElementById("webui-admin-role").value;
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    await apiPost("webui/admins/create", { username, password, role });
+    form.reset();
+    toast(t("adminCreated"));
+    await loadWebUiAdmins();
+  } catch (error) { toast(`${t("operationFailed")}: ${error.message}`, true); }
+  finally { button.disabled = false; }
+}
+
+async function updateWebUiAdmin(adminId, action) {
+  if (action === "password") {
+    const password = window.prompt(t("adminNewPassword"));
+    if (password === null) return;
+    await apiPost("webui/admins/update", { admin_id: adminId, password });
+    toast(t("adminUpdated"));
+  } else {
+    if (action === "disable" && !window.confirm(t("adminConfirmDisable"))) return;
+    await apiPost("webui/admins/update", { admin_id: adminId, enabled: action === "enable" });
+    toast(action === "enable" ? t("adminEnable") : t("adminDisabled"));
+  }
+  await loadWebUiAdmins();
 }
 
 async function loadRule() {
@@ -1302,6 +1353,16 @@ function bindEvents() {
     if (!await openExternalUrl(url)) toast(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
+  document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
+  document.getElementById("webui-admins-refresh")?.addEventListener("click", () => loadWebUiAdmins().catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true)));
+  document.getElementById("webui-admin-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-admin-action]");
+    if (!button) return;
+    button.disabled = true;
+    updateWebUiAdmin(button.dataset.adminId, button.dataset.adminAction)
+      .catch((error) => toast(`${t("operationFailed")}: ${error.message}`, true))
+      .finally(() => { button.disabled = false; });
+  });
   document.getElementById("rule-form").addEventListener("submit", saveRule);
   document.getElementById("rule-policy").addEventListener("change", (event) => {
     document.getElementById("check-only-note").hidden = event.target.value !== "check_only";

@@ -47,6 +47,7 @@ from .core.request_context import (
 )
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.transaction import PluginTransaction
+from .core.webui_auth import WebUIAuth
 from .pages_api import PagesAPIMixin
 from .series_diagnostics import (
     diagnostic_clear as clear_diagnostic_events,
@@ -57,7 +58,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -82,6 +83,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self._config_overrides: dict[str, Any] = {}
         data_root = self._resolve_data_root()
         self.store = AtomicJsonStore(data_root)
+        self.webui_auth = WebUIAuth(self.store)
         saved_overrides = self.store.read("manager-config.json", {})
         if isinstance(saved_overrides, dict):
             self._config_overrides = saved_overrides

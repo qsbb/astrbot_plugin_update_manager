@@ -600,3 +600,28 @@ def test_manager_page_is_responsive_and_accessible():
     assert "button:active:not(:disabled)" in css
     assert "@media (hover:hover) and (pointer:fine)" in css
     assert "transition:.2s" not in css
+
+
+def test_control_center_has_login_only_and_trusted_module_ui():
+    directory = PLUGIN_ROOT / "pages" / "control-center"
+    html = (directory / "index.html").read_text(encoding="utf-8")
+    js = (directory / "app.js").read_text(encoding="utf-8")
+    css = (directory / "style.css").read_text(encoding="utf-8")
+    assert "/api/plugin/page/bridge-sdk.js" in html
+    assert "login-form" in js
+    assert "不提供注册入口" in js
+    assert "注册账户" not in js
+    assert 'get("modules")' in js
+    assert 'post("diagnostics"' in js
+    assert "source=registry_and_qsbb_repository" not in js
+    assert "@media(max-width:720px)" in css
+    assert "@media (min-width:721px){.mobile-nav{display:none!important}}" in css
+
+
+def test_manager_page_exposes_dashboard_protected_admin_management():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'id="webui-admin-create-form"' in html
+    assert 'apiGet("webui/admins")' in js
+    assert 'apiPost("webui/admins/create"' in js
+    assert 'apiPost("webui/admins/update"' in js

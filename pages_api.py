@@ -48,18 +48,20 @@ from .core.trusted import (
     is_trusted_diagnostic_repository,
     trusted_plugin_identities,
 )
+from .core.webui_auth import WebUIAuth, WebUIAuthError
 from .series_diagnostics import diagnostic_operation
 
 try:
     from astrbot.api.web import json_response, request
 except ImportError:  # AstrBot < 4.26
     try:
-        from quart import jsonify, request
+        from quart import has_request_context, jsonify, request
     except ImportError:  # 测试或更旧运行时
+        has_request_context = None
         jsonify = request = None
 
     def json_response(payload: dict[str, Any], status: int = 200):
-        if jsonify is None:
+        if jsonify is None or (has_request_context is not None and not has_request_context()):
             return (payload, status) if status != 200 else payload
         response = jsonify(payload)
         return (response, status) if status != 200 else response
@@ -249,6 +251,29 @@ class PagesAPIMixin:
             ("update", self._pages_update, ["POST"], "更新可信系列插件"),
             ("enable", self._pages_enable, ["POST"], "启用可信系列插件"),
             ("disable", self._pages_disable, ["POST"], "停用可信系列插件"),
+            ("webui/admins", self._pages_webui_admins, ["GET"], "查看控制中心管理员"),
+            (
+                "webui/admins/create",
+                self._pages_webui_admin_create,
+                ["POST"],
+                "创建控制中心管理员",
+            ),
+            (
+                "webui/admins/update",
+                self._pages_webui_admin_update,
+                ["POST"],
+                "更新控制中心管理员",
+            ),
+            ("webui/login", self._pages_webui_login, ["POST"], "登录控制中心"),
+            ("webui/logout", self._pages_webui_logout, ["POST"], "退出控制中心"),
+            ("webui/session", self._pages_webui_session, ["GET"], "读取控制中心会话"),
+            ("webui/modules", self._pages_webui_modules, ["GET"], "读取可信模块状态"),
+            (
+                "webui/diagnostics",
+                self._pages_webui_diagnostics,
+                ["POST"],
+                "读取控制中心诊断摘要",
+            ),
         )
         try:
             for name, handler, methods, description in routes:
@@ -917,10 +942,273 @@ class PagesAPIMixin:
             }
         )
 
+    def _webui_auth_service(self) -> WebUIAuth:
+        service = getattr(self, "webui_auth", None)
+        if isinstance(service, WebUIAuth):
+            return service
+        store = getattr(self, "store", None)
+        if store is None:
+            raise RuntimeError("WEBUI_AUTH_UNAVAILABLE")
+        service = WebUIAuth(store)
+        self.webui_auth = service
+        return service
+
+    @staticmethod
+    def _webui_cookie(name: str = "nx_update_manager_session") -> str | None:
+        try:
+            cookies = getattr(request, "cookies", None) if request is not None else None
+        except RuntimeError:
+            return None
+        if cookies is None:
+            return None
+        try:
+            value = cookies.get(name)
+        except AttributeError:
+            return None
+        return value if isinstance(value, str) else None
+
+    @staticmethod
+    def _webui_response(
+        payload: dict[str, Any],
+        *,
+        status: int = 200,
+        session_token: str | None = None,
+        clear_session: bool = False,
+    ):
+        response = json_response(payload, status=status)
+        response_obj = response[0] if isinstance(response, tuple) else response
+        setter = getattr(response_obj, "set_cookie", None)
+        if callable(setter):
+            if session_token:
+                setter(
+                    "nx_update_manager_session",
+                    session_token,
+                    httponly=True,
+                    samesite="Strict",
+                    secure=False,
+                    max_age=8 * 60 * 60,
+                    path="/",
+                )
+            elif clear_session:
+                setter(
+                    "nx_update_manager_session",
+                    "",
+                    httponly=True,
+                    samesite="Strict",
+                    secure=False,
+                    max_age=0,
+                    expires=0,
+                    path="/",
+                )
+        return response
+
+    async def _pages_webui_admins(self):
+        return json_response(
+            {"success": True, "admins": self._webui_auth_service().list_admins()}
+        )
+
+    async def _pages_webui_admin_create(self):
+        data = await self._request_json()
+        if not isinstance(data, dict) or set(data) != {"username", "password", "role"}:
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        try:
+            admin = self._webui_auth_service().create_admin(
+                data["username"], data["password"], data["role"]
+            )
+        except WebUIAuthError as exc:
+            return json_response({"success": False, "error": str(exc)}, status=400)
+        return json_response({"success": True, "admin": admin})
+
+    async def _pages_webui_admin_update(self):
+        data = await self._request_json()
+        if not isinstance(data, dict) or "admin_id" not in data:
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        allowed = {"admin_id", "password", "role", "enabled"}
+        if set(data) - allowed or len(set(data) & (allowed - {"admin_id"})) == 0:
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        try:
+            admin = self._webui_auth_service().change_admin(
+                data["admin_id"],
+                password=data.get("password"),
+                role=data.get("role"),
+                enabled=data.get("enabled"),
+            )
+        except WebUIAuthError as exc:
+            return json_response({"success": False, "error": str(exc)}, status=400)
+        return json_response({"success": True, "admin": admin})
+
+    async def _pages_webui_login(self):
+        data = await self._request_json()
+        if not isinstance(data, dict) or set(data) != {"username", "password"}:
+            return self._webui_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        try:
+            session = self._webui_auth_service().authenticate(
+                data["username"], data["password"]
+            )
+        except WebUIAuthError as exc:
+            return self._webui_response(
+                {"success": False, "error": str(exc)}, status=401
+            )
+        return self._webui_response(
+            {
+                "success": True,
+                "session": {
+                    "username": session.username,
+                    "role": session.role,
+                },
+            },
+            session_token=session.token,
+        )
+
+    async def _pages_webui_logout(self):
+        service = self._webui_auth_service()
+        service.revoke(self._webui_cookie())
+        return self._webui_response({"success": True}, clear_session=True)
+
+    def _webui_current_session(self):
+        return self._webui_auth_service().session(self._webui_cookie())
+
+    async def _pages_webui_session(self):
+        session = self._webui_current_session()
+        if session is None:
+            return json_response(
+                {
+                    "success": True,
+                    "authenticated": False,
+                    "configured": self._webui_auth_service().has_enabled_admin(),
+                }
+            )
+        return json_response(
+            {
+                "success": True,
+                "authenticated": True,
+                "configured": True,
+                "session": {"username": session.username, "role": session.role},
+            }
+        )
+
+    async def _pages_webui_modules(self):
+        if self._webui_current_session() is None:
+            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
+        items = await self.catalog.scan()
+        trusted_ids = set(TRUSTED_BY_ID)
+        modules = []
+        seen: set[str] = set()
+        for item in items:
+            owned = item.plugin_id in trusted_ids or (
+                item.source_url
+                and is_trusted_diagnostic_repository(item.plugin_id, item.source_url)
+            )
+            if not owned:
+                continue
+            trusted = TRUSTED_BY_ID.get(item.plugin_id)
+            canonical_id = trusted.plugin_id if trusted else item.plugin_id
+            if canonical_id in seen:
+                continue
+            seen.add(canonical_id)
+            contract_info = await self._webui_module_contracts(item.plugin_id, canonical_id)
+            modules.append(
+                {
+                    "plugin_id": canonical_id,
+                    "display_name": trusted.display_name if trusted else item.display_name or item.plugin_id,
+                    "version": item.current_version,
+                    "activated": bool(item.activated),
+                    "loaded": bool(item.loaded),
+                    "eligible": bool(item.eligible),
+                    **contract_info,
+                    "status": "normal" if item.activated and item.loaded else "offline",
+                    "update_available": False,
+                }
+            )
+        return json_response(
+            {
+                "success": True,
+                "source": "trusted_registry_and_qsbb_repository",
+                "modules": modules,
+            }
+        )
+
+    async def _webui_module_contracts(
+        self, runtime_id: str, canonical_id: str
+    ) -> dict[str, Any]:
+        """Count only explicit, read-only contract declarations from a module.
+
+        The control center must not invent a capability count or inspect arbitrary
+        attributes.  The two declarations are intentionally narrow and already
+        used by the diagnostics/runtime integrations.
+        """
+        getter = getattr(self.adapter, "get_plugin_instance", None)
+        if not callable(getter):
+            return {"contracts": 0, "contract_source": "unavailable"}
+        instance = None
+        for plugin_id in dict.fromkeys((runtime_id, canonical_id)):
+            try:
+                instance = getter(plugin_id)
+                if inspect.isawaitable(instance):
+                    instance = await instance
+            except Exception:
+                instance = None
+            if instance is not None:
+                break
+        if instance is None:
+            return {"contracts": 0, "contract_source": "unavailable"}
+        count = 0
+        for method_name in ("diagnostic_log_contract", "series_runtime_contract"):
+            declaration = getattr(instance, method_name, None)
+            if not callable(declaration):
+                continue
+            try:
+                value = declaration()
+                if inspect.isawaitable(value):
+                    value = await value
+            except Exception:
+                continue
+            if (
+                isinstance(value, dict)
+                and isinstance(value.get("name"), str)
+                and isinstance(value.get("version"), str)
+                and value.get("name") in {"series.diagnostics", "update_manager.series_runtime"}
+                and value.get("version", "").split(".", 1)[0] == "1"
+            ):
+                count += 1
+        return {
+            "contracts": count,
+            "contract_source": "self_declared" if count else "unavailable",
+        }
+
+    async def _pages_webui_diagnostics(self):
+        if self._webui_current_session() is None:
+            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
+        providers = await self._diagnostic_providers()
+        return json_response(
+            {
+                "success": True,
+                "providers": [
+                    {
+                        "plugin_id": item.plugin_id,
+                        "display_name": item.display_name,
+                        "status": "ready" if item.self_declared else "available",
+                    }
+                    for item in providers
+                ],
+            }
+        )
+
     async def _request_json(self) -> Any:
         if request is None:
             return None
-        json_reader = getattr(request, "json", None)
+        try:
+            json_reader = getattr(request, "json", None)
+        except RuntimeError:
+            return None
         if callable(json_reader):
             value = json_reader(default={})
         else:
