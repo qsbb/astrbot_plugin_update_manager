@@ -16,66 +16,54 @@ PLUGIN_NAME = "核"
 DIAGNOSTIC_CONTRACT = "series.diagnostics@1.0"
 _MAX_EVENTS = 1000
 _SENSITIVE_KEY = re.compile(
-    r"(?:token|api[_-]?key|secret|password|authorization|cookie|umo|"
-    r"user[_-]?id|group[_-]?id|platform[_-]?id|"
-    r"^(?:account|person|session|requester|recipient|target|identity|filename|file[_-]?path|path|location|latitude|longitude|prompt|response|reply|query|topic|content|message|claim|snippet|url|new_settings)(?:[_-]?id)?$|"
-    r"^scope(?:[_-]?id)?$)",
-    re.IGNORECASE,
-)
-_LONG_NUMBER = re.compile(r"(?<![\w.])[0-9]{6,}(?![\w.])")
-_ACTOR_ID = re.compile(
-    r"(?i)\b(?:user|group|account|person|session)[-_:][A-Za-z0-9_-]+\b"
-)
-_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]+", re.IGNORECASE)
-_URL = re.compile(r"https?://[^\s]+", re.IGNORECASE)
-_EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-_OPAQUE_VALUE = re.compile(
-    r"(?<![\w])(?=[A-Za-z0-9_-]{20,}(?![\w]))"
-    r"(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*[0-9])"
-    r"[A-Za-z0-9_-]+"
+    r"(?i)(?:^|[_-])(?:token|api[_-]?key|secret|password|authorization|cookie|"
+    r"jwt|private[_-]?key|ssh[_-]?key|provider[_-]?key|bridge[_-]?key)(?:$|[_-])"
 )
 _SECRET_VALUE = re.compile(
-    r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|umo|"
-    r"user[_-]?id|group[_-]?id|platform[_-]?id)(?:\s*[:=]\s*|\s+)"
+    r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|jwt|"
+    r"private[_-]?key|ssh[_-]?key|provider[_-]?key|bridge[_-]?key)"
+    r"(?:\s*[:=]\s*|\s+)"
     r"(?:bearer\s+)?([^,\s]+)"
 )
-_PRIVATE_VALUE = re.compile(
-    r"(?i)(user_text|prompt|response|reply|query|topic|content|scope|message|"
-    r"new_settings)\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^,\s]+)"
-)
 
 
-def _safe_text(value: Any, *, limit: int = 320) -> str:
+def _safe_text(value: Any, *, limit: int | None = None) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
     text = _SECRET_VALUE.sub(r"\1=<已隐藏>", text)
-    text = _PRIVATE_VALUE.sub(r"\1=<已隐藏>", text)
-    text = _EMAIL.sub("<已隐藏邮箱>", text)
-    text = _OPAQUE_VALUE.sub("<已隐藏随机标识>", text)
-    text = _ACTOR_ID.sub("<已隐藏标识>", text)
-    text = _URL_QUERY.sub(r"\1?[已隐藏参数]", text)
-    text = _URL.sub("<已隐藏网址>", text)
-    text = _LONG_NUMBER.sub("<已隐藏标识>", text)
-    return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
+    return (
+        text if limit is None or len(text) <= limit else text[: max(1, limit - 1)] + "…"
+    )
+
+
+def _safe_value(value: Any, *, key: str = "") -> Any:
+    """Preserve diagnostic data while masking only credential values."""
+    if _SENSITIVE_KEY.search(key):
+        if isinstance(value, (bool, int, float)) or value is None:
+            return value
+        return "<已隐藏凭据>"
+    if isinstance(value, dict):
+        return {
+            str(name)[:256]: _safe_value(item, key=str(name))
+            for name, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_safe_value(item) for item in value]
+    if isinstance(value, bytes):
+        return _safe_text(value.decode(errors="replace"))
+    if isinstance(value, str):
+        return _safe_text(value)
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return _safe_text(value)
 
 
 def _safe_details(details: Any) -> dict[str, Any]:
     if not isinstance(details, dict):
         return {}
-    result: dict[str, Any] = {}
-    for key, value in details.items():
-        name = str(key)[:64]
-        if _SENSITIVE_KEY.search(name):
-            continue
-        if isinstance(value, bool | int | float) or value is None:
-            result[name] = value
-        elif isinstance(value, (str, bytes)):
-            result[name] = _safe_text(
-                value.decode(errors="replace") if isinstance(value, bytes) else value,
-                limit=2000 if name.lower() == "log_detail" else 160,
-            )
-        elif isinstance(value, (list, tuple)):
-            result[name] = [_safe_text(item, limit=80) for item in value[:8]]
-    return result
+    return {
+        str(key)[:256]: _safe_value(value, key=str(key))
+        for key, value in details.items()
+    }
 
 
 class DiagnosticBuffer(logging.Handler):
@@ -115,7 +103,7 @@ class DiagnosticBuffer(logging.Handler):
                 "line": max(0, int(record.lineno or 0)),
             }
             if record.getMessage():
-                details["log_detail"] = _safe_text(record.getMessage(), limit=2000)
+                details["log_detail"] = _safe_text(record.getMessage())
             if record.exc_info and record.exc_info[0] is not None:
                 details["exception_type"] = record.exc_info[0].__name__
             self.append(

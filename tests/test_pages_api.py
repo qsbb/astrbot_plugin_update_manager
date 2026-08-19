@@ -161,7 +161,9 @@ def test_webui_modules_requires_session_and_filters_to_owned_contracts(
         "astrbot_plugin_future_module",
     }
     assert all(item["contracts"] == 1 for item in payload["modules"])
-    assert all(item["contract_source"] == "self_declared" for item in payload["modules"])
+    assert all(
+        item["contract_source"] == "self_declared" for item in payload["modules"]
+    )
 
 
 def test_webui_url_uses_current_dashboard_host_for_wildcard_listener(
@@ -215,7 +217,7 @@ def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path)
     }
 
 
-def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(
+def test_series_diagnostics_aggregate_preserves_details_and_masks_credentials(
     monkeypatch, tmp_path
 ):
     module = import_main(monkeypatch)
@@ -281,17 +283,19 @@ def test_series_diagnostics_aggregate_isolated_contracts_and_redacts(
     assert event["plugin_id"] == "astrbot_plugin_conversation_flow"
     assert event["plugin_name"] == "言"
     assert event["level"] == "WARNING"
-    assert "123456789" not in event["summary"]
+    assert "123456789" in event["summary"]
     assert "authorization=secret" not in event["summary"]
-    assert "private text" not in event["summary"]
-    assert "alice@example.com" not in event["summary"]
-    assert "Abcdef1234567890Ghijkl" not in event["summary"]
+    assert "private text" in event["summary"]
+    assert "alice@example.com" in event["summary"]
+    assert "Abcdef1234567890Ghijkl" in event["summary"]
     assert event["details"]["duration_ms"] == 6000
+    assert event["details"]["user_id"] == "123456789"
     detail = event["details"]["log_detail"]
-    assert detail.startswith("tool call failed for <已隐藏标识> token=<已隐藏>")
-    assert "user-a" not in detail
+    assert detail.startswith("tool call failed for user-a token=<已隐藏>")
+    assert "user-a" in detail
     assert "abcdefghijk" not in detail
-    assert len(detail) == 2000
+    assert detail.endswith("x" * 2500)
+    assert len(detail) > 2500
     member = next(item for item in payload["members"] if item["plugin_name"] == "言")
     assert member["status"] == "ready"
     assert member["next_seq"] == 4
@@ -1730,7 +1734,9 @@ def test_legacy_embodiment_install_uses_canonical_recommendation_and_updates_by_
         if plugin_id == canonical_id:
             assert current_version == "1.0.0"
             assert source_url == canonical_repo
-            return SimpleNamespace(target_version="1.1.0", archive_url="https://example.invalid/archive")
+            return SimpleNamespace(
+                target_version="1.1.0", archive_url="https://example.invalid/archive"
+            )
         return SimpleNamespace(target_version="1.0.0", archive_url="")
 
     async def update(plugin_id, *, source_kind, source_url, archive_url=None):
@@ -1756,7 +1762,9 @@ def test_legacy_embodiment_install_uses_canonical_recommendation_and_updates_by_
     )
 
     payload = unwrap(asyncio.run(plugin._pages_recommendations()))
-    item = next(entry for entry in payload["items"] if entry["plugin_id"] == canonical_id)
+    item = next(
+        entry for entry in payload["items"] if entry["plugin_id"] == canonical_id
+    )
     assert item["installed"] is True
     assert item["repo_url"] == canonical_repo
     assert item["actions"]["update"] is True

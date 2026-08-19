@@ -1044,6 +1044,17 @@ function syncDiagnosticPluginFilter() {
   if ([...select.options].some((option) => option.value === selected)) select.value = selected;
 }
 
+function diagnosticValue(value) {
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_) {
+      return String(value);
+    }
+  }
+  return String(value ?? "");
+}
+
 function diagnosticDetails(details) {
   const data = details && typeof details === "object" ? details : {};
   const logDetail = typeof data.log_detail === "string" ? data.log_detail : "";
@@ -1054,7 +1065,7 @@ function diagnosticDetails(details) {
   return `<div class="diagnostic-details">`
     + (logDetail ? `<pre class="diagnostic-log-detail">${escapeHtml(logDetail)}</pre>` : "")
     + (entries.length ? `<div class="diagnostic-detail-fields">${entries.map(([key, value]) => (
-      `<span><code>${escapeHtml(key)}</code>${escapeHtml(Array.isArray(value) ? value.join(", ") : value)}</span>`
+      `<span><code>${escapeHtml(key)}</code><pre>${escapeHtml(diagnosticValue(value))}</pre></span>`
     )).join("")}</div>` : "")
     + `</div>`;
 }

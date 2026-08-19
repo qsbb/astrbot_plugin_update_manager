@@ -62,7 +62,9 @@ except ImportError:  # AstrBot < 4.26
         jsonify = request = None
 
     def json_response(payload: dict[str, Any], status: int = 200):
-        if jsonify is None or (has_request_context is not None and not has_request_context()):
+        if jsonify is None or (
+            has_request_context is not None and not has_request_context()
+        ):
             return (payload, status) if status != 200 else payload
         response = jsonify(payload)
         return (response, status) if status != 200 else response
@@ -83,30 +85,15 @@ DIAGNOSTIC_DISCOVERY_CACHE_SECONDS = 10.0
 _DIAGNOSTIC_STREAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _DIAGNOSTIC_PLUGIN_NAME = re.compile(r"^[^\s<>]{1,16}$")
 _DIAGNOSTIC_SENSITIVE_KEY = re.compile(
-    r"(?:token|api[_-]?key|secret|password|authorization|cookie|umo|user[_-]?id|group[_-]?id|platform[_-]?id)",
+    r"(?i)(?:^|[_-])(?:token|api[_-]?key|secret|password|authorization|cookie|"
+    r"jwt|private[_-]?key|ssh[_-]?key|provider[_-]?key|bridge[_-]?key)(?:$|[_-])",
     re.IGNORECASE,
 )
-_DIAGNOSTIC_LONG_NUMBER = re.compile(r"(?<![\w.])[0-9]{6,}(?![\w.])")
-_DIAGNOSTIC_ACTOR_ID = re.compile(
-    r"(?i)\b(?:user|group|account|person|session)[-_:][A-Za-z0-9_-]+\b"
-)
-_DIAGNOSTIC_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]+", re.IGNORECASE)
-_DIAGNOSTIC_EMAIL = re.compile(
-    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE
-)
-_DIAGNOSTIC_OPAQUE_VALUE = re.compile(
-    r"(?<![\w])(?=[A-Za-z0-9_-]{20,}(?![\w]))"
-    r"(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*[0-9])"
-    r"[A-Za-z0-9_-]+"
-)
 _DIAGNOSTIC_SECRET_VALUE = re.compile(
-    r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|umo|"
-    r"user[_-]?id|group[_-]?id|platform[_-]?id)(?:\s*[:=]\s*|\s+)"
+    r"(?i)(token|api[_-]?key|secret|password|authorization|cookie|jwt|"
+    r"private[_-]?key|ssh[_-]?key|provider[_-]?key|bridge[_-]?key)"
+    r"(?:\s*[:=]\s*|\s+)"
     r"(?:bearer\s+)?([^,\s]+)"
-)
-_DIAGNOSTIC_PRIVATE_VALUE = re.compile(
-    r"(?i)(user_text|prompt|response|reply|query|topic|content|scope|message|"
-    r"new_settings)\s*[:=]\s*(?:'[^']*'|\"[^\"]*\"|[^,\s]+)"
 )
 RULE_WRITABLE_KEYS = frozenset(
     {
@@ -436,37 +423,41 @@ class PagesAPIMixin:
         )
 
     @staticmethod
-    def _diagnostic_text(value: Any, limit: int) -> str:
+    def _diagnostic_text(value: Any, limit: int | None = None) -> str:
         text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
         text = _DIAGNOSTIC_SECRET_VALUE.sub(r"\1=<已隐藏>", text)
-        text = _DIAGNOSTIC_PRIVATE_VALUE.sub(r"\1=<已隐藏>", text)
-        text = _DIAGNOSTIC_EMAIL.sub("<已隐藏邮箱>", text)
-        text = _DIAGNOSTIC_OPAQUE_VALUE.sub("<已隐藏随机标识>", text)
-        text = _DIAGNOSTIC_ACTOR_ID.sub("<已隐藏标识>", text)
-        text = _DIAGNOSTIC_URL_QUERY.sub(r"\1?[已隐藏参数]", text)
-        text = _DIAGNOSTIC_LONG_NUMBER.sub("<已隐藏标识>", text)
-        return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
+        return (
+            text
+            if limit is None or len(text) <= limit
+            else text[: max(1, limit - 1)] + "…"
+        )
 
     @classmethod
     def _diagnostic_details(cls, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):
             return {}
-        details: dict[str, Any] = {}
-        for raw_key, raw_value in value.items():
-            key = cls._diagnostic_text(raw_key, 64)
-            if not key or _DIAGNOSTIC_SENSITIVE_KEY.search(key):
-                continue
-            if isinstance(raw_value, (bool, int, float)) or raw_value is None:
-                details[key] = raw_value
-            elif isinstance(raw_value, str):
-                details[key] = cls._diagnostic_text(
-                    raw_value, 2000 if key.lower() == "log_detail" else 160
-                )
-            elif isinstance(raw_value, (list, tuple)):
-                details[key] = [
-                    cls._diagnostic_text(item, 80) for item in raw_value[:8]
-                ]
-        return details
+
+        def preserve(raw: Any, *, key: str = "") -> Any:
+            if _DIAGNOSTIC_SENSITIVE_KEY.search(key):
+                if isinstance(raw, (bool, int, float)) or raw is None:
+                    return raw
+                return "<已隐藏凭据>"
+            if isinstance(raw, dict):
+                return {
+                    str(child_key)[:256]: preserve(child, key=str(child_key))
+                    for child_key, child in raw.items()
+                }
+            if isinstance(raw, (list, tuple, set, frozenset)):
+                return [preserve(item) for item in raw]
+            if isinstance(raw, str):
+                return cls._diagnostic_text(raw)
+            if isinstance(raw, (bool, int, float)) or raw is None:
+                return raw
+            return cls._diagnostic_text(raw)
+
+        return {
+            str(key)[:256]: preserve(raw, key=str(key)) for key, raw in value.items()
+        }
 
     @classmethod
     def _normalize_diagnostic_event(
@@ -485,12 +476,12 @@ class PagesAPIMixin:
             level = "INFO"
         return {
             "seq": sequence,
-            "timestamp": cls._diagnostic_text(value.get("timestamp"), 40),
+            "timestamp": cls._diagnostic_text(value.get("timestamp")),
             "plugin_id": plugin_id,
             "plugin_name": plugin_name,
             "level": level,
-            "code": cls._diagnostic_text(value.get("code"), 80),
-            "summary": cls._diagnostic_text(value.get("summary"), 320),
+            "code": cls._diagnostic_text(value.get("code")),
+            "summary": cls._diagnostic_text(value.get("summary")),
             "details": cls._diagnostic_details(value.get("details")),
         }
 
@@ -572,7 +563,6 @@ class PagesAPIMixin:
             return None
         display_name = self._diagnostic_text(
             getattr(snapshot, "display_name", "") or plugin_id,
-            80,
         )
         return DiagnosticProvider(
             plugin_id=plugin_id,
@@ -1110,11 +1100,15 @@ class PagesAPIMixin:
             if canonical_id in seen:
                 continue
             seen.add(canonical_id)
-            contract_info = await self._webui_module_contracts(item.plugin_id, canonical_id)
+            contract_info = await self._webui_module_contracts(
+                item.plugin_id, canonical_id
+            )
             modules.append(
                 {
                     "plugin_id": canonical_id,
-                    "display_name": trusted.display_name if trusted else item.display_name or item.plugin_id,
+                    "display_name": trusted.display_name
+                    if trusted
+                    else item.display_name or item.plugin_id,
                     "version": item.current_version,
                     "activated": bool(item.activated),
                     "loaded": bool(item.loaded),
@@ -1131,7 +1125,9 @@ class PagesAPIMixin:
 
     async def _pages_webui_modules(self):
         if self._webui_current_session() is None:
-            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
+            return json_response(
+                {"success": False, "error": "AUTH_REQUIRED"}, status=401
+            )
         return json_response({"success": True, **await self._webui_modules_payload()})
 
     async def _webui_module_contracts(
@@ -1173,7 +1169,8 @@ class PagesAPIMixin:
                 isinstance(value, dict)
                 and isinstance(value.get("name"), str)
                 and isinstance(value.get("version"), str)
-                and value.get("name") in {"series.diagnostics", "update_manager.series_runtime"}
+                and value.get("name")
+                in {"series.diagnostics", "update_manager.series_runtime"}
                 and value.get("version", "").split(".", 1)[0] == "1"
             ):
                 count += 1
@@ -1197,8 +1194,12 @@ class PagesAPIMixin:
 
     async def _pages_webui_diagnostics(self):
         if self._webui_current_session() is None:
-            return json_response({"success": False, "error": "AUTH_REQUIRED"}, status=401)
-        return json_response({"success": True, **await self._webui_diagnostics_payload()})
+            return json_response(
+                {"success": False, "error": "AUTH_REQUIRED"}, status=401
+            )
+        return json_response(
+            {"success": True, **await self._webui_diagnostics_payload()}
+        )
 
     async def _pages_webui_url(self):
         server = getattr(self, "webui_server", None)
@@ -1230,7 +1231,9 @@ class PagesAPIMixin:
     async def _pages_webui_start(self):
         starter = getattr(self, "_start_webui_from_page", None)
         if not callable(starter):
-            return json_response({"success": False, "error": "WEBUI_UNAVAILABLE"}, status=503)
+            return json_response(
+                {"success": False, "error": "WEBUI_UNAVAILABLE"}, status=503
+            )
         try:
             server = await starter(self._request_hostname())
         except Exception as exc:
@@ -1240,7 +1243,9 @@ class PagesAPIMixin:
                 "独立 WebUI 启动",
                 emit_start=False,
             ).fail(exc, summary="独立 WebUI 启动失败")
-            return json_response({"success": False, "error": "WEBUI_START_FAILED"}, status=503)
+            return json_response(
+                {"success": False, "error": "WEBUI_START_FAILED"}, status=503
+            )
         request_host = self._webui_request_host(server)
         return json_response(
             {

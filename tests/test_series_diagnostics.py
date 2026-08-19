@@ -13,12 +13,20 @@ from astrbot_plugin_update_manager.series_diagnostics import (
 )
 
 
-def test_series_diagnostics_are_bounded_redacted_and_isolated():
+def test_series_diagnostics_preserve_debug_details_and_mask_credentials():
     diagnostic_clear()
     diagnostic_event(
         "update.plan",
         "planned 123456789",
-        details={"eligible": True, "token": "secret"},
+        details={
+            "eligible": True,
+            "token": "secret",
+            "token_configured": True,
+            "path": r"D:\AstrBot\data\plugins",
+            "response": "full diagnostic response",
+            "nested": {"user_id": "123456789", "api_key": "nested-secret"},
+            "items": list(range(12)),
+        },
     )
     diagnostic_event("page.webui.start", "页面 POST webui/start 完成")
     logger.warning(
@@ -34,16 +42,24 @@ def test_series_diagnostics_are_bounded_redacted_and_isolated():
     assert payload["events"][1]["summary"] == "页面 POST webui/start 完成"
     log_detail = payload["events"][2]["details"]["log_detail"]
     assert "private chat body" in log_detail
-    assert "user-a" not in serialized
+    assert "user-a" in serialized
     assert "abcdefghijk" not in serialized
     assert logger.propagate is False
-    assert payload["events"][0]["details"] == {"eligible": True}
-    assert "123456789" not in str(payload["events"])
+    assert payload["events"][0]["details"] == {
+        "eligible": True,
+        "token": "<已隐藏凭据>",
+        "token_configured": True,
+        "path": r"D:\AstrBot\data\plugins",
+        "response": "full diagnostic response",
+        "nested": {"user_id": "123456789", "api_key": "<已隐藏凭据>"},
+        "items": list(range(12)),
+    }
+    assert "123456789" in str(payload["events"])
     assert "token=secret" not in str(payload["events"])
     assert "authorization=secret" not in str(payload["events"])
-    assert "private text" not in str(payload["events"])
-    assert "alice@example.com" not in str(payload["events"])
-    assert "Abcdef1234567890Ghijkl" not in str(payload["events"])
+    assert "private text" in str(payload["events"])
+    assert "alice@example.com" in str(payload["events"])
+    assert "Abcdef1234567890Ghijkl" in str(payload["events"])
     assert any(
         type(handler).__name__ == "DiagnosticBuffer" for handler in logger.handlers
     )
