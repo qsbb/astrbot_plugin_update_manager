@@ -1203,13 +1203,18 @@ class PagesAPIMixin:
 
     async def _pages_webui_url(self):
         server = getattr(self, "webui_server", None)
-        request_host = self._webui_request_host(server)
+        # Expose the configured endpoint even before the listener starts.
+        preview = server or self._new_webui_server()
+        request_host = self._webui_request_host(preview)
         return json_response(
             {
                 "success": True,
                 "enabled": bool(server is not None),
+                "configured_enabled": self._get_bool("webui_enabled", True),
                 "ready": bool(server is not None and server.started),
-                "url": server.url_for_host(request_host) if server is not None else "",
+                "host": preview.host,
+                "port": preview.port,
+                "url": preview.url_for_host(request_host),
             }
         )
 
@@ -1251,7 +1256,10 @@ class PagesAPIMixin:
             {
                 "success": True,
                 "enabled": True,
+                "configured_enabled": True,
                 "ready": bool(server.started),
+                "host": server.host,
+                "port": server.port,
                 "url": server.url_for_host(request_host),
             }
         )

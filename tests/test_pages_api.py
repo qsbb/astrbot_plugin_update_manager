@@ -178,8 +178,35 @@ def test_webui_url_uses_current_dashboard_host_for_wildcard_listener(
     plugin.webui_server._started = True
     payload = unwrap(asyncio.run(plugin._pages_webui_url()))
     assert payload["enabled"] is True
+    assert payload["configured_enabled"] is True
     assert payload["ready"] is True
+    assert payload["host"] == "0.0.0.0"
+    assert payload["port"] == 25528
     assert payload["url"] == "http://192.168.5.88:25528"
+
+
+def test_webui_url_reports_configured_endpoint_while_listener_is_disabled(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path),
+        {"webui_enabled": False, "webui_host": "0.0.0.0", "webui_port": 25529},
+    )
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(
+        pages_api, "request", SimpleNamespace(host="192.168.5.88:25520")
+    )
+    payload = unwrap(asyncio.run(plugin._pages_webui_url()))
+    assert payload == {
+        "success": True,
+        "enabled": False,
+        "configured_enabled": False,
+        "ready": False,
+        "host": "0.0.0.0",
+        "port": 25529,
+        "url": "http://192.168.5.88:25529",
+    }
 
 
 def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path):
@@ -194,6 +221,7 @@ def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path)
 
     class StartedServer:
         host = "0.0.0.0"
+        port = 25528
         started = True
 
         @staticmethod
@@ -212,7 +240,10 @@ def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path)
     assert payload == {
         "success": True,
         "enabled": True,
+        "configured_enabled": True,
         "ready": True,
+        "host": "0.0.0.0",
+        "port": 25528,
         "url": "http://192.168.5.88:25528",
     }
 

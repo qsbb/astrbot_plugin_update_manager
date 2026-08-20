@@ -11,7 +11,10 @@ def test_manager_page_zh_cn_metadata_is_complete():
     metadata = json.loads(I18N_FILE.read_text(encoding="utf-8"))
     manager = metadata["pages"]["manager"]
     assert manager["title"] == "系列插件核心"
-    assert manager["description"] == "推荐安装，统一管理系列插件的更新、启用停用、回滚与调度"
+    assert (
+        manager["description"]
+        == "推荐安装，统一管理系列插件的更新、启用停用、回滚与调度"
+    )
 
 
 def test_release_docs_cover_page_fallback_and_secret_behavior():
@@ -125,7 +128,7 @@ def test_manager_page_handles_storage_and_startup_failures():
     assert "init().catch(showStartupError);" in js
     assert "Object.prototype.hasOwnProperty.call(messages, storedLocale)" in js
     assert "Object.hasOwn(" not in js
-    assert 'const state = { locale: localStorage.getItem' not in js
+    assert "const state = { locale: localStorage.getItem" not in js
 
 
 def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
@@ -141,7 +144,10 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert '["install", "update", "disable"].includes(action)' in js
     assert "{ plugin_id: pluginId, confirm: true }" in js
     assert ": { plugin_id: pluginId };" in js
-    assert "await Promise.all([loadRecommendations(), loadOverview(), loadCatalog()])" in js
+    assert (
+        "await Promise.all([loadRecommendations(), loadOverview(), loadCatalog()])"
+        in js
+    )
     assert "data?.success === false" in js
     assert "errorReason(data.error || data.detail)" in js
     assert "ClientResponseError" not in js
@@ -162,7 +168,7 @@ def test_catalog_has_safe_lifecycle_switch_and_localized_errors():
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert "function catalogSwitch(item)" in js
     assert 'data-catalog-action="${action}"' in js
-    assert 'apiPost(`catalog/${action}`, payload)' in js
+    assert "apiPost(`catalog/${action}`, payload)" in js
     assert 'action === "disable" && !await confirmRecommendationAction' in js
     assert "item.lifecycle?.reason" in js
     assert "errorReason" in js
@@ -201,7 +207,10 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
     assert "checkCatalogUpdates" not in tab_handler
     # 普通与强制更新都必须二次确认；强制模式使用独立警示文案与显式 force。
     assert 'await confirmRecommendationAction("update", pluginName)' in js
-    assert 'await showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))' in js
+    assert (
+        'await showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))'
+        in js
+    )
     assert "? { plugin_id: pluginId, confirm: true, force: true }" in js
     assert ": { plugin_id: pluginId, confirm: true };" in js
     assert 'apiPost("catalog/update", payload)' in js
@@ -210,7 +219,10 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
     assert "even when it is the same version or older" in js
     # 普通更新仅允许新版本；强制更新额外允许同版本和本地较新。
     assert "Boolean(view?.update_available)" in js
-    assert '["update_available", "up_to_date", "local_newer"].includes(view?.version_status)' in js
+    assert (
+        '["update_available", "up_to_date", "local_newer"].includes(view?.version_status)'
+        in js
+    )
     assert 't("notChecked")' in js
     assert "未检查" in js
     assert 'checkUpdates: "Check for updates"' in js
@@ -223,7 +235,9 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert 'id="check-latest"' in html
     assert 'id="apply-all-recommendations"' in html
     assert 'data-i18n="applyAll"' in html
-    assert 'apiPost("recommendations/check-latest", { force_refresh: forceRefresh })' in js
+    assert (
+        'apiPost("recommendations/check-latest", { force_refresh: forceRefresh })' in js
+    )
     assert 'apiPost("recommendations/apply-all", { confirm: true })' in js
     assert "async function runApplyAllRecommendations()" in js
     assert "applyAllConfirm" in js
@@ -231,9 +245,11 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert "actions.update" in js
     assert "actions.force_update" in js
     assert 'data-recommendation-action="update" data-force-update="true"' in js
-    assert '? { plugin_id: pluginId, confirm: true, force: true }' in js
+    assert "? { plugin_id: pluginId, confirm: true, force: true }" in js
     assert 'setRecommendationBusy(force ? "forceUpdate" : action, pluginName)' in js
-    assert 'showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))' in js
+    assert (
+        'showConfirmation(t("forceUpdateConfirm").replace("{name}", pluginName))' in js
+    )
     for status in (
         "update_available",
         "up_to_date",
@@ -261,7 +277,9 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
 def test_recommendations_tab_auto_checks_once_with_cached_request():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     # 自动检查必须复用 loadRecommendations 与 check-latest，且不强制刷新。
-    assert "async function loadRecommendations(check = false, forceRefresh = true)" in js
+    assert (
+        "async function loadRecommendations(check = false, forceRefresh = true)" in js
+    )
     assert "async function autoCheckRecommendations()" in js
     assert "await loadRecommendations(true, false);" in js
     assert "versionCheckBusy: false" in js
@@ -284,7 +302,11 @@ def test_recommendations_tab_auto_checks_once_with_cached_request():
     assert "clearVersionCheckBusy();" in auto_check
     assert "await loadRecommendations();" in auto_check
     assert "catch (error)" in auto_check
-    tab_handler = js[js.index('document.querySelectorAll("[data-tab]")') : js.index('document.getElementById("config-form")')]
+    tab_handler = js[
+        js.index('document.querySelectorAll("[data-tab]")') : js.index(
+            'document.getElementById("config-form")'
+        )
+    ]
     assert 'button.dataset.tab === "recommendations"' in tab_handler
     assert "autoCheckRecommendations()" in tab_handler
 
@@ -295,7 +317,11 @@ def test_manual_and_auto_version_check_share_one_busy_lock():
     assert "function clearVersionCheckBusy()" in js
     assert "state.versionCheckBusy = true;" in js
     assert "state.versionCheckBusy = false;" in js
-    manual = js[js.index('document.getElementById("check-latest").addEventListener') : js.index('document.getElementById("refresh").addEventListener')]
+    manual = js[
+        js.index('document.getElementById("check-latest").addEventListener') : js.index(
+            'document.getElementById("refresh").addEventListener'
+        )
+    ]
     assert "if (state.versionCheckBusy) return;" in manual
     assert "state.autoVersionCheckDone = true;" in manual
     assert 'setVersionCheckBusy("checkingLatest")' in manual
@@ -303,8 +329,8 @@ def test_manual_and_auto_version_check_share_one_busy_lock():
     assert "clearVersionCheckBusy();" in manual
     # 版本检查不得抢走推荐操作的状态条。
     assert "if (status && !state.recommendationBusy) status.hidden = true;" in js
-    assert "autoCheckingLatest: \"正在自动检查版本…\"" in js
-    assert "autoCheckingLatest: \"Checking versions automatically…\"" in js
+    assert 'autoCheckingLatest: "正在自动检查版本…"' in js
+    assert 'autoCheckingLatest: "Checking versions automatically…"' in js
 
 
 def test_recommendations_show_self_update_repository_notice():
@@ -319,8 +345,8 @@ def test_recommendations_show_self_update_repository_notice():
     assert 'rel = "noopener noreferrer"' in js
     assert 'const installedRoute = "/extension#installed"' in js
     assert "link.dataset.internalRoute = installedRoute" in js
-    assert 'a[data-external-url]' in js
-    assert 'a[data-internal-route]' in js
+    assert "a[data-external-url]" in js
+    assert "a[data-internal-route]" in js
     assert 'link.href = internalRouteUrl(installedRoute) || "#"' in js
     assert 'data-external-url="${escapeHtml(item.repo_url)}"' in js
     assert "自身更新已禁用，请前往已安装插件页更新" in js
@@ -330,15 +356,15 @@ def test_recommendations_show_self_update_repository_notice():
 
 def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    helper = js[js.index("async function invokeBridgeNavigation") : js.index("function toast")]
-    self_update = helper[
-        helper.index("async function openSelfUpdateTarget") :
+    helper = js[
+        js.index("async function invokeBridgeNavigation") : js.index("function toast")
     ]
+    self_update = helper[helper.index("async function openSelfUpdateTarget") :]
 
     assert 'typeof bridge[method] !== "function"' in helper
     assert "await bridge[method](target)" in helper
     assert 'invokeBridgeNavigation("navigate", target)' in helper
-    assert 'new URL(`/#${target}`, window.location.origin).href' in helper
+    assert "new URL(`/#${target}`, window.location.origin).href" in helper
     assert 'window.open(targetUrl, "_top")' in helper
     assert 'target.startsWith("/")' in helper
     assert 'target.startsWith("//")' in helper
@@ -354,7 +380,9 @@ def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
 def test_restricted_host_reveals_and_copies_update_page_url_with_prompt_fallback():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
-    fallback = js[js.index("function revealInstalledPageUrl") : js.index("function toast")]
+    fallback = js[
+        js.index("function revealInstalledPageUrl") : js.index("function toast")
+    ]
 
     assert 'link.closest(".self-update-notice")' in fallback
     assert 'fallback.className = "installed-page-url-fallback"' in fallback
@@ -378,7 +406,7 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     assert 'id="recommendation-status"' in html
     assert "const confirmed = !requiresConfirmation" in js
     assert "await confirmRecommendationAction(action, pluginName)" in js
-    assert 'input[role=\'switch\']' in js
+    assert "input[role='switch']" in js
     assert "item.disabled = true" in js
     assert 'setRecommendationBusy(force ? "forceUpdate" : action, pluginName)' in js
     assert "clearRecommendationBusy()" in js
@@ -418,20 +446,25 @@ def test_daily_rule_master_gate_uses_safe_save_order_and_refreshes_all_sources()
     assert 'id="rule-auto-update-enabled"' in html
     assert 'role="switch"' in html
     assert "Boolean(data.global?.auto_update_enabled)" in js
-    save_rule = js[js.index("async function saveRule") : js.index("async function saveConfig")]
+    save_rule = js[
+        js.index("async function saveRule") : js.index("async function saveConfig")
+    ]
     disable_branch = save_rule[
         save_rule.index("if (!autoUpdateEnabled)") : save_rule.index("} else {")
     ]
     enable_branch = save_rule[
-        save_rule.index("} else {") : save_rule.index("toast(t(\"ruleSaved\"))")
+        save_rule.index("} else {") : save_rule.index('toast(t("ruleSaved"))')
     ]
-    assert disable_branch.index('apiPost("config", { auto_update_enabled: false })') < disable_branch.index(
-        'apiPost("rule", payload)'
-    )
+    assert disable_branch.index(
+        'apiPost("config", { auto_update_enabled: false })'
+    ) < disable_branch.index('apiPost("rule", payload)')
     assert enable_branch.index('apiPost("rule", payload)') < enable_branch.index(
         'apiPost("config", { auto_update_enabled: true })'
     )
-    assert 'apiPost("config", { auto_update_enabled: false })' in save_rule[save_rule.index("catch (error)") :]
+    assert (
+        'apiPost("config", { auto_update_enabled: false })'
+        in save_rule[save_rule.index("catch (error)") :]
+    )
     assert "Promise.allSettled([loadConfig(), loadRule(), loadOverview()])" in save_rule
 
 
@@ -448,7 +481,7 @@ def test_rule_policy_and_failure_options_have_bilingual_labels_and_keep_values()
     }
     for value, label_key in expected.items():
         assert f'value="{value}" data-i18n="{label_key}"' in html
-        assert f'{label_key}:' in js
+        assert f"{label_key}:" in js
         assert value in js
 
 
@@ -472,7 +505,9 @@ def test_rate_limit_notice_shows_retry_time_and_token_hint():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert 'id="rate-limit-notice"' in html
-    assert 'function renderRateLimitNotice(rateLimit, nodeId = "rate-limit-notice")' in js
+    assert (
+        'function renderRateLimitNotice(rateLimit, nodeId = "rate-limit-notice")' in js
+    )
     assert "renderRateLimitNotice(data.rate_limit)" in js
     assert "rateLimit?.limited" in js
     # 限流提示必须同时给出可重试时间、剩余额度与提额入口。
@@ -499,14 +534,23 @@ def test_mirror_tab_lists_candidates_with_latency_and_custom_entry():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
-    for element_id in ("mirrors", "mirror-list", "mirror-benchmark", "mirror-add-form", "mirror-add-input", "mirror-probe"):
+    for element_id in (
+        "mirrors",
+        "mirror-list",
+        "mirror-benchmark",
+        "mirror-add-form",
+        "mirror-add-input",
+        "mirror-probe",
+    ):
         assert f'id="{element_id}"' in html
     assert "加速站只做前缀代理" in html
     assert 'data-i18n-placeholder="mirrorAddPlaceholder"' in html
     assert 'apiGet("mirrors")' in js
     assert 'apiPost("mirrors/benchmark", {})' in js
     assert 'apiPost("config", { github_mirror: mirror })' in js
-    assert 'apiPost("config", { github_mirror_candidates: candidates.join("\\n") })' in js
+    assert (
+        'apiPost("config", { github_mirror_candidates: candidates.join("\\n") })' in js
+    )
     # 单选 + 延迟展示 + 自定义增删必须同时存在。
     assert 'type="radio" name="mirror-choice"' in js
     assert "function mirrorLatencyLabel(url)" in js
@@ -521,7 +565,11 @@ def test_mirror_tab_lists_candidates_with_latency_and_custom_entry():
 
 def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    mirror_block = js[js.index("function mirrorRow(url, selected, builtin)") : js.index("async function loadMirrors()")]
+    mirror_block = js[
+        js.index("function mirrorRow(url, selected, builtin)") : js.index(
+            "async function loadMirrors()"
+        )
+    ]
     # 所有插值都必须过 escapeHtml，绝不能把加速站 URL 直接拼进 innerHTML。
     for fragment in (
         "${escapeHtml(url)}",
@@ -534,10 +582,29 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     zh_block = js[js.index('"zh-CN": {') : js.index('"en-US": {')]
     en_block = js[js.index('"en-US": {') :]
     mirror_keys = (
-        "mirrors:", "mirrorsTitle:", "mirrorsHint:", "mirrorDirect:", "mirrorBuiltin:", "mirrorCustom:",
-        "mirrorBenchmark:", "mirrorBenchmarking:", "mirrorBenchmarkDone:", "mirrorLatency:", "mirrorUnreachable:",
-        "mirrorUntested:", "mirrorApply:", "mirrorApplied:", "mirrorAddTitle:", "mirrorAddPlaceholder:", "mirrorAdd:",
-        "mirrorAdded:", "mirrorInvalid:", "mirrorDuplicate:", "mirrorRemove:", "mirrorRemoved:", "mirrorProbeHint:",
+        "mirrors:",
+        "mirrorsTitle:",
+        "mirrorsHint:",
+        "mirrorDirect:",
+        "mirrorBuiltin:",
+        "mirrorCustom:",
+        "mirrorBenchmark:",
+        "mirrorBenchmarking:",
+        "mirrorBenchmarkDone:",
+        "mirrorLatency:",
+        "mirrorUnreachable:",
+        "mirrorUntested:",
+        "mirrorApply:",
+        "mirrorApplied:",
+        "mirrorAddTitle:",
+        "mirrorAddPlaceholder:",
+        "mirrorAdd:",
+        "mirrorAdded:",
+        "mirrorInvalid:",
+        "mirrorDuplicate:",
+        "mirrorRemove:",
+        "mirrorRemoved:",
+        "mirrorProbeHint:",
     )
     for key in mirror_keys:
         assert key in zh_block, key
@@ -547,11 +614,16 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     # 测速期间必须禁用按钮并展示进行中文案，避免重复并发测速。
     assert "if (state.mirrorBusy) return;" in js
     assert 'state.mirrorBusy ? t("mirrorBenchmarking") : t("mirrorBenchmark")' in js
-    assert 'document.getElementById("mirror-benchmark").addEventListener("click", benchmarkMirrors)' in js
+    assert (
+        'document.getElementById("mirror-benchmark").addEventListener("click", benchmarkMirrors)'
+        in js
+    )
     # 自定义输入框的占位文案同样跟随语言切换。
     assert "[data-i18n-placeholder]" in js
     assert "t(node.dataset.i18nPlaceholder)" in js
-    resilient_refresh = js[js.index("const sectionLoaders") : js.index("function showStartupError")]
+    resilient_refresh = js[
+        js.index("const sectionLoaders") : js.index("function showStartupError")
+    ]
     assert "load: loadMirrors" in resilient_refresh
     assert "Promise.allSettled" in resilient_refresh
 
@@ -584,7 +656,9 @@ def test_manager_page_has_resilient_accessible_loading_and_bounded_logs():
 
 def test_recommendation_version_error_has_no_empty_separator():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    block = js[js.index("function versionError") : js.index("function renderRateLimitNotice")]
+    block = js[
+        js.index("function versionError") : js.index("function renderRateLimitNotice")
+    ]
     assert '[reason, ...details].filter(Boolean).join(" · ")' in block
     assert '${escapeHtml(reason)} · ${escapeHtml(details.join(" · "))}' not in block
 
@@ -626,3 +700,17 @@ def test_manager_page_exposes_dashboard_protected_admin_management():
     assert 'apiPost("webui/admins/create"' in js
     assert 'apiPost("webui/admins/update"' in js
     assert 'apiPost("webui/start"' in js
+    assert 'id="webui-address"' in html
+    assert 'window.open("about:blank", "_blank")' in js
+    assert "renderWebUiAddress(data)" in js
+
+
+def test_manager_page_exposes_copy_and_direct_open_webui_actions():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert 'id="copy-webui"' in html
+    assert 'id="open-webui-direct"' in html
+    assert 'data-i18n="copyWebUiLink"' in html
+    assert 'data-i18n-aria-label="webuiActionsLabel"' in html
+    assert ".webui-address-row" in css

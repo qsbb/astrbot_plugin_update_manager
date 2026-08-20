@@ -2,7 +2,7 @@ const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
     refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
-    openWebUi: "打开独立 WebUI", startupFailed: "页面启动失败", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
+    openWebUi: "打开独立 WebUI", copyWebUiLink: "复制链接", copiedWebUiLink: "WebUI 链接已复制", copyWebUiPrompt: "请复制独立 WebUI 地址", webuiActionsLabel: "独立 WebUI 操作", startupFailed: "页面启动失败", webuiAddressLoading: "独立 WebUI 地址加载中…", webuiAddressUnavailable: "独立 WebUI 地址不可用", webuiAddressRunning: "运行中", webuiAddressStopped: "未启动，点击按钮启动", webuiAddressDisabled: "已关闭，请在配置中启用", webuiAddressLabel: "地址", portLabel: "端口", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
     retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
@@ -28,7 +28,7 @@ const messages = {
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
     refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
-    openWebUi: "Open standalone WebUI", startupFailed: "Page startup failed", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
+    openWebUi: "Open standalone WebUI", copyWebUiLink: "Copy link", copiedWebUiLink: "WebUI link copied", copyWebUiPrompt: "Copy the standalone WebUI address", webuiActionsLabel: "Standalone WebUI actions", startupFailed: "Page startup failed", webuiAddressLoading: "Loading standalone WebUI address…", webuiAddressUnavailable: "Standalone WebUI address unavailable", webuiAddressRunning: "Running", webuiAddressStopped: "Stopped; click the button to start", webuiAddressDisabled: "Disabled; enable it in configuration", webuiAddressLabel: "Address", portLabel: "Port", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
     retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
@@ -311,17 +311,71 @@ async function loadConfig() {
   const data = await apiGet("config");
   state.config = data;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  await loadWebUiAddress();
   try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("config", error); }
 }
 
+function renderWebUiAddress(data) {
+  const node = document.getElementById("webui-address");
+  if (!node) return;
+  if (!data?.url) {
+    node.textContent = t("webuiAddressUnavailable");
+    return;
+  }
+  const stateText = data.ready
+    ? t("webuiAddressRunning")
+    : data.configured_enabled === false
+      ? t("webuiAddressDisabled")
+      : t("webuiAddressStopped");
+  node.textContent = `${t("webuiAddressLabel")}: ${data.url} · ${t("portLabel")}: ${data.port} · ${stateText}`;
+  node.title = data.url;
+}
+
+async function loadWebUiAddress() {
+  try {
+    renderWebUiAddress(await apiGet("webui/url"));
+  } catch (error) {
+    renderWebUiAddress(null);
+    console.warn("Unable to read standalone WebUI address", error);
+  }
+}
+
 async function openStandaloneWebUi() {
+  // Reserve the popup synchronously while the click still counts as a user gesture.
+  const popup = window.open("about:blank", "_blank");
   try {
     let data = await apiGet("webui/url");
     if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
     if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
-    const target = window.open(data.url, "_blank", "noopener,noreferrer");
-    if (!target) window.prompt("请复制独立 WebUI 地址", data.url);
+    renderWebUiAddress(data);
+    if (popup && !popup.closed) {
+      try { popup.opener = null; } catch (_) { /* Optional hardening. */ }
+      popup.location.replace(data.url);
+    } else {
+      if (!await openExternalUrl(data.url)) window.prompt("请复制独立 WebUI 地址", data.url);
+    }
   } catch (error) {
+    if (popup && !popup.closed) popup.close();
+    toast(`${t("operationFailed")}: ${error.message}`, true);
+  }
+}
+
+async function copyStandaloneWebUiLink() {
+  let data;
+  try {
+    data = await apiGet("webui/url");
+    if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
+    if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
+    renderWebUiAddress(data);
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("Clipboard API unavailable");
+    await navigator.clipboard.writeText(data.url);
+    toast(t("copiedWebUiLink"));
+  } catch (error) {
+    if (data?.url) {
+      renderWebUiAddress(data);
+      window.prompt(t("copyWebUiPrompt"), data.url);
+      return;
+    }
     toast(`${t("operationFailed")}: ${error.message}`, true);
   }
 }
@@ -1378,6 +1432,8 @@ function bindEvents() {
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
   document.getElementById("open-webui")?.addEventListener("click", openStandaloneWebUi);
+  document.getElementById("open-webui-direct")?.addEventListener("click", openStandaloneWebUi);
+  document.getElementById("copy-webui")?.addEventListener("click", copyStandaloneWebUiLink);
   document.getElementById("open-webui-config")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("webui-admins-refresh")?.addEventListener("click", () => loadWebUiAdmins().catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true)));
   document.getElementById("webui-admin-list")?.addEventListener("click", (event) => {
