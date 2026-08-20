@@ -707,7 +707,6 @@ def test_manager_page_exposes_dashboard_protected_admin_management():
 
 def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
-    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert 'id="copy-webui"' in html
     assert 'id="open-webui-direct"' in html
