@@ -50,6 +50,18 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert "waitForAstrBotBridge" in js
 
 
+def test_standalone_webui_has_clickable_views_and_model_routing():
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+    for view in ("modules", "diagnostics", "updates", "settings", "security"):
+        assert f'"{view}"' in js
+    assert 'document.querySelectorAll("[data-view]")' in js
+    assert 'get("model-routing")' in js
+    assert 'post("diagnostics", {})' in js
+    assert "module-button" in js and ".module-button" in css
+    assert "detail-grid" in js and ".detail-grid" in css
+
+
 def test_manager_page_has_incremental_series_diagnostic_console():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
@@ -692,6 +704,17 @@ def test_control_center_has_login_only_and_trusted_module_ui():
     assert "@media (min-width:721px){.mobile-nav{display:none!important}}" in css
 
 
+def test_control_center_export_uses_document_download_lifecycle():
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    export_block = js[
+        js.index("function exportSummary") : js.index("async function loadDashboard")
+    ]
+    assert "document.body.appendChild(link)" in export_block
+    assert "link.click()" in export_block
+    assert "link.remove()" in export_block
+    assert "URL.revokeObjectURL(url)" in export_block
+
+
 def test_manager_page_exposes_dashboard_protected_admin_management():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
@@ -713,3 +736,12 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     assert 'data-i18n="copyWebUiLink"' in html
     assert 'data-i18n-aria-label="webuiActionsLabel"' in html
     assert ".webui-address-row" in css
+
+
+def test_manager_page_exposes_unified_model_routing_fields():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'id="config-fields"' in html
+    assert 'field.type === "model_routing"' in js
+    assert "data-model-kind" in js
+    assert "插件显式配置优先" in js

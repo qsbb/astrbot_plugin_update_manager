@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,12 @@ from .core.diagnostics import (
 )
 from .core.health import HealthChecker
 from .core.mirrors import resolve_mirror
+from .core.model_router import (
+    MODEL_KINDS,
+    contract as model_router_contract,
+    normalize_routes,
+    resolve_route,
+)
 from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
 from .core.planner import PlanError, UpdatePlanner
 from .core.request_context import (
@@ -46,6 +53,7 @@ from .core.request_context import (
     set_flag,
 )
 from .core.scheduler import RuleConflictError, ScheduleService
+from .core.series_control import SeriesControlGateway
 from .core.transaction import PluginTransaction
 from .core.webui_auth import WebUIAuth
 from .core.webui_server import WebUIServer
@@ -59,7 +67,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.12.2"
+__version__ = "0.13.1"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -90,6 +98,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         if isinstance(saved_overrides, dict):
             self._config_overrides = saved_overrides
         self.webui_auth = WebUIAuth(self.store)
+        self.adapter = AstrBotAdapter(context)
+        self.series_control = SeriesControlGateway(
+            self.adapter,
+            self.store,
+            diagnostic=diagnostic_event,
+        )
         self.webui_enabled = self._get_bool("webui_enabled", True)
         self.webui_server = self._new_webui_server() if self.webui_enabled else None
         self.enabled = self._get_bool("enabled", True)
@@ -99,7 +113,6 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         plugin_root = Path(
             str(self._get("plugin_root", "")) or Path(__file__).resolve().parent.parent
         )
-        self.adapter = AstrBotAdapter(context)
         self.catalog = PluginCatalog(self.adapter)
         self.planner = UpdatePlanner(
             ttl_seconds=int(self._get("plan_ttl_seconds", 900))
@@ -268,6 +281,75 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "astrbot_log_propagation": False,
         }
 
+    def series_model_router_contract(self) -> dict[str, object]:
+        """Declare the optional, read-only unified model routing contract."""
+        return model_router_contract()
+
+    def _astrbot_provider_for_kind(self, kind: str) -> Any:
+        """Best-effort native provider discovery without invoking a provider."""
+        context = self.context
+        if kind == "conversation":
+            for name in ("get_using_provider", "get_default_provider"):
+                getter = getattr(context, name, None)
+                if callable(getter):
+                    try:
+                        value = getter()
+                        if value is not None:
+                            return value
+                    except Exception:
+                        continue
+            return None
+        manager = getattr(context, "provider_manager", None)
+        aliases = {
+            "embedding": ("embedding_provider_insts", "embed_provider_insts"),
+            "vision": ("provider_insts",),
+            "stt": ("stt_provider_insts",),
+            "tts": ("tts_provider_insts",),
+        }
+        for name in aliases.get(kind, ()):
+            values = getattr(manager, name, None)
+            if isinstance(values, Mapping):
+                return next(iter(values.values()), None)
+            if isinstance(values, (list, tuple)):
+                return next(iter(values), None)
+        return None
+
+    def _provider_is_available(self, provider_id: str) -> bool:
+        provider_id = str(provider_id or "").strip()
+        if not provider_id:
+            return False
+        getter = getattr(self.context, "get_provider_by_id", None)
+        if callable(getter):
+            try:
+                if getter(provider_id) is not None:
+                    return True
+            except Exception:
+                pass
+        manager = getattr(self.context, "provider_manager", None)
+        providers = getattr(manager, "providers", None) or ()
+        return any(str(getattr(item, "id", "") or "") == provider_id for item in providers)
+
+    def resolve_model_route(
+        self, kind: str, *, plugin_override: Any = None
+    ) -> dict[str, Any]:
+        """Resolve a route for an own plugin with plugin -> core -> AstrBot fallback."""
+        configured = normalize_routes(self._get("model_routing", {}))
+        return resolve_route(
+            kind,
+            plugin_override=plugin_override,
+            core_config=configured,
+            astrbot_provider=self._astrbot_provider_for_kind,
+            provider_exists=self._provider_is_available,
+        ).to_public_dict()
+
+    def model_routes_snapshot(self) -> dict[str, Any]:
+        return {
+            "contract": model_router_contract(),
+            "routes": {
+                kind: self.resolve_model_route(kind) for kind in MODEL_KINDS
+            },
+        }
+
     def diagnostic_events(self, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:
         return read_diagnostic_events(after_seq=after_seq, limit=limit)
 
@@ -341,6 +423,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             public_url=str(self._get("webui_public_url", "")),
             modules=self._webui_modules_payload,
             diagnostics=self._webui_diagnostics_payload,
+            model_routing=self.model_routes_snapshot,
+            series_control=self.series_control,
         )
 
     async def _start_webui_from_page(self, request_host: str = "") -> WebUIServer:

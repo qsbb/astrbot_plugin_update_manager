@@ -300,6 +300,11 @@ function makeField(key, field, value) {
     return `<label><span>${label}</span><input name="${key}" type="password" autocomplete="new-password" placeholder="${configured ? t("configured") : t("notConfigured")}" /><small>${t("writeOnly")}</small></label>`;
   }
   if (field.type === "bool") return `<label class="switch"><input name="${key}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
+  if (field.type === "model_routing") {
+    const routes = value && typeof value === "object" ? value : {};
+    const kinds = Object.entries(field.kinds || {});
+    return `<fieldset class="model-routing-field"><legend>${label}</legend><p class="field-hint">插件显式配置优先，其次使用核，最后回退 AstrBot 原生配置。</p>${kinds.map(([kind, kindLabel]) => { const route = routes[kind] || {}; return `<div class="model-route-row"><strong>${escapeHtml(kindLabel)}</strong><input data-model-kind="${escapeHtml(kind)}" data-model-field="provider_id" placeholder="Provider ID" value="${escapeHtml(route.provider_id || "")}"/><input data-model-kind="${escapeHtml(kind)}" data-model-field="model" placeholder="模型名" value="${escapeHtml(route.model || "")}"/><input data-model-kind="${escapeHtml(kind)}" data-model-field="voice" placeholder="音色（可选）" value="${escapeHtml(route.voice || "")}"/></div>`; }).join("")}</fieldset>`;
+  }
   if (field.options) return `<label><span>${label}</span><select name="${key}">${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
   const type = field.type === "int" || field.type === "float" ? "number" : "text";
   const step = field.type === "float" ? "any" : "1";
@@ -507,6 +512,12 @@ async function saveConfig(event) {
   const payload = {};
   for (const [key, field] of Object.entries(state.config?.schema || {})) {
     const input = event.currentTarget.elements.namedItem(key);
+    if (field.type === "model_routing") {
+      const routes = {};
+      form.querySelectorAll(`[data-model-kind][data-model-field]`).forEach((node) => { const kind = node.dataset.modelKind; const fieldName = node.dataset.modelField; const text = String(node.value || "").trim(); if (text) (routes[kind] ||= {})[fieldName] = text; });
+      payload[key] = routes;
+      continue;
+    }
     if (!input || input.disabled) continue;
     if (field.write_only && !input.value) continue;
     if (field.type === "bool") payload[key] = input.checked;

@@ -26,6 +26,7 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/overview", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/model-routing", ("GET",)),
         (f"/{module.PLUGIN_NAME}/mirrors", ("GET",)),
         (f"/{module.PLUGIN_NAME}/mirrors/benchmark", ("POST",)),
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
@@ -71,6 +72,77 @@ def test_pages_config_never_returns_secret(monkeypatch, tmp_path):
     assert payload["config"]["proxy"] == "http://proxy"
 
 
+def test_model_routing_public_config_drops_unknown_nested_fields(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path),
+        {
+            "model_routing": {
+                "conversation": {
+                    "provider_id": "safe-ref",
+                    "api_key": "must-not-escape",
+                }
+            }
+        },
+    )
+    payload = unwrap(asyncio.run(plugin._pages_get_config()))
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "must-not-escape" not in serialized
+
+
+def test_model_router_contract_uses_core_then_astrbot_fallback(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path),
+        {
+            "model_routing": {
+                "conversation": {
+                    "provider_id": "core-chat",
+                    "model": "core-model",
+                }
+            }
+        },
+    )
+    plugin._astrbot_provider_for_kind = lambda kind: {
+        "provider_id": "native-provider",
+        "model": "native-model",
+    }
+    core = plugin.resolve_model_route("conversation")
+    native = plugin.resolve_model_route("embedding")
+    local = plugin.resolve_model_route(
+        "conversation", plugin_override={"provider_id": "local-provider"}
+    )
+    assert core["source"] == "core"
+    assert core["provider_id"] == "core-chat"
+    assert native["source"] == "astrbot"
+    assert local["source"] == "plugin"
+
+
+def test_model_routing_page_returns_contract_without_secrets(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(
+        context(tmp_path),
+        {"model_routing": {"conversation": {"provider_id": "safe-ref"}}},
+    )
+    payload = unwrap(asyncio.run(plugin._pages_model_routing()))
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["success"] is True
+    assert payload["contract"]["name"] == "series.model_router@1.0"
+    assert payload["routes"]["conversation"]["source"] == "core"
+    assert "api_key" not in serialized.lower()
+
+
+def test_model_router_rejects_unknown_fields(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin._config = {}
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(pages_api, "request", None)
+    assert plugin._coerce_page_value(
+        "model_routing", {"conversation": {"provider_id": "x"}}, {"type": "model_routing"}
+    )["conversation"]["provider_id"] == "x"
+
+
 def test_apply_page_runtime_config_clears_optional_network_values(
     monkeypatch, tmp_path
 ):
@@ -106,7 +178,7 @@ def test_pages_request_json_prefers_astrbot_web_contract(monkeypatch, tmp_path):
     assert calls == [{}]
 
 
-def test_webui_modules_requires_session_and_filters_to_owned_contracts(
+def test_webui_modules_requires_session_and_filters_to_trusted_registry(
     monkeypatch, tmp_path
 ):
     module = import_main(monkeypatch)
@@ -147,7 +219,16 @@ def test_webui_modules_requires_session_and_filters_to_owned_contracts(
 
     class Provider:
         def diagnostic_log_contract(self):
-            return {"name": "series.diagnostics", "version": "1.0"}
+            return {
+                "name": "series.diagnostics",
+                "version": "1.0",
+                "series_id": "ningxin_suxi",
+                "plugin_id": "astrbot_plugin_update_manager",
+                "plugin_name": "未来模块",
+                "capabilities": ("read_events", "clear_events"),
+                "storage": "memory_only",
+                "astrbot_log_propagation": False,
+            }
 
     async def get_instance(plugin_id):
         return Provider() if plugin_id != "astrbot_plugin_third_party" else None
@@ -158,9 +239,8 @@ def test_webui_modules_requires_session_and_filters_to_owned_contracts(
     payload = unwrap(asyncio.run(plugin._pages_webui_modules()))
     assert {item["plugin_id"] for item in payload["modules"]} == {
         "astrbot_plugin_update_manager",
-        "astrbot_plugin_future_module",
     }
-    assert all(item["contracts"] == 1 for item in payload["modules"])
+    assert payload["modules"][0]["contracts"] == 1
     assert all(
         item["contract_source"] == "self_declared" for item in payload["modules"]
     )
@@ -815,7 +895,7 @@ def test_series_diagnostics_clear_validates_scope_and_degrades_missing(
     async def clear_untrusted():
         return {
             "confirm": True,
-            "plugin_ids": ["astrbot_plugin_orchestration_hub"],
+                "plugin_ids": ["astrbot_plugin_third_party"],
         }
 
     monkeypatch.setattr(plugin, "_request_json", clear_untrusted)
@@ -1644,6 +1724,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         "声",
         "临",
         "核",
+        "枢",
     ]
     assert all(
         item["repo_url"].startswith("https://github.com/qsbb/astrbot_plugin_")
@@ -1675,7 +1756,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     assert payload["items"][0]["description_zh"] == (
         "主动学习对话知识，支持检索、验证与持续积累。"
     )
-    core = payload["items"][-1]
+    core = next(item for item in payload["items"] if item["plugin_id"] == module.PLUGIN_NAME)
     assert core["installed"] is True
     assert core["actions"]["update"] is False
     assert core["actions"]["disable"] is False
@@ -1871,9 +1952,9 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert len(payload["items"]) == 8
+    assert len(payload["items"]) == 9
     assert peak > 1
-    assert force_values == [True] * 8
+    assert force_values == [True] * 9
     failed = next(
         item
         for item in payload["items"]
@@ -1906,7 +1987,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
     monkeypatch.setattr(plugin, "_request_json", cached_payload)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert force_values == [False] * 8
+    assert force_values == [False] * 9
 
     # 缺省仍是手动强制刷新语义。
     force_values.clear()
@@ -1916,7 +1997,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
 
     monkeypatch.setattr(plugin, "_request_json", empty_payload)
     assert unwrap(asyncio.run(plugin._pages_check_recommendations()))["success"] is True
-    assert force_values == [True] * 8
+    assert force_values == [True] * 9
 
     # 非布尔值必须拒绝，不能被静默当成真值。
     force_values.clear()

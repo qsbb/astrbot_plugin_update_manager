@@ -349,7 +349,7 @@ def test_recommendation_check_respects_configured_concurrency_limit(
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
 
     assert payload["success"] is True
-    assert len(payload["items"]) == 8
+    assert len(payload["items"]) == 9
     assert 1 < peak <= 2
 
 
@@ -375,8 +375,8 @@ def test_recommendation_check_defaults_to_full_parallel_for_trusted_series(
     elapsed = time.monotonic() - started
 
     assert payload["success"] is True
-    assert len(payload["items"]) == 8
-    assert peak == 8
+    assert len(payload["items"]) == 9
+    assert peak == 9
     assert elapsed < 0.02 * 8
 
 

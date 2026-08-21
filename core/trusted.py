@@ -75,6 +75,13 @@ TRUSTED_SERIES = (
         "https://github.com/qsbb/astrbot_plugin_update_manager",
         "管理可信插件的安全更新、回滚与自动化调度。",
     ),
+    TrustedPlugin(
+        "枢",
+        "astrbot_plugin_orchestration_hub",
+        "凝心溯溪-枢",
+        "https://github.com/qsbb/astrbot_plugin_orchestration_hub",
+        "提供系列服务注册、契约解析与跨插件能力编排。",
+    ),
 )
 TRUSTED_BY_ID = {
     identity: item

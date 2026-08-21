@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -28,6 +29,9 @@ class WebUIServer:
         public_url: str = "",
         modules: Callable[[], Awaitable[dict[str, Any]]],
         diagnostics: Callable[[], Awaitable[dict[str, Any]]],
+        model_routing: Callable[[], dict[str, Any] | Awaitable[dict[str, Any]]]
+        | None = None,
+        series_control: Any | None = None,
     ) -> None:
         self.auth = auth
         self.static_root = static_root.resolve()
@@ -48,6 +52,8 @@ class WebUIServer:
         )
         self.modules = modules
         self.diagnostics = diagnostics
+        self.model_routing = model_routing
+        self.series_control = series_control
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._started = False
@@ -67,15 +73,11 @@ class WebUIServer:
             return self.public_url
         display_host = (host or "").strip()
         if not display_host:
-            display_host = (
-                "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
-            )
+            display_host = "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
         parsed = urlsplit(f"//{display_host}")
         hostname = parsed.hostname
         if not hostname:
-            hostname = (
-                "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
-            )
+            hostname = "127.0.0.1" if self.host in {"0.0.0.0", "::"} else self.host
         rendered_host = (
             f"[{hostname}]"
             if ":" in hostname and not hostname.startswith("[")
@@ -95,6 +97,15 @@ class WebUIServer:
             app.router.add_get("/api/session", self._session)
             app.router.add_get("/api/modules", self._modules)
             app.router.add_post("/api/diagnostics", self._diagnostics)
+            app.router.add_get("/api/model-routing", self._model_routing)
+            app.router.add_get("/api/series/control", self._series_overview)
+            app.router.add_post("/api/series/control/mode", self._series_mode)
+            app.router.add_get("/api/series/{plugin_id}/control/schema", self._series_schema)
+            app.router.add_get("/api/series/{plugin_id}/control/snapshot", self._series_snapshot)
+            app.router.add_post("/api/series/{plugin_id}/control/validate", self._series_validate)
+            app.router.add_post("/api/series/{plugin_id}/control/apply", self._series_apply)
+            app.router.add_post("/api/series/{plugin_id}/control/reset", self._series_reset)
+            app.router.add_get("/api/series/{plugin_id}/control/diagnostics", self._series_diagnostics)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
@@ -204,3 +215,102 @@ class WebUIServer:
         if self._session_value(request) is None:
             return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
         return self._json({"success": True, **await self.diagnostics()})
+
+    async def _model_routing(self, request: web.Request) -> web.Response:
+        if self._session_value(request) is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.model_routing is None:
+            return self._json(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, 503
+            )
+        try:
+            payload = self.model_routing()
+            if inspect.isawaitable(payload):
+                payload = await payload
+        except Exception:
+            return self._json(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, 503
+            )
+        if not isinstance(payload, dict):
+            return self._json(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, 503
+            )
+        return self._json({"success": True, **payload})
+
+    def _series_role(self, request: web.Request) -> str | None:
+        session = self._session_value(request)
+        return None if session is None else str(session.role)
+
+    async def _series_call(self, request: web.Request, method: str, *args: Any) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.series_control is None:
+            return self._json({"success": False, "error": "SERIES_CONTROL_UNAVAILABLE"}, 503)
+        try:
+            function = getattr(self.series_control, method)
+            value = function(*args, role=role) if method in {"apply", "reset", "set_mode"} else function(*args)
+            if inspect.isawaitable(value):
+                value = await value
+            return self._json(value if isinstance(value, dict) else {"success": True, "data": value})
+        except PermissionError as exc:
+            return self._json({"success": False, "error": str(exc)}, 403)
+        except (LookupError, ValueError, RuntimeError, TypeError) as exc:
+            error = str(exc) or "SERIES_CONTROL_FAILED"
+            status = 409 if error == "REVISION_CONFLICT" else 400
+            if error in {"PLUGIN_NOT_LOADED", "CONTRACT_UNAVAILABLE", "CONTRACT_VERSION_UNSUPPORTED"}:
+                status = 503
+            return self._json({"success": False, "error": error}, status)
+
+    async def _series_overview(self, request: web.Request) -> web.Response:
+        if self._session_role(request) is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.series_control is None:
+            return self._json({"success": False, "error": "SERIES_CONTROL_UNAVAILABLE"}, 503)
+        return self._json({"success": True, **await self.series_control.overview()})
+
+    def _session_role(self, request: web.Request) -> str | None:
+        session = self._session_value(request)
+        return None if session is None else str(session.role)
+
+    async def _series_mode(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        if body is None or not isinstance(body.get("mode"), str):
+            return self._json({"success": False, "error": "INVALID_JSON_PAYLOAD"}, 400)
+        return await self._series_call(request, "set_mode", body["mode"])
+
+    async def _series_schema(self, request: web.Request) -> web.Response:
+        return await self._series_call(request, "schema", request.match_info["plugin_id"])
+
+    async def _series_snapshot(self, request: web.Request) -> web.Response:
+        return await self._series_call(request, "snapshot", request.match_info["plugin_id"])
+
+    async def _series_diagnostics(self, request: web.Request) -> web.Response:
+        return await self._series_call(request, "diagnostics", request.match_info["plugin_id"])
+
+    async def _series_validate(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        if body is None or not isinstance(body.get("patch"), dict):
+            return self._json({"success": False, "error": "INVALID_JSON_PAYLOAD"}, 400)
+        try:
+            revision = int(body.get("expected_revision"))
+        except (TypeError, ValueError):
+            return self._json({"success": False, "error": "INVALID_REVISION"}, 400)
+        return await self._series_call(request, "validate", request.match_info["plugin_id"], body["patch"], revision)
+
+    async def _series_apply(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        if body is None or not isinstance(body.get("patch"), dict):
+            return self._json({"success": False, "error": "INVALID_JSON_PAYLOAD"}, 400)
+        try:
+            revision = int(body.get("expected_revision"))
+        except (TypeError, ValueError):
+            return self._json({"success": False, "error": "INVALID_REVISION"}, 400)
+        return await self._series_call(request, "apply", request.match_info["plugin_id"], body["patch"], revision)
+
+    async def _series_reset(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        fields = body.get("fields") if isinstance(body, dict) else None
+        if fields is not None and (not isinstance(fields, list) or not all(isinstance(x, str) for x in fields)):
+            return self._json({"success": False, "error": "INVALID_FIELDS"}, 400)
+        return await self._series_call(request, "reset", request.match_info["plugin_id"], fields)

@@ -27,6 +27,9 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
     async def diagnostics():
         return {"providers": []}
 
+    def model_routing():
+        return {"contract": {"name": "series.model_router@1.0"}, "routes": {}}
+
     server = WebUIServer(
         auth,
         static_root=tmp_path,
@@ -34,6 +37,7 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
         port=free_port(),
         modules=modules,
         diagnostics=diagnostics,
+        model_routing=model_routing,
     )
 
     async def exercise():
@@ -47,6 +51,8 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
                 assert response.status == 200
             async with client.get(server.url + "/api/modules") as response:
                 assert response.status == 401
+            async with client.get(server.url + "/api/model-routing") as response:
+                assert response.status == 401
             async with client.post(
                 server.url + "/api/login",
                 json={"username": "owner", "password": "owner-pass"},
@@ -55,6 +61,11 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
             async with client.get(server.url + "/api/modules") as response:
                 assert response.status == 200
                 assert (await response.json())["modules"][0]["plugin_id"] == "demo"
+            async with client.get(server.url + "/api/model-routing") as response:
+                assert response.status == 200
+                assert (await response.json())["contract"][
+                    "name"
+                ] == "series.model_router@1.0"
         await server.stop()
 
     asyncio.run(exercise())

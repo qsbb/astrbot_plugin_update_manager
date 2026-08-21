@@ -50,6 +50,7 @@ class DiagnosticsTests(unittest.TestCase):
                 ("astrbot_plugin_voice_hub", "声"),
                 ("astrbot_plugin_embodiment_bridge", "临"),
                 ("astrbot_plugin_update_manager", "核"),
+                ("astrbot_plugin_orchestration_hub", "枢"),
             ),
         )
 

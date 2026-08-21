@@ -40,6 +40,7 @@ from .core.mirrors import (
     parse_mirror_candidates,
     resolve_mirror,
 )
+from .core.model_router import normalize_routes
 from .core.models import UpdateRule
 from .core.scheduler import RuleConflictError, RuleValidationError
 from .core.trusted import (
@@ -186,6 +187,7 @@ class PagesAPIMixin:
             ("overview", self._pages_overview, ["GET"], "更新管理器总览"),
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
+            ("model-routing", self._pages_model_routing, ["GET"], "读取统一模型路由"),
             ("mirrors", self._pages_mirrors, ["GET"], "查看 GitHub 加速站候选"),
             (
                 "mirrors/benchmark",
@@ -350,6 +352,8 @@ class PagesAPIMixin:
         for key, field in self._schema().items():
             if key in SENSITIVE_KEYS:
                 public[key] = {"configured": bool(self._get(key, ""))}
+            elif field.get("type") == "model_routing":
+                public[key] = normalize_routes(self._get(key, {}))
             else:
                 public[key] = self._get(key, field.get("default"))
         return public
@@ -421,6 +425,14 @@ class PagesAPIMixin:
         return json_response(
             {"success": True, "config": self._public_config(), "schema": schema}
         )
+
+    async def _pages_model_routing(self):
+        resolver = getattr(self, "model_routes_snapshot", None)
+        if not callable(resolver):
+            return json_response(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
+            )
+        return json_response({"success": True, **resolver()})
 
     @staticmethod
     def _diagnostic_text(value: Any, limit: int | None = None) -> str:
@@ -1089,11 +1101,10 @@ class PagesAPIMixin:
         modules = []
         seen: set[str] = set()
         for item in items:
-            owned = item.plugin_id in trusted_ids or (
-                item.source_url
-                and is_trusted_diagnostic_repository(item.plugin_id, item.source_url)
-            )
-            if not owned:
+            # The operations center manages the fixed Ningxin-Suxi registry only.
+            # Repository ownership and a diagnostic contract are insufficient to
+            # grant lifecycle controls to an arbitrary plugin.
+            if item.plugin_id not in trusted_ids:
                 continue
             trusted = TRUSTED_BY_ID.get(item.plugin_id)
             canonical_id = trusted.plugin_id if trusted else item.plugin_id
@@ -1119,7 +1130,7 @@ class PagesAPIMixin:
                 }
             )
         return {
-            "source": "trusted_registry_and_qsbb_repository",
+            "source": "trusted_registry",
             "modules": modules,
         }
 
@@ -1155,7 +1166,11 @@ class PagesAPIMixin:
         if instance is None:
             return {"contracts": 0, "contract_source": "unavailable"}
         count = 0
-        for method_name in ("diagnostic_log_contract", "series_runtime_contract"):
+        for method_name in (
+            "diagnostic_log_contract",
+            "series_runtime_contract",
+            "series_model_router_contract",
+        ):
             declaration = getattr(instance, method_name, None)
             if not callable(declaration):
                 continue
@@ -1651,6 +1666,16 @@ class PagesAPIMixin:
                     raise ValueError(key)
                 return normalized
             return value
+        if kind == "model_routing":
+            normalized = normalize_routes(value)
+            if not isinstance(value, dict):
+                raise ValueError(key)
+            for route in value.values():
+                if not isinstance(route, dict):
+                    raise ValueError(key)
+                if set(route) - {"provider_id", "model", "voice"}:
+                    raise ValueError(key)
+            return normalized
         raise TypeError(key)
 
     def _apply_page_runtime_config(self) -> None:
