@@ -342,6 +342,12 @@ class PagesAPIMixin:
         return tracked_handler
 
     @staticmethod
+    def _is_model_routing_field(key: str, field: dict[str, Any]) -> bool:
+        # AstrBot only accepts its built-in schema types. Keep the richer
+        # model-routing editor as a plugin-side convention on an object field.
+        return key == "model_routing" and field.get("type") == "object"
+
+    @staticmethod
     def _schema() -> dict[str, dict[str, Any]]:
         path = Path(__file__).with_name("_conf_schema.json")
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -352,7 +358,7 @@ class PagesAPIMixin:
         for key, field in self._schema().items():
             if key in SENSITIVE_KEYS:
                 public[key] = {"configured": bool(self._get(key, ""))}
-            elif field.get("type") == "model_routing":
+            elif PagesAPIMixin._is_model_routing_field(key, field):
                 public[key] = normalize_routes(self._get(key, {}))
             else:
                 public[key] = self._get(key, field.get("default"))
@@ -1666,7 +1672,7 @@ class PagesAPIMixin:
                     raise ValueError(key)
                 return normalized
             return value
-        if kind == "model_routing":
+        if PagesAPIMixin._is_model_routing_field(key, field):
             normalized = normalize_routes(value)
             if not isinstance(value, dict):
                 raise ValueError(key)

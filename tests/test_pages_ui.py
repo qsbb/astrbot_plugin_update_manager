@@ -742,6 +742,6 @@ def test_manager_page_exposes_unified_model_routing_fields():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert 'id="config-fields"' in html
-    assert 'field.type === "model_routing"' in js
+    assert 'key === "model_routing" && field.type === "object"' in js
     assert "data-model-kind" in js
     assert "插件显式配置优先" in js

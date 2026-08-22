@@ -139,7 +139,7 @@ def test_model_router_rejects_unknown_fields(monkeypatch, tmp_path):
     pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
     monkeypatch.setattr(pages_api, "request", None)
     assert plugin._coerce_page_value(
-        "model_routing", {"conversation": {"provider_id": "x"}}, {"type": "model_routing"}
+        "model_routing", {"conversation": {"provider_id": "x"}}, {"type": "object"}
     )["conversation"]["provider_id"] == "x"
 
 

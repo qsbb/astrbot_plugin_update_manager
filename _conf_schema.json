@@ -23,7 +23,7 @@
   "webui_port": {"type": "int", "description": "独立 WebUI 监听端口；修改后需单插件重载核", "default": 25528},
   "webui_public_url": {"type": "string", "description": "核 Page 打开独立 WebUI 使用的完整公开地址；监听 0.0.0.0 时应显式填写", "default": ""},
   "model_routing": {
-    "type": "model_routing",
+    "type": "object",
     "description": "凝心溯溪统一模型路由；插件未显式配置时按 核 → AstrBot 原生 配置回退",
     "default": {},
     "kinds": {
