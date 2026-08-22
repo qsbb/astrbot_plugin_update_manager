@@ -1,12 +1,23 @@
-# 凝心溯溪-核（astrbot_plugin_update_manager）
+# 凝心溯溪-核
 
-凝心溯溪系列更新模块：安全、串行、可回滚的 AstrBot 插件更新管理器。发现可信来源候选，冻结不可变计划，通过 AstrBot 核心串行更新，并提供备份、健康检查、自动回滚、审计、持久化每日规则与清理能力。
+> 凝心溯溪系列更新模块：安全、串行、可回滚的 AstrBot 插件更新管理器。发现可信来源候选，冻结不可变计划，通过 AstrBot 核心串行更新，并提供备份、健康检查、自动回滚、审计、持久化每日规则与清理能力。
+
+> **凝心溯溪系列** 当前完整插件清单为知、言、序、情、境、声、核、临：各插件职责独立、互不冲突，可按需组合使用，覆盖知识学习、对话调节、身份管理、关系状态、环境感知、语音、更新管理与具身桥接。
+
+| 字 | 模块 | 说明 |
+|----|------|------|
+| [知](https://github.com/qsbb/astrbot_plugin_active_learner) | 知识学习 | 自动检索注入、多源学习、交叉验证 |
+| [言](https://github.com/qsbb/astrbot_plugin_conversation_flow) | 对话调节 | 沉默判断、智能分段、插话衔接 |
+| [序](https://github.com/qsbb/astrbot_plugin_identity_guardian) | 身份管理 | 关系感知、权限边界、群组行动 |
+| [情](https://github.com/qsbb/astrbot_plugin_relationship) | 关系状态 | 情绪、好感、信任、熟悉度状态记录与只读建议 |
+| [境](https://github.com/qsbb/astrbot_plugin_environment_awareness) | 环境感知 | 时间、天气、空气质量、预警与环境关心候选 |
+| [声](https://github.com/qsbb/astrbot_plugin_voice_hub) | 语音合成 | 双 TTS 后端、多音色管理、AI 导演 |
+| [核](https://github.com/qsbb/astrbot_plugin_update_manager) | 更新管理 | 安全检查、计划、串行更新与回滚（本插件） |
+| [临](https://github.com/qsbb/astrbot_plugin_embodiment_bridge) | 具身桥接 | Quest 客户端桥接、实时对话与空间感知 |
 
 ## 当前实现信息
 
-- 版本号以 `metadata.yaml` 为唯一事实源；AstrBot 兼容范围：`>=4.16,<5`。
-- 当前版本请以 `metadata.yaml` 中的 `version` 字段为准。
-- 版本口径：README 只描述当前实现；CHANGELOG 下方版本号与日期均为真实历史记录，不因当前文档整改而改写。
+- 版本号以 `metadata.yaml` 的 `version` 为唯一事实源；逐版变更见 `CHANGELOG.md`。AstrBot 兼容范围：`>=4.16,<5`。
 - 命令入口：`/aup` 命令组，支持探测、目录、计划、执行、规则、预演、回滚、取消、状态和套件诊断（`/aup diag`）。
 - 页面入口：AstrBot Plugin Page 的“更新管理”页面；实现目录为 `pages/manager/`，页面能力不可用时命令与调度仍可用。
 - 模块运营中心：由“更新管理”页打开插件自有的独立 WebUI；资源位于 `webui/`，不会被 AstrBot 当成第二个 Plugin Page。首屏永远是登录页，不提供浏览器注册。管理员账号只能在“核” Page 的“控制中心管理员”区域创建、修改、重置密码和启停。
@@ -23,20 +34,20 @@
 - 更新前自动备份，更新后执行加载/版本/启用状态检查；声明 `plugin.health@1.0` 的插件还会执行业务健康检查，失败自动回滚。
 - 持久化每日规则、审计记录与备份清理策略（按数量、天数、容量）。
 - 提供 AstrBot Plugin Page 便捷设置页面，可查看总览、修改常用配置、浏览插件目录并管理固定可信系列推荐。
-- 固定可信系列清单仅包含 qsbb GitHub 仓库：知 `active_learner`、言 `conversation_flow`、序 `identity_guardian`、情 `relationship`、境 `environment_awareness`、声 `voice_hub`、临 `embodiment_bridge`、核 `update_manager`；核禁止自更新和自停用。
+- 固定可信系列清单仅包含 qsbb GitHub 仓库：知 `active_learner`、言 `conversation_flow`、序 `identity_guardian`、情 `relationship`、境 `environment_awareness`、声 `voice_hub`、临 `embodiment_bridge`、核 `update_manager`、枢 `orchestration_hub`；核禁止自更新和自停用。
 - Plugin Page API 采用运行时能力探测；旧版 AstrBot 不支持页面能力时自动降级，不影响命令与调度功能。
 - `github_token` 等敏感配置按只写方式处理：只显示“是否已配置”，敏感 token 不回显到页面、接口响应或审计。
-- 新增“日志”页，统一读取知、言、序、情、境、声、临、核以及自动发现的官方系列插件所声明的 `series.diagnostics@1.0` 内存诊断；只在打开该页时增量轮询，不依赖 AstrBot 主日志。
+- 新增“日志”页，统一读取知、言、序、情、境、声、临、核、枢以及自动发现的官方系列插件所声明的 `series.diagnostics@1.0` 内存诊断；只在打开该页时增量轮询，不依赖 AstrBot 主日志。
 - 日志按插件、级别和关键词筛选，可暂停、刷新或清空；清空操作需要页面和接口双重确认。每个插件独立保留有限条目；诊断详情保留路径、URL、参数、账号标识、长数字、正文、错误文本和哈希等排障信息，仅对凭据值再次脱敏。
 - `enabled=false` 时统一门禁全部命令与调度。
 
-### 模块运营中心与管理员
+## 模块运营中心与管理员
 
 控制中心采用两层边界：AstrBot Plugin Page 只负责管理员配置和打开入口；独立 WebUI 由核自己的 `aiohttp` listener 提供，API 再要求自己的短时内存会话。WebUI 不接受匿名注册，也不读取 Dashboard JWT；首个通过“核” Page 创建的账号自动获得 `owner` 角色，后续可创建 `owner`、`admin` 或 `viewer`。密码只以 PBKDF2-HMAC-SHA256（随机盐）保存到插件数据目录的 `webui-admins.json`，会话令牌只存在内存，退出、禁用或改密码会撤销相关会话，最后一个启用的 owner 不能被禁用或降级。
 
 独立 WebUI 默认开启并监听 `0.0.0.0:25528`，但所有管理 API 仍要求使用“核” Page 创建的管理员账户登录。Page 顶部会持续显示当前 URL、端口和运行状态，并按当前 Dashboard 主机生成可访问地址；跨网段或反向代理部署应显式填写 `webui_public_url`，并配合防火墙或 HTTPS 反向代理。端口、监听地址或开关变更后需要单插件重载“核”，不要把端口直接暴露到公网。
 
-独立 WebUI 的左侧工作区包含模块总览、运行诊断、更新状态、全局设置和安全与账户五个视图；模块名称可进入该模块的运行详情。全局设置视图读取 `series.model_router@1.0` 的有效来源和可用状态，编辑仍回到核 Page 的配置区，避免独立 WebUI 绕过宿主的插件配置权限。统一模型路由的优先级固定为“插件显式配置 → 核 → AstrBot 原生配置”。
+独立 WebUI 的左侧工作区包含模块总览、系列接管、运行诊断、更新与回滚、全局设置和安全与账户六个视图；模块名称可进入该模块的运行详情。“系列接管”视图显示统一接管模式（`native`/`managed`）、全局 revision、各可信模块的运行来源与状态原因，并可查看模块通过 `series.control@1.0` 声明的可管理字段（秘密字段只标记敏感性，不回显默认值）；仅 owner 角色可切换统一接管开关，字段写入与重置经接管 API 进行，要求 admin 及以上角色并携带 revision 做冲突保护。核只保存覆盖层，关闭接管后插件自身配置立即恢复生效。全局设置视图读取 `series.model_router@1.0` 的有效来源和可用状态，编辑仍回到核 Page 的配置区，避免独立 WebUI 绕过宿主的插件配置权限。统一模型路由的优先级固定为“插件显式配置 → 核 → AstrBot 原生配置”。
 
 模块列表只包含“核”固定可信清单、旧兼容别名归一后的模块，或同时满足官方 `qsbb` 仓库归属和自声明诊断/运行态契约的未来自有模块。第三方插件不会因目录扫描进入控制中心。契约未声明或模块未加载时显示 `unavailable`，不会用占位数字伪装能力。控制中心的诊断和导出摘要只返回模块状态、版本、契约数量和固定状态，不包含密码哈希、会话令牌、账号标识、消息正文或 Provider 密钥。
 
@@ -66,13 +77,14 @@
 | `/aup rollback <tx_id>` | 人工回滚满足前置条件的已提交事务 |
 | `/aup cancel` | 在当前事务边界后停止批次 |
 | `/aup status` | 查看运行状态 |
+| `/aup diag` | 系列套件诊断（安装/加载状态与健康检查） |
 
 ## 便捷设置页面
 
 在支持 Plugin Page 的 AstrBot 版本中，可从插件详情进入“更新管理”页面：
 
 - **总览**：查看插件状态、AstrBot 版本、更新能力探测结果与每日规则。
-- **系列推荐**：查看知、言、序、情、境、声、临、核固定可信清单；按运行时能力显示“安装/已安装”“更新”“强制更新”“启用/停用”，并提供“一键全部安装/更新”。普通更新仅在远端版本更高时可用；强制更新可用远端版本覆盖同版本或本地更高版本，并有独立二次警告；境与其他非核插件使用完全相同的安装、更新和安全门禁。批量操作仍只执行普通更新，会先检查最新状态，再串行安装未安装项、更新确有新版本的已安装项；核始终跳过自更新。完成后汇总成功/失败并刷新推荐状态、总览和目录。核有新版本时，“前往已安装插件页”优先使用宿主 bridge 跳到 `/extension#installed`；bridge 不支持时保留链接的原生 `target="_top"` 跳转，只有宿主仍不允许顶层导航时才会显示并复制更新页 URL，复制失败则弹出 URL 供手动复制。
+- **系列推荐**：查看知、言、序、情、境、声、临、核、枢固定可信清单；按运行时能力显示“安装/已安装”“更新”“强制更新”“启用/停用”，并提供“一键全部安装/更新”。普通更新仅在远端版本更高时可用；强制更新可用远端版本覆盖同版本或本地更高版本，并有独立二次警告；境与其他非核插件使用完全相同的安装、更新和安全门禁。批量操作仍只执行普通更新，会先检查最新状态，再串行安装未安装项、更新确有新版本的已安装项；核始终跳过自更新。完成后汇总成功/失败并刷新推荐状态、总览和目录。核有新版本时，“前往已安装插件页”优先使用宿主 bridge 跳到 `/extension#installed`；bridge 不支持时保留链接的原生 `target="_top"` 跳转，只有宿主仍不允许顶层导航时才会显示并复制更新页 URL，复制失败则弹出 URL 供手动复制。
 - **设置**：修改常用配置并即时应用；配置仍会持久化到 AstrBot `data` 目录。
 - **镜像加速**：列出内置与自定义 GitHub 加速站，单选启用、一键并发测速查看毫秒延迟、添加或移除自定义站点，保存即热应用。
 - **插件目录**：查看已安装插件、当前版本、来源与自动更新资格；右上角「检查更新」按需探测全部有 GitHub 来源的插件。普通「更新」仅在检测到远端新版本时可用；「强制更新」支持以远端版本覆盖本地版本，可用于同版本重装、恢复已回退插件，或将本地更高版本覆盖为远端版本，并使用独立二次确认。进入页面或切到该 tab 都不会自动检查，避免全量探测拖慢首屏并耗尽 GitHub 匿名配额。
@@ -85,7 +97,7 @@
 
 `github_token` 是只写敏感项：页面和 API 仅返回是否已配置，敏感 token 不回显原值；保存空值或占位符不会清除现有 token。如需替换 token，请输入新值后保存。
 
-### 跨插件系列运行态契约
+## 跨插件系列运行态契约
 
 核为具身桥接插件等明确消费方提供纯只读契约 `update_manager.series_runtime@1.0`。消费方应先按插件 ID `astrbot_plugin_update_manager` 取得实例，再直接调用 `series_runtime_contract()`；只接受契约名完全一致且主版本为 `1`、能力包含 `read_runtime_snapshot` 的声明，不得通过猜测方法名或读取核的私有字段降级接入。
 
@@ -115,17 +127,17 @@
       "installed": true,
       "loaded": true,
       "activated": true,
-      "version": "1.4.0",
+      "version": "1.0.0",
       "health_status": "ok",
       "reason": "HEALTHY"
     }
   ],
-  "healthy": 7,
-  "total": 7
+  "healthy": 9,
+  "total": 9
 }
 ```
 
-`members` 始终按知、言、序、情、境、声、临、核排列。成员 `health_status` 可为 `ok`、`compatible`、`degraded`、`unhealthy` 或 `missing`；`compatible` 表示旧插件未声明 `plugin.health@1.0`，只能确认基础运行态。顶层状态及降级语义如下：
+`members` 始终按知、言、序、情、境、声、临、核、枢排列。成员 `health_status` 可为 `ok`、`compatible`、`degraded`、`unhealthy` 或 `missing`；`compatible` 表示旧插件未声明 `plugin.health@1.0`，只能确认基础运行态。顶层状态及降级语义如下：
 
 成员状态与原因码是固定组合：`ok/HEALTHY`、`compatible/L0_ONLY`、`degraded/PLUGIN_NOT_ACTIVATED`、`missing/PLUGIN_NOT_FOUND`；`unhealthy` 对应 `PLUGIN_NOT_LOADED`、`HEALTH_CONTRACT_INCOMPATIBLE`、`HEALTH_CONTRACT_INVALID`、`HEALTH_PROBE_FAILED`、`HEALTH_VERSION_MISMATCH` 或 `BUSINESS_HEALTH_UNHEALTHY`。出现未声明组合时整个响应返回 `error/DIAGNOSTIC_INVALID`，消费方不得使用部分成员数据。
 
@@ -141,7 +153,7 @@
 
 该契约只封装现有 `diagnose_series(adapter)`：读取本地安装/加载/激活状态并调用各插件公开的 `plugin.health@1.0` 探针。它不访问 GitHub 或镜像，不检查新版本，不创建计划，不安装、更新、启停或重载插件，也不写数据库或配置。契约不可用或核未安装时，具身桥接插件应继续隔离运行，只把系列诊断标记为不可用。
 
-### 系列诊断日志
+## 系列诊断日志
 
 - “日志”标签位于首位并作为页面默认视图。页面打开后会立即读取日志，并与总览、推荐、配置、镜像和目录数据并行加载，不再等待其他标签全部完成。诊断会捕获本系列插件自有 logger 的 `DEBUG` 到 `CRITICAL` 事件；每个插件最多保留 1000 条，页面单次读取最多 1000 条、浏览器最多暂存 10000 条。列表每行先显示插件中文名，再显示时间、级别和事件；大量折叠日志由浏览器延迟布局，但不会因此丢失缓存事件。
 - 页面一次最多渲染最近 500 条匹配日志，完整的 10000 条浏览器缓存仍可用于筛选；搜索输入会短暂防抖，轮询没有新增事件时不会重建整张日志列表。
@@ -152,7 +164,7 @@
 - 页签支持键盘左右方向键、Home 和 End 切换，并同步 `aria-selected`，便于键盘和读屏用户定位当前区域。
 “日志”页和运营中心始终保留知、言、序、情、境、声、临、核、枢九个可信成员；运营中心只纳管这份固定清单，不会因 GitHub 组织相同而吸纳第三方插件。`astrbot_plugin_quest_avatar_bridge` 仅作为“临”的旧部署兼容别名，聚合输出与推荐链接统一使用正式 ID `astrbot_plugin_embodiment_bridge`。日志只存在内存中，清空、热重载或 AstrBot 重启后自动消失。
 
-### 统一模型路由
+## 统一模型路由
 
 “核”提供只读契约 `series.model_router@1.0`，统一配置对话/LLM、向量/Embedding、识图/视觉、STT 和 TTS。自有插件接入契约后按“插件显式配置 → 核 → AstrBot 原生配置”解析；未接入契约的插件保持自身现有行为，不会被核强制改写。接口只返回 provider/model 的配置引用、来源和可用状态，不返回密钥。
 
@@ -196,7 +208,7 @@ def diagnostic_clear() -> None: ...
 | `enabled` | bool | true | 启用管理命令与调度服务 |
 | `auto_update_enabled` | bool | false | 允许每日规则执行更新 |
 | `network_timeout_seconds` | int | 15 | 候选查询总超时 |
-| `cache_ttl_seconds` | int | 300 | 候选与条件请求缓存时长 |
+| `cache_ttl_seconds` | int | 1800 | 候选与条件请求成功结果缓存时长；越长越省 GitHub 配额 |
 | `version_check_concurrency` | int | 9 | 版本检查并发上限；默认允许九个可信仓库同时探测 |
 | `github_mirror` | string | "" | GitHub 加速站前缀（留空直连；镜像失败自动回退直连，不会导致检查失败） |
 | `github_mirror_candidates` | string | "" | 自定义加速站列表（换行或逗号分隔，必须 https，非法项忽略） |
