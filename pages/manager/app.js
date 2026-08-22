@@ -7,7 +7,7 @@ const messages = {
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
-    checkLatest: "检查最新版本", checkingLatest: "正在检查…", autoCheckingLatest: "正在自动检查版本…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
+    checkLatest: "检查最新版本", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
     selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制", copyInstalledPageUrl: "请复制更新页地址后在浏览器中打开：",
@@ -33,7 +33,7 @@ const messages = {
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
-    checkLatest: "Check latest versions", checkingLatest: "Checking…", autoCheckingLatest: "Checking versions automatically…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
+    checkLatest: "Check latest versions", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
     selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.", copyInstalledPageUrl: "Copy this update page URL and open it in a browser:",
@@ -84,8 +84,6 @@ const state = {
   recommendationBusy: null,
   // 版本检查互斥：自动检查与手动检查共享同一把锁，避免并发请求触发限流。
   versionCheckBusy: false,
-  // 每次会话只自动检查一次；刷新页面才会重新自动检查。
-  autoVersionCheckDone: false,
   // 目录版本结果按 plugin_id 缓存。目录不做自动检查（全量插件探测会拖慢首屏并
   // 快速耗尽 GitHub 匿名配额），所以刷新目录列表时必须保留已有结果，否则用户
   // 点过的检查会因为一次启停操作而白跑。
@@ -951,25 +949,6 @@ function clearVersionCheckBusy() {
   if (status && !state.recommendationBusy) status.hidden = true;
 }
 
-// 首次切到"系列推荐"时自动检查一次仓库版本；使用缓存、不强制刷新，失败也不阻塞列表渲染。
-async function autoCheckRecommendations() {
-  if (state.autoVersionCheckDone || state.versionCheckBusy || state.recommendationBusy) return;
-  state.autoVersionCheckDone = true;
-  setVersionCheckBusy("autoCheckingLatest");
-  try {
-    await loadRecommendations(true, false);
-  } catch (error) {
-    toast(`${t("checkFailed")}: ${error.message}`, true);
-    try {
-      await loadRecommendations();
-    } catch (fallbackError) {
-      console.warn("Unable to render cached recommendations", fallbackError);
-    }
-  } finally {
-    clearVersionCheckBusy();
-  }
-}
-
 function showConfirmation(message) {
   const dialog = document.getElementById("confirmation-dialog");
   document.getElementById("confirmation-message").textContent = message;
@@ -1377,11 +1356,6 @@ function activateTab(button, focus = false) {
   });
   if (focus) button.focus();
   if (button.dataset.tab !== "logs") stopDiagnosticPolling();
-  if (button.dataset.tab === "recommendations") {
-    autoCheckRecommendations().catch((error) => {
-      console.warn("Automatic recommendation version check failed", error);
-    });
-  }
   if (button.dataset.tab === "logs") {
     loadDiagnostics(!state.diagnosticLoaded).catch((error) => renderSectionLoadError("diagnostics", error));
     startDiagnosticPolling();
@@ -1511,10 +1485,8 @@ function bindEvents() {
     state.diagnosticSearchTimer = window.setTimeout(renderDiagnostics, 200);
   });
   document.getElementById("check-latest").addEventListener("click", async () => {
-    // 与自动检查共享同一把锁：任一方在跑时忽略新的手动点击。
+    // 版本检查共享同一把锁，重复点击不会并发请求。
     if (state.versionCheckBusy) return;
-    // 手动检查是明确的用户意图，跳过自动检查以免重复请求。
-    state.autoVersionCheckDone = true;
     setVersionCheckBusy("checkingLatest");
     try {
       await loadRecommendations(true);

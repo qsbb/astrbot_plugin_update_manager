@@ -265,6 +265,22 @@ def test_webui_url_uses_current_dashboard_host_for_wildcard_listener(
     assert payload["url"] == "http://192.168.5.88:25528"
 
 
+def test_webui_url_reads_dashboard_host_header_for_wildcard_listener(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(
+        pages_api,
+        "request",
+        SimpleNamespace(host="", headers={"Host": "192.168.5.88:25520"}),
+    )
+    plugin.webui_server._started = True
+    payload = unwrap(asyncio.run(plugin._pages_webui_url()))
+    assert payload["url"] == "http://192.168.5.88:25528"
+
+
 def test_webui_url_reports_configured_endpoint_while_listener_is_disabled(
     monkeypatch, tmp_path
 ):
@@ -1762,10 +1778,10 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
     assert core["actions"]["disable"] is False
     assert payload["self_update"] == {
         "current_version": module.__version__,
-        "latest_version": module.__version__,
+        "latest_version": "",
         "update_available": False,
-        "version_status": "up_to_date",
-        "checked_at": core["checked_at"],
+        "version_status": "unknown",
+        "checked_at": None,
         "error": None,
         "repo_url": "https://github.com/qsbb/astrbot_plugin_update_manager",
     }
@@ -1809,7 +1825,7 @@ def test_self_update_check_reports_repository_update_without_self_action(
             turn_off_plugin=True,
         ),
     )
-    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     core = next(
         item for item in payload["items"] if item["plugin_id"] == module.PLUGIN_NAME
     )
@@ -1873,7 +1889,7 @@ def test_legacy_embodiment_install_uses_canonical_recommendation_and_updates_by_
         ),
     )
 
-    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     item = next(
         entry for entry in payload["items"] if entry["plugin_id"] == canonical_id
     )
@@ -1920,7 +1936,7 @@ def test_canonical_embodiment_install_wins_over_legacy_duplicate(monkeypatch, tm
     plugin.adapter.snapshot_plugins = snapshots
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
 
-    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     items = [item for item in payload["items"] if item["plugin_id"] == canonical_id]
     assert len(items) == 1
     assert items[0]["installed"] is True
@@ -2144,13 +2160,33 @@ def test_recommendations_payload_reports_global_rate_limit_snapshot(
             "token_configured": False,
         },
     )
-    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["rate_limit"]["limited"] is True
     assert payload["rate_limit"]["retry_after_seconds"] == 300
     assert payload["rate_limit"]["remaining"] == 0
     assert "token" not in json.dumps(payload["rate_limit"]).replace(
         "token_configured", ""
     )
+
+
+def test_recommendations_get_is_local_and_does_not_probe_remote_versions(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    calls = []
+
+    async def latest(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("普通推荐列表不应触发远端版本检查")
+
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    assert payload["success"] is True
+    assert len(payload["items"]) == 9
+    assert calls == []
+    assert all(item["version_status"] == "unknown" for item in payload["items"])
+    assert all(item["checked_at"] is None for item in payload["items"])
 
 
 def test_recommendation_failure_detail_redacts_tokens(monkeypatch, tmp_path):
@@ -2197,7 +2233,7 @@ def test_update_action_requires_newer_version(monkeypatch, tmp_path):
         turn_off_plugin=True,
     )
     monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
-    payload = unwrap(asyncio.run(plugin._pages_recommendations()))
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     voice = next(
         item
         for item in payload["items"]

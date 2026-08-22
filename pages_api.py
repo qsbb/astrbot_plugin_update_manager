@@ -1241,8 +1241,21 @@ class PagesAPIMixin:
 
     @staticmethod
     def _request_hostname() -> str:
+        """Read the dashboard host across AstrBot web-request adapters."""
         try:
             raw_host = str(getattr(request, "host", "") or "")
+            if not raw_host:
+                headers = getattr(request, "headers", None)
+                if headers is not None:
+                    try:
+                        raw_host = str(headers.get("Host", "") or "")
+                    except (AttributeError, TypeError):
+                        raw_host = ""
+            if not raw_host:
+                url = getattr(request, "url", None)
+                raw_host = str(getattr(url, "netloc", "") or "")
+                if not raw_host:
+                    raw_host = str(getattr(url, "host", "") or "")
         except (RuntimeError, AttributeError):
             raw_host = ""
         # 只取请求 hostname，避免把查询串、用户名或外部 URL 拼入跳转地址。
@@ -2143,7 +2156,9 @@ class PagesAPIMixin:
         except asyncio.TimeoutError as exc:
             raise RegistryError("VERSION_CHECK_TIMEOUT", repo=repo_url) from exc
 
-    async def _recommendation_payload(self, *, force_refresh: bool) -> dict[str, Any]:
+    async def _recommendation_payload(
+        self, *, force_refresh: bool, check_versions: bool = True
+    ) -> dict[str, Any]:
         snapshots = await self.adapter.snapshot_plugins()
         installed = {
             identity: item
@@ -2162,6 +2177,27 @@ class PagesAPIMixin:
                 ),
                 None,
             )
+            if not check_versions:
+                # A normal GET is used for the initial page render.  It must be
+                # deterministic and local: network version probes belong only
+                # to the explicit check-latest action.  Returning an explicit
+                # unknown state keeps lifecycle actions disabled until a check
+                # supplies a fresh version comparison.
+                return (
+                    trusted,
+                    snapshot,
+                    {
+                        "latest_version": "",
+                        "update_available": False,
+                        "version_status": "unknown",
+                        "download_url": "",
+                        "default_branch": "",
+                        "checked_at": None,
+                        "error": None,
+                        "error_detail": None,
+                        "error_context": {},
+                    },
+                )
             checked_at = datetime.now(timezone.utc).isoformat()
             try:
                 candidate = await self._check_latest_with_timeout(
@@ -2283,10 +2319,15 @@ class PagesAPIMixin:
         }
 
     async def _pages_recommendations(self):
-        return json_response(await self._recommendation_payload(force_refresh=False))
+        return json_response(
+            await self._recommendation_payload(
+                force_refresh=False,
+                check_versions=False,
+            )
+        )
 
     async def _pages_check_recommendations(self):
-        # 默认强制刷新（手动"检查最新版本"）；页面自动检查显式传 force_refresh=false 走缓存，避免限流。
+        # 默认强制刷新（手动"检查最新版本"）；调用方可显式复用 registry 缓存。
         data = await self._request_json()
         force_refresh = True
         if isinstance(data, dict) and "force_refresh" in data:
@@ -2298,7 +2339,10 @@ class PagesAPIMixin:
                 )
             force_refresh = value
         return json_response(
-            await self._recommendation_payload(force_refresh=force_refresh)
+            await self._recommendation_payload(
+                force_refresh=force_refresh,
+                check_versions=True,
+            )
         )
 
     @staticmethod

@@ -210,11 +210,11 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
         "\n// 只在用户点击时调用", 1
     )[0]
     assert "check-updates" not in load_catalog
-    # 标签切换只为系列推荐自动检查，目录不在其中。
+    # 标签切换不触发任何远端版本探测；推荐和目录都由明确按钮触发。
     tab_handler = js.split('document.querySelectorAll("[data-tab]")', 1)[1].split(
         "config-form", 1
     )[0]
-    assert "autoCheckRecommendations" in tab_handler
+    assert "autoCheckRecommendations" not in tab_handler
     assert "runCatalogCheck" not in tab_handler
     assert "checkCatalogUpdates" not in tab_handler
     # 普通与强制更新都必须二次确认；强制模式使用独立警示文案与显式 force。
@@ -286,41 +286,21 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert "不会额外重复重载" in html
 
 
-def test_recommendations_tab_auto_checks_once_with_cached_request():
+def test_recommendations_tab_does_not_start_implicit_network_check():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    # 自动检查必须复用 loadRecommendations 与 check-latest，且不强制刷新。
+    # 推荐列表切换只读本地状态；远端检查必须由用户明确点击按钮触发。
     assert (
         "async function loadRecommendations(check = false, forceRefresh = true)" in js
     )
-    assert "async function autoCheckRecommendations()" in js
-    assert "await loadRecommendations(true, false);" in js
     assert "versionCheckBusy: false" in js
-    assert "autoVersionCheckDone: false" in js
-    auto_check = js[
-        js.index("async function autoCheckRecommendations()") : js.index(
-            "function confirmRecommendationAction"
-        )
-    ]
-    # 会话内只自动检查一次，并与手动检查/推荐操作互斥。
-    assert (
-        "if (state.autoVersionCheckDone || state.versionCheckBusy || state.recommendationBusy) return;"
-        in auto_check
-    )
-    assert auto_check.index("state.autoVersionCheckDone = true;") < auto_check.index(
-        "await loadRecommendations(true, false);"
-    )
-    # 检查中显示状态，失败仍回落到缓存列表渲染。
-    assert 'setVersionCheckBusy("autoCheckingLatest")' in auto_check
-    assert "clearVersionCheckBusy();" in auto_check
-    assert "await loadRecommendations();" in auto_check
-    assert "catch (error)" in auto_check
+    assert "async function autoCheckRecommendations()" not in js
     tab_handler = js[
         js.index('document.querySelectorAll("[data-tab]")') : js.index(
             'document.getElementById("config-form")'
         )
     ]
-    assert 'button.dataset.tab === "recommendations"' in tab_handler
-    assert "autoCheckRecommendations()" in tab_handler
+    assert 'button.dataset.tab === "recommendations"' not in tab_handler
+    assert "autoCheckRecommendations()" not in tab_handler
 
 
 def test_manual_and_auto_version_check_share_one_busy_lock():
@@ -335,14 +315,13 @@ def test_manual_and_auto_version_check_share_one_busy_lock():
         )
     ]
     assert "if (state.versionCheckBusy) return;" in manual
-    assert "state.autoVersionCheckDone = true;" in manual
+    assert "state.autoVersionCheckDone" not in manual
     assert 'setVersionCheckBusy("checkingLatest")' in manual
     assert "await loadRecommendations(true);" in manual
     assert "clearVersionCheckBusy();" in manual
     # 版本检查不得抢走推荐操作的状态条。
     assert "if (status && !state.recommendationBusy) status.hidden = true;" in js
-    assert 'autoCheckingLatest: "正在自动检查版本…"' in js
-    assert 'autoCheckingLatest: "Checking versions automatically…"' in js
+    assert "autoCheckingLatest" not in js
 
 
 def test_recommendations_show_self_update_repository_notice():
@@ -736,6 +715,8 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     assert 'data-i18n="copyWebUiLink"' in html
     assert 'data-i18n-aria-label="webuiActionsLabel"' in html
     assert ".webui-address-row" in css
+    assert ".hero { flex-wrap:wrap; }" in css
+    assert ".hero > div:first-child" in css
 
 
 def test_manager_page_exposes_unified_model_routing_fields():
