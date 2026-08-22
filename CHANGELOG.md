@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## 0.13.3 - 2026-08-22
+
+- 补齐 `model_routing` 对象配置的 `items` 定义，兼容 AstrBot 配置 schema 解析器。
+
 ## 0.13.2 - 2026-08-22
 
 - 修复 `model_routing` 配置 schema 使用宿主不支持的自定义类型；改用 AstrBot 原生 `object` 类型，同时保留核 Page 的统一模型路由编辑器。

@@ -26,6 +26,38 @@
     "type": "object",
     "description": "凝心溯溪统一模型路由；插件未显式配置时按 核 → AstrBot 原生 配置回退",
     "default": {},
+    "items": {
+      "conversation": {
+        "type": "object",
+        "description": "对话/LLM 路由",
+        "default": {},
+        "items": {}
+      },
+      "embedding": {
+        "type": "object",
+        "description": "向量/Embedding 路由",
+        "default": {},
+        "items": {}
+      },
+      "vision": {
+        "type": "object",
+        "description": "识图/视觉路由",
+        "default": {},
+        "items": {}
+      },
+      "stt": {
+        "type": "object",
+        "description": "语音识别/STT 路由",
+        "default": {},
+        "items": {}
+      },
+      "tts": {
+        "type": "object",
+        "description": "语音合成/TTS 路由",
+        "default": {},
+        "items": {}
+      }
+    },
     "kinds": {
       "conversation": "对话/LLM",
       "embedding": "向量/Embedding",
