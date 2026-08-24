@@ -53,3 +53,8 @@ secrets*.json
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# 本地备份/临时文件（勿提交）
+*.bak
+*.bak_*
+*.orig
