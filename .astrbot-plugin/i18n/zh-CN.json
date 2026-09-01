@@ -2,7 +2,19 @@
   "pages": {
     "manager": {
       "title": "系列插件核心",
-      "description": "推荐安装，统一管理系列插件的更新、启用停用、回滚与调度"
+      "description": "推荐安装，统一管理系列插件的更新、启用停用、回滚与调度",
+      "seriesCenter": "系列中心",
+      "seriesCenterTitle": "系列中心",
+      "seriesCenterHint": "统一接管全系列插件：总览状态、版本与各插件管理页。管理页内嵌打开，复用 dashboard 登录态，无需二次登录。",
+      "refreshSeries": "刷新状态",
+      "seriesEmbedBack": "返回系列中心",
+      "seriesTotal": "系列插件",
+      "seriesInstalled": "已安装",
+      "seriesEnabledCount": "已启用",
+      "seriesEnabled": "已启用",
+      "seriesDisabled": "已安装未启用",
+      "seriesNotInstalled": "未安装",
+      "seriesGoInstall": "前往系列推荐安装"
     }
   }
 }

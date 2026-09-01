@@ -29,13 +29,26 @@
     </header>
 
     <nav class="tabs" role="tablist" aria-label="管理页分区" data-i18n-aria-label="managerSectionsLabel">
-      <button id="tab-logs" class="active" role="tab" aria-selected="true" aria-controls="logs" tabindex="0" data-tab="logs" data-i18n="logs">日志</button>
+      <button id="tab-series" class="active" role="tab" aria-selected="true" aria-controls="series" tabindex="0" data-tab="series" data-i18n="seriesCenter">系列中心</button>
+      <button id="tab-logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1" data-tab="logs" data-i18n="logs">日志</button>
       <button id="tab-recommendations" role="tab" aria-selected="false" aria-controls="recommendations" tabindex="-1" data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
       <button id="tab-config" role="tab" aria-selected="false" aria-controls="config" tabindex="-1" data-tab="config" data-i18n="config">配置</button>
       <button id="tab-mirrors" role="tab" aria-selected="false" aria-controls="mirrors" tabindex="-1" data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
       <button id="tab-catalog" role="tab" aria-selected="false" aria-controls="catalog" tabindex="-1" data-tab="catalog" data-i18n="catalog">目录</button>
       <button id="tab-overview" role="tab" aria-selected="false" aria-controls="overview" tabindex="-1" data-tab="overview" data-i18n="overview">总览</button>
     </nav>
+
+    <section id="series" class="panel active" role="tabpanel" aria-labelledby="tab-series" tabindex="0">
+      <article class="card">
+        <div class="section-heading"><div><h2 data-i18n="seriesCenterTitle">系列中心</h2><p data-i18n="seriesCenterHint">统一接管全系列插件：总览状态、版本与各插件管理页。管理页内嵌打开，复用 dashboard 登录态，无需二次登录。</p></div><button id="series-refresh" type="button" data-i18n="refreshSeries">刷新状态</button></div>
+        <div id="series-summary" class="cards"></div>
+        <div id="series-list" class="series-grid"><p data-i18n="loading">加载中…</p></div>
+      </article>
+      <article class="card" id="series-embed" hidden>
+        <div class="section-heading"><div><h2 id="series-embed-title">管理页</h2></div><button id="series-embed-back" type="button" data-i18n="seriesEmbedBack">返回系列中心</button></div>
+        <iframe id="series-embed-frame" class="series-embed-frame" title="plugin page" referrerpolicy="same-origin"></iframe>
+      </article>
+    </section>
 
     <section id="overview" class="panel" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
       <div id="summary" class="cards"><p data-i18n="loading">加载中…</p></div>
@@ -98,7 +111,7 @@
       <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
     </section>
 
-    <section id="logs" class="panel active" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
+    <section id="logs" class="panel" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
       <article class="card diagnostic-card">
         <div class="section-heading">
           <div>

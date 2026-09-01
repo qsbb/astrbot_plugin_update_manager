@@ -80,3 +80,19 @@ dialog { width:min(460px,calc(100% - 32px));color:var(--text);background:var(--p
 .model-route-row{display:grid;grid-template-columns:150px repeat(3,minmax(0,1fr));gap:8px;align-items:center;margin:8px 0}
 .model-route-row input{min-width:0}
 @media(max-width:760px){.model-route-row{grid-template-columns:1fr}.model-routing-field{padding:12px}}
+
+/* 系列中心：统一接管各插件管理页 */
+.series-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+.series-card { display:flex; flex-direction:column; gap:10px; padding:16px; border:1px solid var(--line); border-radius:10px; background:rgba(17,38,58,.6); }
+.series-card header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.series-card header strong { flex:1 1 auto; overflow-wrap:anywhere; }
+.series-key { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 6px; border-radius:8px; background:rgba(93,214,192,.14); color:var(--accent); font-weight:700; }
+.series-card .pill.warn { color:var(--warn); background:rgba(255,184,107,.12); }
+.series-desc { margin:0; color:var(--muted); font-size:13px; }
+.series-card footer { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.series-version { color:var(--muted); font-size:12px; }
+.series-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.series-actions button { padding:6px 12px; font-size:13px; }
+.series-embed-frame { display:block; width:100%; height:min(72vh,760px); border:1px solid var(--line); border-radius:8px; background:#fff; }
+@media (prefers-color-scheme:dark) { .series-embed-frame { background:#0b1420; } }
+@media (max-width:760px) { .series-grid { grid-template-columns:1fr; } .series-embed-frame { height:64vh; } }

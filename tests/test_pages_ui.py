@@ -33,21 +33,43 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert '<script src="/api/plugin/page/bridge-sdk.js"></script>' in html
     assert '<script type="module" src="./app.js"></script>' in html
     assert html.index("bridge-sdk.js") < html.index("./app.js")
+    assert 'data-tab="series"' in html
     assert 'data-tab="overview"' in html
     assert 'data-tab="recommendations"' in html
     assert 'data-tab="config"' in html
     assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
     assert 'data-tab="logs"' in html
-    assert 'id="tab-logs" class="active" role="tab"' in html
-    assert 'id="logs" class="panel active" role="tabpanel"' in html
+    # 系列中心是统一接管入口，作为默认激活 tab 排在第一位。
+    assert 'id="tab-series" class="active" role="tab"' in html
+    assert 'id="series" class="panel active" role="tabpanel"' in html
+    assert 'id="tab-logs" role="tab"' in html
+    assert 'id="logs" class="panel" role="tabpanel"' in html
     assert 'id="overview" class="panel" role="tabpanel"' in html
+    assert html.index('data-tab="series"') < html.index('data-tab="logs"')
     assert html.index('data-tab="logs"') < html.index('data-tab="overview"')
+    # 系列中心嵌入容器与各插件管理页 iframe。
+    assert 'id="series-list"' in html
+    assert 'id="series-embed-frame"' in html
+    assert 'id="series-refresh"' in html
+    assert 'id="series-embed-back"' in html
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
     assert '"zh-CN"' in js and '"en-US"' in js
     assert "async function resolveBridge" in js
     assert "waitForAstrBotBridge" in js
+    # 系列中心前端逻辑。
+    assert "async function loadSeries" in js
+    assert "function renderSeries" in js
+    assert "function openSeriesEmbed" in js
+    assert 'apiGet("series/overview")' in js
+    assert "/api/plugin/page/content/" in js
+    assert 'series: { targetId: "series-list"' in js
+    assert 'data-series-page' in js
+    assert 'data-series-goto-recommendations' in js
+    # i18n 字典覆盖系列中心键。
+    for key in ("seriesCenter", "seriesCenterHint", "seriesEmbedBack", "seriesNotInstalled", "seriesGoInstall"):
+        assert key in js
 
 
 def test_standalone_webui_has_clickable_views_and_model_routing():
