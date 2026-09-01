@@ -822,24 +822,16 @@ class PagesAPIMixin:
         )
         return member, events
 
-    async def _pages_diagnostic_logs(self):
-        data = await self._request_json()
-        if data is None:
-            data = {}
-        if not isinstance(data, dict):
-            return json_response(
-                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
-            )
+    async def _diagnostic_logs_core(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """诊断日志聚合内核：Page 与独立 WebUI 共用的唯一实现。"""
         cursors = data.get("cursors", {})
         if not isinstance(cursors, dict):
-            return json_response(
-                {"success": False, "error": "INVALID_DIAGNOSTIC_CURSORS"}, status=400
-            )
+            return {"success": False, "error": "INVALID_DIAGNOSTIC_CURSORS"}, 400
         streams = data.get("streams", {})
         if not isinstance(streams, dict):
-            return json_response(
-                {"success": False, "error": "INVALID_DIAGNOSTIC_STREAMS"}, status=400
-            )
+            return {"success": False, "error": "INVALID_DIAGNOSTIC_STREAMS"}, 400
         providers = await self._diagnostic_providers()
         try:
             limit = min(1000, max(1, int(data.get("limit", 1000))))
@@ -848,9 +840,7 @@ class PagesAPIMixin:
                 for item in providers
             }
         except (TypeError, ValueError):
-            return json_response(
-                {"success": False, "error": "INVALID_DIAGNOSTIC_CURSOR"}, status=400
-            )
+            return {"success": False, "error": "INVALID_DIAGNOSTIC_CURSOR"}, 400
         normalized_streams: dict[str, str] = {}
         for item in providers:
             value = streams.get(item.plugin_id, "")
@@ -859,9 +849,7 @@ class PagesAPIMixin:
             elif isinstance(value, str) and _DIAGNOSTIC_STREAM_ID.fullmatch(value):
                 normalized_streams[item.plugin_id] = value
             else:
-                return json_response(
-                    {"success": False, "error": "INVALID_DIAGNOSTIC_STREAM"}, status=400
-                )
+                return {"success": False, "error": "INVALID_DIAGNOSTIC_STREAM"}, 400
         rows = await asyncio.gather(
             *(
                 self._read_plugin_diagnostics(
@@ -883,26 +871,37 @@ class PagesAPIMixin:
                 int(event.get("seq") or 0),
             )
         )
-        return json_response(
-            {
-                "success": True,
-                "contract": "series.diagnostics.aggregate@1.0",
-                "events": events,
-                "members": members,
-                "count": len(events),
-            }
-        )
+        return {
+            "success": True,
+            "contract": "series.diagnostics.aggregate@1.0",
+            "events": events,
+            "members": members,
+            "count": len(events),
+        }, 200
 
-    async def _pages_clear_diagnostic_logs(self):
+    async def _pages_diagnostic_logs(self):
         data = await self._request_json()
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        payload, status = await self._diagnostic_logs_core(data)
+        if status != 200:
+            return json_response(payload, status=status)
+        return json_response(payload)
+
+    async def _diagnostic_clear_core(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """诊断清空内核：Page 与独立 WebUI 共用的唯一实现。"""
         if (
             not isinstance(data, dict)
             or not set(data).issubset({"confirm", "plugin_ids"})
             or data.get("confirm") is not True
         ):
-            return json_response(
-                {"success": False, "error": "CONFIRMATION_REQUIRED"}, status=400
-            )
+            return {"success": False, "error": "CONFIRMATION_REQUIRED"}, 400
         providers = await self._diagnostic_providers()
         provider_by_id = {item.plugin_id: item for item in providers}
         requested = data.get("plugin_ids")
@@ -913,16 +912,12 @@ class PagesAPIMixin:
         ):
             selected = list(dict.fromkeys(requested))
         else:
-            return json_response(
-                {"success": False, "error": "INVALID_PLUGIN_IDS"}, status=400
-            )
+            return {"success": False, "error": "INVALID_PLUGIN_IDS"}, 400
         unknown = [
             plugin_id for plugin_id in selected if plugin_id not in provider_by_id
         ]
         if unknown:
-            return json_response(
-                {"success": False, "error": "PLUGIN_NOT_TRUSTED"}, status=403
-            )
+            return {"success": False, "error": "PLUGIN_NOT_TRUSTED"}, 403
         cleared: list[str] = []
         unavailable: list[str] = []
         for plugin_id in selected:
@@ -940,13 +935,20 @@ class PagesAPIMixin:
                 cleared.append(plugin_id)
             except Exception:
                 unavailable.append(plugin_id)
-        return json_response(
-            {
-                "success": True,
-                "cleared": cleared,
-                "unavailable": unavailable,
-            }
+        return {
+            "success": True,
+            "cleared": cleared,
+            "unavailable": unavailable,
+        }, 200
+
+    async def _pages_clear_diagnostic_logs(self):
+        data = await self._request_json()
+        payload, status = await self._diagnostic_clear_core(
+            data if isinstance(data, dict) else data
         )
+        if status != 200:
+            return json_response(payload, status=status)
+        return json_response(payload)
 
     def _webui_auth_service(self) -> WebUIAuth:
         service = getattr(self, "webui_auth", None)
@@ -1104,6 +1106,17 @@ class PagesAPIMixin:
     async def _webui_modules_payload(self) -> dict[str, Any]:
         items = await self.catalog.scan()
         trusted_ids = set(TRUSTED_BY_ID)
+        version_state = self.store.read("webui-version-state.json", {})
+        state_items = (
+            version_state.get("items", {}) if isinstance(version_state, dict) else {}
+        )
+        if not isinstance(state_items, dict):
+            state_items = {}
+        checked_at = (
+            str(version_state.get("checked_at") or "")
+            if isinstance(version_state, dict)
+            else ""
+        )
         modules = []
         seen: set[str] = set()
         for item in items:
@@ -1120,6 +1133,8 @@ class PagesAPIMixin:
             contract_info = await self._webui_module_contracts(
                 item.plugin_id, canonical_id
             )
+            per_state = state_items.get(canonical_id)
+            per_state = per_state if isinstance(per_state, dict) else {}
             modules.append(
                 {
                     "plugin_id": canonical_id,
@@ -1132,7 +1147,12 @@ class PagesAPIMixin:
                     "eligible": bool(item.eligible),
                     **contract_info,
                     "status": "normal" if item.activated and item.loaded else "offline",
-                    "update_available": False,
+                    "update_available": bool(per_state.get("update_available")),
+                    "version_status": str(
+                        per_state.get("version_status") or "not_checked"
+                    ),
+                    "latest_version": str(per_state.get("latest_version") or ""),
+                    "versions_checked_at": checked_at,
                 }
             )
         return {
@@ -1321,12 +1341,13 @@ class PagesAPIMixin:
                 return None
         return value
 
-    async def _pages_save_config(self):
-        data = await self._request_json()
-        if not isinstance(data, dict):
-            return json_response(
-                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
-            )
+    async def _save_config_core(
+        self, data: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """配置保存内核：schema 校验 + 双层持久化 + 运行时应用 + 调度重建。
+
+        Page 与独立 WebUI 共用，保证两条入口的校验与副作用完全一致。
+        """
         schema = self._schema()
         changes: dict[str, Any] = {}
         errors: dict[str, str] = {}
@@ -1344,22 +1365,22 @@ class PagesAPIMixin:
             except (TypeError, ValueError):
                 errors[key] = "INVALID_VALUE"
         if errors:
-            return json_response(
+            return (
                 {"success": False, "error": "VALIDATION_FAILED", "fields": errors},
-                status=400,
+                400,
             )
 
         updated_overrides = {**self._config_overrides, **changes}
         try:
             self.store.write("manager-config.json", updated_overrides)
         except Exception as exc:
-            return json_response(
+            return (
                 {
                     "success": False,
                     "error": "CONFIG_PERSIST_FAILED",
                     "detail": str(exc) or type(exc).__name__,
                 },
-                status=500,
+                500,
             )
 
         self._config_overrides = updated_overrides
@@ -1374,14 +1395,14 @@ class PagesAPIMixin:
         try:
             self._apply_page_runtime_config()
         except Exception as exc:
-            return json_response(
+            return (
                 {
                     "success": False,
                     "error": "CONFIG_APPLY_FAILED",
                     "detail": str(exc) or type(exc).__name__,
                     "persisted": {"local": True, "native": native_saved},
                 },
-                status=500,
+                500,
             )
 
         schedule_updated = False
@@ -1393,7 +1414,7 @@ class PagesAPIMixin:
                     await self.scheduler.remove_job()
                 schedule_updated = True
             except Exception as exc:
-                return json_response(
+                return (
                     {
                         "success": False,
                         "error": "SCHEDULE_UPDATE_FAILED",
@@ -1401,17 +1422,26 @@ class PagesAPIMixin:
                         "config": self._public_config(),
                         "persisted": {"local": True, "native": native_saved},
                     },
-                    status=500,
+                    500,
                 )
-        return json_response(
-            {
-                "success": True,
-                "config": self._public_config(),
-                "persisted": {"local": True, "native": native_saved},
-                "schedule_updated": schedule_updated,
-                "restart_required": False,
-            }
-        )
+        return {
+            "success": True,
+            "config": self._public_config(),
+            "persisted": {"local": True, "native": native_saved},
+            "schedule_updated": schedule_updated,
+            "restart_required": False,
+        }, 200
+
+    async def _pages_save_config(self):
+        data = await self._request_json()
+        if not isinstance(data, dict):
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        payload, status = await self._save_config_core(data)
+        if status != 200:
+            return json_response(payload, status=status)
+        return json_response(payload)
 
     # ------------------------------------------------------------ 镜像加速
 

@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from .transaction import TransactionError
+
 from .webui_auth import WebUIAuth, WebUIAuthError
 
 SESSION_COOKIE = "nx_update_manager_session"
@@ -34,6 +36,13 @@ class WebUIServer:
         series_control: Any | None = None,
         panels: Any | None = None,
         lifecycle: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        diagnostic_logs: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        diagnostic_clear: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        updates_check: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        transactions: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        rollback: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        settings_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.auth = auth
         self.static_root = static_root.resolve()
@@ -58,6 +67,13 @@ class WebUIServer:
         self.series_control = series_control
         self.panels = panels
         self.lifecycle = lifecycle
+        self.diagnostic_logs = diagnostic_logs
+        self.diagnostic_clear = diagnostic_clear
+        self.updates_check = updates_check
+        self.transactions = transactions
+        self.rollback = rollback
+        self.settings_get = settings_get
+        self.settings_save = settings_save
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._started = False
@@ -114,6 +130,13 @@ class WebUIServer:
             app.router.add_get("/api/series/{plugin_id}/panels/{panel}", self._panels_data)
             app.router.add_post("/api/series/{plugin_id}/panels/{panel}/actions/{action}", self._panels_action)
             app.router.add_post("/api/series/{plugin_id}/lifecycle/{action}", self._lifecycle_action)
+            app.router.add_post("/api/diagnostics/logs", self._diagnostics_logs)
+            app.router.add_post("/api/diagnostics/clear", self._diagnostics_clear)
+            app.router.add_post("/api/updates/check", self._updates_check)
+            app.router.add_get("/api/updates/transactions", self._updates_transactions)
+            app.router.add_post("/api/updates/rollback", self._updates_rollback)
+            app.router.add_get("/api/settings", self._settings_get)
+            app.router.add_post("/api/settings", self._settings_save)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
@@ -397,3 +420,79 @@ class WebUIServer:
             return self._json({"success": False, "error": str(exc)}, 400)
         except (ValueError, RuntimeError) as exc:
             return self._json({"success": False, "error": str(exc)}, 409)
+
+    async def _call_capability(
+        self,
+        request: web.Request,
+        name: str,
+        *args: Any,
+        role_required: str = "viewer",
+        body: bool = False,
+    ) -> web.Response:
+        """统一能力调用：会话校验 → 角色门控 → 错误映射。"""
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        ranks = {"viewer": 0, "admin": 1, "owner": 2}
+        if ranks.get(role, -1) < ranks[role_required]:
+            return self._json({"success": False, "error": "ROLE_FORBIDDEN"}, 403)
+        function = getattr(self, name, None)
+        if not callable(function):
+            return self._json(
+                {"success": False, "error": f"{name.upper()}_UNAVAILABLE"}, 503
+            )
+        try:
+            call_args = list(args)
+            if body:
+                call_args.append(await self._body(request))
+            value = await function(*call_args)
+            payload = value if isinstance(value, dict) else {"success": True, "data": value}
+            payload.setdefault("success", True)
+            return self._json(payload)
+        except PermissionError as exc:
+            return self._json({"success": False, "error": str(exc)}, 403)
+        except LookupError as exc:
+            return self._json({"success": False, "error": str(exc)}, 400)
+        except TransactionError as exc:
+            return self._json({"success": False, "error": str(exc)}, 409)
+        except ValueError as exc:
+            return self._json({"success": False, "error": str(exc)}, 400)
+        except Exception as exc:  # noqa: BLE001 — 兜底，避免拖垮整个 WebUI
+            return self._json(
+                {"success": False, "error": f"WEBUI_CAPABILITY_FAILED:{type(exc).__name__}"},
+                500,
+            )
+
+    async def _diagnostics_logs(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "diagnostic_logs", body=True)
+
+    async def _diagnostics_clear(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "diagnostic_clear", body=True, role_required="admin"
+        )
+
+    async def _updates_check(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "updates_check", role_required="admin"
+        )
+
+    async def _updates_transactions(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "transactions")
+
+    async def _updates_rollback(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if role != "owner":
+            return self._json({"success": False, "error": "OWNER_REQUIRED"}, 403)
+        body = await self._body(request) or {}
+        tx_id = str(body.get("tx_id") or "").strip() if isinstance(body, dict) else ""
+        return await self._call_capability(request, "rollback", tx_id)
+
+    async def _settings_get(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "settings_get")
+
+    async def _settings_save(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "settings_save", body=True, role_required="admin"
+        )

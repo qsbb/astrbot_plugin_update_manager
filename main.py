@@ -42,7 +42,15 @@ from .core.model_router import (
     normalize_routes,
     resolve_route,
 )
-from .core.models import Candidate, FailurePolicy, Policy, UpdatePlan, UpdateRule
+from .core.models import (
+    Candidate,
+    FailurePolicy,
+    Policy,
+    TxState,
+    UpdatePlan,
+    UpdateRule,
+    utc_now,
+)
 from .core.planner import PlanError, UpdatePlanner
 from .core.request_context import (
     OWNER_UPDATE_MANAGER,
@@ -69,8 +77,21 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 _current_instance: "UpdateManagerPlugin | None" = None
+
+# 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
+# 密钥、代理、插件根目录等敏感配置仍然只在已鉴权的核 Page 中维护。
+WEBUI_SETTINGS_KEYS = frozenset(
+    {
+        "model_routing",
+        "auto_update_enabled",
+        "log_level",
+        "webui_host",
+        "webui_port",
+        "webui_public_url",
+    }
+)
 
 
 @register(
@@ -431,6 +452,13 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             series_control=self.series_control,
             panels=self.webui_panels,
             lifecycle=self._webui_lifecycle,
+            diagnostic_logs=self._webui_diagnostic_logs,
+            diagnostic_clear=self._webui_diagnostic_clear,
+            updates_check=self._webui_updates_check,
+            transactions=self._webui_transactions,
+            rollback=self._webui_rollback,
+            settings_get=self._webui_settings_get,
+            settings_save=self._webui_settings_save,
         )
 
     async def _webui_lifecycle(
@@ -455,6 +483,138 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "action": action,
             "version": result.get("version"),
             "lifecycle": result.get("lifecycle"),
+        }
+
+    # ------------------------------------------------ 独立 WebUI：诊断/检查/设置
+
+    async def _webui_diagnostic_logs(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """WebUI 诊断日志：与 Page 共用 _diagnostic_logs_core 唯一实现。"""
+        data = payload if isinstance(payload, dict) else {}
+        result, status = await self._diagnostic_logs_core(data)
+        if status != 200:
+            raise ValueError(str(result.get("error") or "DIAGNOSTIC_LOGS_FAILED"))
+        return result
+
+    async def _webui_diagnostic_clear(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        result, status = await self._diagnostic_clear_core(data)
+        if status != 200:
+            error = str(result.get("error") or "DIAGNOSTIC_CLEAR_FAILED")
+            if error == "PLUGIN_NOT_TRUSTED":
+                raise LookupError(error)
+            raise ValueError(error)
+        return result
+
+    def _webui_provider_options(self) -> list[dict[str, str]]:
+        """best-effort 枚举宿主可用 provider，供路由编辑下拉/补全。"""
+        manager = getattr(self.context, "provider_manager", None)
+        providers = getattr(manager, "providers", None) or ()
+        options: dict[str, str] = {}
+        for item in providers:
+            provider_id = str(getattr(item, "id", "") or "").strip()
+            if not provider_id:
+                continue
+            options.setdefault(provider_id, type(item).__name__)
+        return [
+            {"provider_id": key, "type": value}
+            for key, value in sorted(options.items())
+        ]
+
+    async def _webui_settings_get(self) -> dict[str, Any]:
+        config = self._public_config()
+        settings = {key: config.get(key) for key in sorted(WEBUI_SETTINGS_KEYS)}
+        return {
+            "success": True,
+            "settings": settings,
+            "providers": self._webui_provider_options(),
+        }
+
+    async def _webui_settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        if not data:
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        unknown = sorted(set(data) - WEBUI_SETTINGS_KEYS)
+        if unknown:
+            raise ValueError(f"UNKNOWN_FIELD:{','.join(unknown)}")
+        result, status = await self._save_config_core(data)
+        if status != 200:
+            error = str(result.get("error") or "SETTINGS_SAVE_FAILED")
+            fields = result.get("fields")
+            detail = ";".join(
+                f"{key}={value}" for key, value in sorted(fields.items())
+            ) if isinstance(fields, dict) else ""
+            raise ValueError(f"{error}:{detail}" if detail else error)
+        return result
+
+    async def _webui_updates_check(self) -> dict[str, Any]:
+        """真实版本检查：复用 Page 的 registry 比对，并把结果持久化给模块列表。"""
+        payload = await self._recommendation_payload(
+            force_refresh=True, check_versions=True
+        )
+        rows: list[dict[str, Any]] = []
+        state_items: dict[str, Any] = {}
+        for item in payload.get("recommendations", []) or []:
+            if not isinstance(item, dict):
+                continue
+            plugin_id = str(item.get("plugin_id") or "")
+            if plugin_id not in TRUSTED_BY_ID:
+                continue
+            state_items[plugin_id] = {
+                "update_available": bool(item.get("update_available")),
+                "version_status": str(item.get("version_status") or "unknown"),
+                "latest_version": str(item.get("latest_version") or ""),
+            }
+            rows.append(
+                {
+                    "plugin_id": plugin_id,
+                    "display_name": str(item.get("display_name") or plugin_id),
+                    "version": str(item.get("version") or ""),
+                    "latest_version": str(item.get("latest_version") or ""),
+                    "update_available": bool(item.get("update_available")),
+                    "version_status": str(item.get("version_status") or "unknown"),
+                }
+            )
+        checked_at = utc_now().isoformat()
+        self.store.write(
+            "webui-version-state.json", {"checked_at": checked_at, "items": state_items}
+        )
+        return {"success": True, "checked_at": checked_at, "items": rows}
+
+    async def _webui_transactions(self) -> dict[str, Any]:
+        """列出可回滚的已提交更新事务（只读，供 owner 选择恢复点）。"""
+        records: list[dict[str, Any]] = []
+        for name in self.store.names("tx-"):
+            record = self.store.read(name, None)
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("state") or "") != TxState.COMMITTED.value:
+                continue
+            records.append(
+                {
+                    "tx_id": str(record.get("tx_id") or name[3:-5]),
+                    "plugin_id": str(record.get("plugin_id") or ""),
+                    "from_version": str(record.get("from_version") or ""),
+                    "to_version": str(record.get("to_version") or ""),
+                    "started_at": str(record.get("started_at") or ""),
+                }
+            )
+        records.sort(key=lambda item: item["started_at"], reverse=True)
+        return {"success": True, "transactions": records[:50]}
+
+    async def _webui_rollback(self, tx_id: str) -> dict[str, Any]:
+        tx = str(tx_id or "").strip()
+        if not tx:
+            raise ValueError("INVALID_TRANSACTION_ID")
+        record = await self.transaction.manual_rollback(tx)
+        return {
+            "success": True,
+            "tx_id": str(record.get("tx_id") or tx),
+            "plugin_id": str(record.get("plugin_id") or ""),
+            "state": str(record.get("state") or ""),
+            "from_version": str(record.get("from_version") or ""),
+            "to_version": str(record.get("to_version") or ""),
         }
 
     async def _start_webui_from_page(self, request_host: str = "") -> WebUIServer:

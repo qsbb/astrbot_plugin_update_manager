@@ -30,3 +30,9 @@
 .panel-action-form select,.panel-action-form input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;min-width:160px}
 .empty-cell{color:var(--muted)}
 @media (max-width:860px){.form-row{grid-template-columns:1fr;gap:8px}.form-meta{justify-content:flex-start}}
+.select{padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:13px}
+.log-table td{font-size:12px;vertical-align:top}
+.log-error td:first-child{border-left:3px solid var(--red)}
+.log-warning td:first-child{border-left:3px solid var(--orange)}
+.log-details{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.pill.warn{background:#fff7e6;color:var(--orange)}

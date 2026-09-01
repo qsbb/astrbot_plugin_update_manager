@@ -51,6 +51,23 @@ class AtomicJsonStore:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
 
+    def names(self, prefix: str = "") -> list[str]:
+        """列举数据根目录下的存储名（仅本层 .json 文件，不含子目录）。"""
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]*", prefix):
+            raise ValueError("非法存储前缀")
+        try:
+            entries = sorted(self.root.iterdir())
+        except OSError:
+            return []
+        return [
+            entry.name
+            for entry in entries
+            if entry.is_file()
+            and entry.name.endswith(".json")
+            and not entry.name.startswith(".")
+            and entry.name.startswith(prefix)
+        ]
+
     def write(self, name: str, value: Any) -> None:
         target = self.path(name)
         fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(self.root))

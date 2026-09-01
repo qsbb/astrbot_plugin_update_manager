@@ -97,7 +97,7 @@ def test_standalone_webui_control_console_takes_over_series_plugins():
     assert "lifecycle-force" in js
     assert 'role !== "owner"' in js
     # 生命周期走核事务路径提示，更新视图跳转接管台
-    assert "前往接管台执行" in js
+    assert "前往接管台" in js
     assert "data-control-open" in js
     # 样式支撑
     for cls in (".tab-strip", ".form-row", ".panel-nav", ".panel-actions", ".pill.managed"):
@@ -768,3 +768,26 @@ def test_manager_page_exposes_unified_model_routing_fields():
     assert 'key === "model_routing" && field.type === "object"' in js
     assert "data-model-kind" in js
     assert "插件显式配置优先" in js
+
+
+def test_standalone_webui_has_working_diagnostics_updates_settings():
+    """用户视角可用性：诊断日志、更新检查/回滚、设置编辑三条链路齐全。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    # 诊断：游标续读 + 级别过滤 + 自动刷新 + 清空
+    assert "diagnostics/logs" in js
+    assert "diagnostics/clear" in js
+    assert "logCursors" in js and "next_seq" in js
+    assert 'id="log-level"' in js and 'id="log-auto"' in js
+    # 更新：真实检查更新 + 恢复点回滚
+    assert "updates/check" in js
+    assert "updates/transactions" in js
+    assert "updates/rollback" in js
+    assert "data-rollback" in js
+    assert "async function checkUpdates" in js
+    # 设置：模型路由编辑 + 白名单字段保存
+    assert "data-setting-route" in js
+    assert "async function saveSettings" in js
+    assert 'post("settings"' in js
+    # 模块列表不再伪造检查结果
+    assert 'id="check"' in js
+    assert "version_status === \"not_checked\"" in js
