@@ -62,6 +62,48 @@ def test_standalone_webui_has_clickable_views_and_model_routing():
     assert "detail-grid" in js and ".detail-grid" in css
 
 
+def test_standalone_webui_control_console_takes_over_series_plugins():
+    """系列接管管理台：字段接管表单、插件面板、生命周期三区齐全。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+    # 三个子区与切换
+    assert '["fields", "字段接管"], ["panels", "插件面板"], ["lifecycle", "生命周期"]' in js
+    assert "data-control-tab" in js
+    assert "state.controlTab" in js
+    # 字段接管：可编辑表单 + validate/apply + 重置 + revision 乐观锁
+    assert "function controlFieldsTab" in js
+    assert "function collectControlPatch" in js
+    assert "async function applyControlPatch" in js
+    assert "async function resetControlFields" in js
+    assert "/control/validate" in js
+    assert "/control/apply" in js
+    assert "/control/reset" in js
+    assert "expected_revision" in js
+    assert 'data-control-field' in js
+    # 插件面板：series.webui 契约分发 + 通用渲染 + 动作
+    assert "async function loadPanelsList" in js
+    assert "async function loadPanelData" in js
+    assert "async function runPanelAction" in js
+    assert "/panels" in js
+    assert "/actions/" in js
+    assert "function panelContent" in js
+    assert "payload_fields" in js
+    assert 'data-panel-select' in js and 'data-panel-action' in js
+    # 生命周期：owner 门控 + 确认 + force 选项
+    assert "async function runLifecycle" in js
+    assert "/lifecycle/" in js
+    assert 'data-lifecycle="update"' in js
+    assert 'data-lifecycle="disable"' in js
+    assert "lifecycle-force" in js
+    assert 'role !== "owner"' in js
+    # 生命周期走核事务路径提示，更新视图跳转接管台
+    assert "前往接管台执行" in js
+    assert "data-control-open" in js
+    # 样式支撑
+    for cls in (".tab-strip", ".form-row", ".panel-nav", ".panel-actions", ".pill.managed"):
+        assert cls in css
+
+
 def test_manager_page_has_incremental_series_diagnostic_console():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")

@@ -54,8 +54,10 @@ from .core.request_context import (
 )
 from .core.scheduler import RuleConflictError, ScheduleService
 from .core.series_control import SeriesControlGateway
+from .core.trusted import TRUSTED_BY_ID
 from .core.transaction import PluginTransaction
 from .core.webui_auth import WebUIAuth
+from .core.webui_panels import WebUIPanelsGateway
 from .core.webui_server import WebUIServer
 from .pages_api import PagesAPIMixin
 from .series_diagnostics import (
@@ -67,7 +69,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.13.3"
+__version__ = "0.14.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 
@@ -104,6 +106,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             self.store,
             diagnostic=diagnostic_event,
         )
+        # 独立 WebUI 统一接管：面板契约网关 + 生命周期（owner 专用）
+        self.webui_panels = WebUIPanelsGateway(self.adapter)
         self.webui_enabled = self._get_bool("webui_enabled", True)
         self.webui_server = self._new_webui_server() if self.webui_enabled else None
         self.enabled = self._get_bool("enabled", True)
@@ -425,7 +429,33 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             diagnostics=self._webui_diagnostics_payload,
             model_routing=self.model_routes_snapshot,
             series_control=self.series_control,
+            panels=self.webui_panels,
+            lifecycle=self._webui_lifecycle,
         )
+
+    async def _webui_lifecycle(
+        self, plugin_id: str, action: str, *, force: bool = False
+    ) -> dict[str, Any]:
+        """独立 WebUI 的生命周期入口（调用方已做 owner 门控）。
+
+        复用与核 Page 完全相同的 _apply_recommended_plugin 事务路径
+        （可信校验、串行协调、回滚与热重载语义一致），不另起一套逻辑。
+        """
+        trusted = TRUSTED_BY_ID.get(str(plugin_id or "").strip())
+        if trusted is None:
+            raise LookupError("PLUGIN_NOT_TRUSTED")
+        canonical = trusted.plugin_id
+        if canonical == PLUGIN_NAME:
+            raise ValueError("SELF_UPDATE_FORBIDDEN")
+        result = await self._apply_recommended_plugin(
+            canonical, action, force=force if action == "update" else False
+        )
+        return {
+            "plugin_id": canonical,
+            "action": action,
+            "version": result.get("version"),
+            "lifecycle": result.get("lifecycle"),
+        }
 
     async def _start_webui_from_page(self, request_host: str = "") -> WebUIServer:
         """Start the listener after an explicit, already-authenticated Page action."""

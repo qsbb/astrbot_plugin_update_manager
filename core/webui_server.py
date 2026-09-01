@@ -32,6 +32,8 @@ class WebUIServer:
         model_routing: Callable[[], dict[str, Any] | Awaitable[dict[str, Any]]]
         | None = None,
         series_control: Any | None = None,
+        panels: Any | None = None,
+        lifecycle: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.auth = auth
         self.static_root = static_root.resolve()
@@ -54,6 +56,8 @@ class WebUIServer:
         self.diagnostics = diagnostics
         self.model_routing = model_routing
         self.series_control = series_control
+        self.panels = panels
+        self.lifecycle = lifecycle
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._started = False
@@ -106,6 +110,10 @@ class WebUIServer:
             app.router.add_post("/api/series/{plugin_id}/control/apply", self._series_apply)
             app.router.add_post("/api/series/{plugin_id}/control/reset", self._series_reset)
             app.router.add_get("/api/series/{plugin_id}/control/diagnostics", self._series_diagnostics)
+            app.router.add_get("/api/series/{plugin_id}/panels", self._panels_list)
+            app.router.add_get("/api/series/{plugin_id}/panels/{panel}", self._panels_data)
+            app.router.add_post("/api/series/{plugin_id}/panels/{panel}/actions/{action}", self._panels_action)
+            app.router.add_post("/api/series/{plugin_id}/lifecycle/{action}", self._lifecycle_action)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
@@ -314,3 +322,78 @@ class WebUIServer:
         if fields is not None and (not isinstance(fields, list) or not all(isinstance(x, str) for x in fields)):
             return self._json({"success": False, "error": "INVALID_FIELDS"}, 400)
         return await self._series_call(request, "reset", request.match_info["plugin_id"], fields)
+
+    async def _panels_dispatch(
+        self, request: web.Request, method: str, *args: Any
+    ) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.panels is None:
+            return self._json({"success": False, "error": "PANELS_UNAVAILABLE"}, 503)
+        try:
+            function = getattr(self.panels, method)
+            if method == "action":
+                value = await function(
+                    request.match_info["plugin_id"],
+                    request.match_info["panel"],
+                    request.match_info["action"],
+                    await self._body(request) or {},
+                    role,
+                )
+            else:
+                call_args = (request.match_info["plugin_id"],) + args
+                value = await function(*call_args)
+            payload = value if isinstance(value, dict) else {"success": True, "data": value}
+            payload.setdefault("success", True)
+            return self._json(payload)
+        except PermissionError as exc:
+            return self._json({"success": False, "error": str(exc)}, 403)
+        except LookupError as exc:
+            error = str(exc) or "PANEL_FAILED"
+            status = 503 if error in {"PLUGIN_NOT_LOADED", "CONTRACT_UNAVAILABLE", "CONTRACT_VERSION_UNSUPPORTED"} else 400
+            return self._json({"success": False, "error": error}, status)
+        except (ValueError, TypeError) as exc:
+            error = str(exc) or "PANEL_FAILED"
+            status = 409 if error == "REVISION_CONFLICT" else 400
+            return self._json({"success": False, "error": error}, status)
+        except Exception as exc:  # noqa: BLE001 — 独立服务必须兜底，避免拖垮整个 WebUI
+            return self._json(
+                {"success": False, "error": f"PANEL_FAILED:{type(exc).__name__}"}, 500
+            )
+
+    async def _panels_list(self, request: web.Request) -> web.Response:
+        return await self._panels_dispatch(request, "panels")
+
+    async def _panels_data(self, request: web.Request) -> web.Response:
+        return await self._panels_dispatch(request, "data", request.match_info["panel"])
+
+    async def _panels_action(self, request: web.Request) -> web.Response:
+        return await self._panels_dispatch(request, "action")
+
+    async def _lifecycle_action(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.lifecycle is None:
+            return self._json({"success": False, "error": "LIFECYCLE_UNAVAILABLE"}, 503)
+        action = request.match_info["action"]
+        if action not in {"install", "update", "enable", "disable"}:
+            return self._json({"success": False, "error": "INVALID_LIFECYCLE_ACTION"}, 400)
+        body = await self._body(request) or {}
+        force = bool(body.get("force")) if isinstance(body, dict) else False
+        if role != "owner":
+            return self._json({"success": False, "error": "OWNER_REQUIRED"}, 403)
+        try:
+            value = await self.lifecycle(
+                request.match_info["plugin_id"], action, force=force
+            )
+            payload = value if isinstance(value, dict) else {"success": True, "data": value}
+            payload.setdefault("success", True)
+            return self._json(payload)
+        except PermissionError as exc:
+            return self._json({"success": False, "error": str(exc)}, 403)
+        except LookupError as exc:
+            return self._json({"success": False, "error": str(exc)}, 400)
+        except (ValueError, RuntimeError) as exc:
+            return self._json({"success": False, "error": str(exc)}, 409)
