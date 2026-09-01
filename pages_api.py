@@ -74,24 +74,6 @@ except ImportError:  # AstrBot < 4.26
 PLUGIN_ID = "astrbot_plugin_update_manager"
 SENSITIVE_KEYS = frozenset({"github_token"})
 READ_ONLY_KEYS = frozenset({"data_dir", "plugin_root"})
-
-# 系列中心：各插件管理页映射（page_name -> 中文标题）。
-# 供核 WebUI 统一接管：series/overview 聚合后由前端 iframe 嵌入
-# /api/plugin/page/content/{plugin_id}/{page_name}/（dashboard cookie 鉴权）。
-SERIES_PAGE_MAP: dict[str, tuple[tuple[str, str], ...]] = {
-    "astrbot_plugin_active_learner": (("manager", "知识管理"),),
-    "astrbot_plugin_conversation_flow": (),
-    "astrbot_plugin_embodiment_bridge": (
-        ("operator", "具身操作台"),
-        ("pairing", "设备配对"),
-    ),
-    "astrbot_plugin_environment_awareness": (("status", "环境状态"),),
-    "astrbot_plugin_identity_guardian": (("join_review", "入群审核"),),
-    "astrbot_plugin_orchestration_hub": (("manager", "服务中枢"),),
-    "astrbot_plugin_relationship": (("manager", "关系管理"),),
-    "astrbot_plugin_update_manager": (("manager", "更新管理"),),
-    "astrbot_plugin_voice_hub": (("settings", "语音设置"),),
-}
 DIAGNOSTIC_CONTRACT_NAME = "series.diagnostics"
 DIAGNOSTIC_CONTRACT_MAJOR = "1"
 DIAGNOSTIC_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -203,12 +185,6 @@ class PagesAPIMixin:
             return False
         routes = (
             ("overview", self._pages_overview, ["GET"], "更新管理器总览"),
-            (
-                "series/overview",
-                self._pages_series_overview,
-                ["GET"],
-                "系列统一总览（统一接管各插件管理页）",
-            ),
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
             ("model-routing", self._pages_model_routing, ["GET"], "读取统一模型路由"),
@@ -445,67 +421,6 @@ class PagesAPIMixin:
                     "next_run": self.scheduler.next_run(rule),
                 },
             }
-        )
-
-    async def _series_overview_payload(self) -> dict[str, Any]:
-        """聚合全系列插件状态与管理页入口（统一接管的唯一数据源）。"""
-        by_identity: dict[str, Any] = {}
-        try:
-            snapshots = await self.adapter.snapshot_plugins()
-        except Exception:
-            snapshots = ()
-        for snapshot in snapshots:
-            name = str(getattr(snapshot, "name", "") or "").strip()
-            root = str(getattr(snapshot, "root_dir_name", "") or "").strip()
-            for identity in (name, root):
-                if identity and identity not in by_identity:
-                    by_identity[identity] = snapshot
-        entries: list[dict[str, Any]] = []
-        for item in TRUSTED_SERIES:
-            snapshot = None
-            for identity in trusted_plugin_identities(item):
-                if identity in by_identity:
-                    snapshot = by_identity[identity]
-                    break
-            installed = snapshot is not None
-            activated = bool(getattr(snapshot, "activated", False)) if installed else False
-            loaded = bool(getattr(snapshot, "loaded", False)) if installed else False
-            version = str(getattr(snapshot, "version", "") or "") if installed else ""
-            pages = [
-                {
-                    "page": page_name,
-                    "title": title,
-                    "url": f"/api/plugin/page/content/{item.plugin_id}/{page_name}/",
-                }
-                for page_name, title in SERIES_PAGE_MAP.get(item.plugin_id, ())
-            ]
-            entries.append(
-                {
-                    "key": item.key,
-                    "plugin_id": item.plugin_id,
-                    "display_name": item.display_name,
-                    "description": item.description_zh,
-                    "repo_url": item.repo_url,
-                    "installed": installed,
-                    "enabled": installed and activated and loaded,
-                    "version": version,
-                    "pages": pages,
-                }
-            )
-        installed_count = sum(1 for entry in entries if entry["installed"])
-        enabled_count = sum(1 for entry in entries if entry["enabled"])
-        return {
-            "summary": {
-                "total": len(entries),
-                "installed": installed_count,
-                "enabled": enabled_count,
-            },
-            "series": entries,
-        }
-
-    async def _pages_series_overview(self):
-        return json_response(
-            {"success": True, **(await self._series_overview_payload())}
         )
 
     async def _pages_get_config(self):

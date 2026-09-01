@@ -67,7 +67,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.14.0"
+__version__ = "0.13.3"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 

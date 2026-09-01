@@ -24,7 +24,6 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
     module.UpdateManagerPlugin(ctx, {})
     assert [(route[0], tuple(route[2])) for route in routes] == [
         (f"/{module.PLUGIN_NAME}/overview", ("GET",)),
-        (f"/{module.PLUGIN_NAME}/series/overview", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
         (f"/{module.PLUGIN_NAME}/model-routing", ("GET",)),
@@ -2577,93 +2576,3 @@ async def _catalog_result():
             source_url=None,
         ),
     )
-
-
-def test_series_overview_lists_all_trusted_plugins(monkeypatch, tmp_path):
-    """系列总览：9 个可信插件全部在列，页面映射与状态正确聚合。"""
-    module = import_main(monkeypatch)
-    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
-
-    async def snapshot_plugins():
-        return (
-            SimpleNamespace(
-                name="astrbot_plugin_relationship",
-                root_dir_name="astrbot_plugin_relationship",
-                display_name="凝心溯溪-情",
-                version="0.9.5",
-                activated=True,
-                loaded=True,
-            ),
-            SimpleNamespace(
-                name="astrbot_plugin_voice_hub",
-                root_dir_name="astrbot_plugin_voice_hub",
-                display_name="凝心溯溪-声",
-                version="0.9.1",
-                activated=False,
-                loaded=True,
-            ),
-        )
-
-    monkeypatch.setattr(plugin.adapter, "snapshot_plugins", snapshot_plugins)
-    payload = unwrap(asyncio.run(plugin._pages_series_overview()))
-
-    assert payload["success"] is True
-    entries = {entry["plugin_id"]: entry for entry in payload["series"]}
-    assert len(payload["series"]) == 9
-    keys = {entry["key"] for entry in payload["series"]}
-    assert {"知", "言", "序", "情", "境", "声", "临", "核", "枢"} <= keys
-
-    qing = entries["astrbot_plugin_relationship"]
-    assert qing["installed"] is True
-    assert qing["enabled"] is True
-    assert qing["version"] == "0.9.5"
-    assert qing["pages"] == [
-        {
-            "page": "manager",
-            "title": "关系管理",
-            "url": "/api/plugin/page/content/astrbot_plugin_relationship/manager/",
-        }
-    ]
-
-    sheng = entries["astrbot_plugin_voice_hub"]
-    assert sheng["installed"] is True
-    assert sheng["enabled"] is False  # activated=False → 已安装未启用
-
-    yan = entries["astrbot_plugin_conversation_flow"]
-    assert yan["installed"] is False
-    assert yan["enabled"] is False
-    assert yan["version"] == ""
-    assert yan["pages"] == []
-
-    assert payload["summary"] == {"total": 9, "installed": 2, "enabled": 1}
-
-
-def test_series_overview_survives_adapter_failure(monkeypatch, tmp_path):
-    """快照失败时降级为全未安装，不抛错。"""
-    module = import_main(monkeypatch)
-    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
-
-    async def snapshot_plugins():
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(plugin.adapter, "snapshot_plugins", snapshot_plugins)
-    payload = unwrap(asyncio.run(plugin._pages_series_overview()))
-
-    assert payload["success"] is True
-    assert payload["summary"] == {"total": 9, "installed": 0, "enabled": 0}
-    assert all(entry["installed"] is False for entry in payload["series"])
-
-
-def test_series_overview_route_registered(monkeypatch, tmp_path):
-    """series/overview 注册为 GET 路由。"""
-    module = import_main(monkeypatch)
-    routes = []
-    ctx = context(tmp_path)
-    ctx.register_web_api = lambda *args: routes.append(args)
-    plugin = module.UpdateManagerPlugin(ctx, {})
-    matched = [
-        (route, methods)
-        for route, _handler, methods, _desc in routes
-        if route.endswith("/series/overview")
-    ]
-    assert matched == [("/astrbot_plugin_update_manager/series/overview", ["GET"])]

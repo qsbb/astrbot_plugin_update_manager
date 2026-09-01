@@ -1,8 +1,6 @@
 const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
-    seriesCenter: "系列中心", seriesCenterTitle: "系列中心", seriesCenterHint: "统一接管全系列插件：总览状态、版本与各插件管理页。管理页内嵌打开，复用 dashboard 登录态，无需二次登录。", refreshSeries: "刷新状态", seriesEmbedBack: "返回系列中心",
-    seriesTotal: "系列插件", seriesInstalled: "已安装", seriesEnabledCount: "已启用", seriesEnabled: "已启用", seriesDisabled: "已安装未启用", seriesNotInstalled: "未安装", seriesGoInstall: "前往系列推荐安装",
     refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
     openWebUi: "打开独立 WebUI", copyWebUiLink: "复制链接", copiedWebUiLink: "WebUI 链接已复制", copyWebUiPrompt: "请复制独立 WebUI 地址", webuiActionsLabel: "独立 WebUI 操作", startupFailed: "页面启动失败", webuiAddressLoading: "独立 WebUI 地址加载中…", webuiAddressUnavailable: "独立 WebUI 地址不可用", webuiAddressRunning: "运行中", webuiAddressStopped: "未启动，点击按钮启动", webuiAddressDisabled: "已关闭，请在配置中启用", webuiAddressLabel: "地址", portLabel: "端口", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
     retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
@@ -29,8 +27,6 @@ const messages = {
   },
   "en-US": {
     title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
-    seriesCenter: "Series hub", seriesCenterTitle: "Series hub", seriesCenterHint: "Manage the whole series in one place: status, versions, and each plugin's management page. Pages open embedded and reuse the dashboard session — no second login.", refreshSeries: "Refresh status", seriesEmbedBack: "Back to series hub",
-    seriesTotal: "Series plugins", seriesInstalled: "Installed", seriesEnabledCount: "Enabled", seriesEnabled: "Enabled", seriesDisabled: "Installed, disabled", seriesNotInstalled: "Not installed", seriesGoInstall: "Install from Recommendations",
     refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
     openWebUi: "Open standalone WebUI", copyWebUiLink: "Copy link", copiedWebUiLink: "WebUI link copied", copyWebUiPrompt: "Copy the standalone WebUI address", webuiActionsLabel: "Standalone WebUI actions", startupFailed: "Page startup failed", webuiAddressLoading: "Loading standalone WebUI address…", webuiAddressUnavailable: "Standalone WebUI address unavailable", webuiAddressRunning: "Running", webuiAddressStopped: "Stopped; click the button to start", webuiAddressDisabled: "Disabled; enable it in configuration", webuiAddressLabel: "Address", portLabel: "Port", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
     retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
@@ -293,60 +289,6 @@ async function loadOverview() {
     const comment = item.comment?.[state.locale] || "";
     return `<div><span class="capability-copy"><strong>${escapeHtml(label)}</strong><code>${escapeHtml(item.code)}</code><small>${escapeHtml(comment)}</small></span><span class="pill ${item.available ? "ok" : "off"}">${item.available ? t("available") : t("unavailable")}</span></div>`;
   }).join("");
-}
-
-function seriesStatus(entry) {
-  if (!entry.installed) return { cls: "off", label: t("seriesNotInstalled") };
-  if (entry.enabled) return { cls: "ok", label: t("seriesEnabled") };
-  return { cls: "warn", label: t("seriesDisabled") };
-}
-
-function renderSeries(data) {
-  const summary = data.summary || {};
-  document.getElementById("series-summary").innerHTML = [
-    [t("seriesTotal"), summary.total ?? 0],
-    [t("seriesInstalled"), summary.installed ?? 0],
-    [t("seriesEnabledCount"), summary.enabled ?? 0]
-  ].map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>`).join("");
-  const entries = data.series || [];
-  document.getElementById("series-list").innerHTML = entries.length
-    ? entries.map((entry) => {
-        const status = seriesStatus(entry);
-        const pages = (entry.pages || []).map((page) => `<button type="button" class="series-open" data-series-plugin="${escapeHtml(entry.plugin_id)}" data-series-page="${escapeHtml(page.page)}" data-series-title="${escapeHtml(page.title)}" ${entry.enabled ? "" : "disabled"}>${escapeHtml(page.title)}</button>`).join("");
-        const installHint = entry.installed
-          ? ""
-          : `<button type="button" class="series-install" data-series-goto-recommendations="${escapeHtml(entry.plugin_id)}">${t("seriesGoInstall")}</button>`;
-        return `<article class="series-card"><header><span class="series-key">${escapeHtml(entry.key)}</span><strong>${escapeHtml(entry.display_name)}</strong><span class="pill ${status.cls}">${escapeHtml(status.label)}</span></header><p class="series-desc">${escapeHtml(entry.description || "")}</p><footer><code class="series-version">${entry.installed ? `v${escapeHtml(entry.version || "?")}` : "—"}</code><div class="series-actions">${pages}${installHint}</div></footer></article>`;
-      }).join("")
-    : `<p>${escapeHtml(t("loading"))}</p>`;
-}
-
-async function loadSeries() {
-  const data = await apiGet("series/overview");
-  renderSeries(data);
-}
-
-function openSeriesEmbed(pluginId, pageName, title) {
-  const card = document.getElementById("series-embed");
-  const frame = document.getElementById("series-embed-frame");
-  if (!card || !frame) return;
-  document.getElementById("series-embed-title").textContent = title || pageName;
-  frame.src = `/api/plugin/page/content/${encodeURIComponent(pluginId)}/${encodeURIComponent(pageName)}/`;
-  card.hidden = false;
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function closeSeriesEmbed() {
-  const card = document.getElementById("series-embed");
-  const frame = document.getElementById("series-embed-frame");
-  if (!card || !frame) return;
-  card.hidden = true;
-  frame.src = "about:blank";
-}
-
-function gotoRecommendations() {
-  const button = document.getElementById("tab-recommendations");
-  if (button) activateTab(button, true);
 }
 
 function makeField(key, field, value) {
@@ -1341,7 +1283,6 @@ async function clearDiagnostics() {
 
 
 const sectionLoaders = {
-  series: { targetId: "series-list", labelKey: "seriesCenter", load: loadSeries },
   overview: { targetId: "summary", labelKey: "overview", load: loadOverview },
   recommendations: { targetId: "recommendations-list", labelKey: "recommendations", load: loadRecommendations },
   config: { targetId: "config-fields", labelKey: "config", load: loadConfig },
@@ -1452,37 +1393,6 @@ function bindEvents() {
     if (retryButton) {
       event.preventDefault();
       await retrySection(retryButton.dataset.retrySection, retryButton);
-      return;
-    }
-    const seriesOpen = event.target.closest("[data-series-page]");
-    if (seriesOpen && !seriesOpen.disabled) {
-      event.preventDefault();
-      openSeriesEmbed(
-        seriesOpen.dataset.seriesPlugin,
-        seriesOpen.dataset.seriesPage,
-        seriesOpen.dataset.seriesTitle
-      );
-      return;
-    }
-    const seriesGoInstall = event.target.closest("[data-series-goto-recommendations]");
-    if (seriesGoInstall) {
-      event.preventDefault();
-      gotoRecommendations();
-      return;
-    }
-    const seriesBack = event.target.closest("#series-embed-back");
-    if (seriesBack) {
-      event.preventDefault();
-      closeSeriesEmbed();
-      return;
-    }
-    const seriesRefresh = event.target.closest("#series-refresh");
-    if (seriesRefresh) {
-      event.preventDefault();
-      seriesRefresh.disabled = true;
-      loadSeries()
-        .catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true))
-        .finally(() => { seriesRefresh.disabled = false; });
       return;
     }
     const link = event.target.closest("a[data-external-url], a[data-internal-route]");
