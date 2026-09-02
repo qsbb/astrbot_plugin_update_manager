@@ -778,6 +778,13 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     assert "diagnostics/clear" in js
     assert "logCursors" in js and "next_seq" in js
     assert 'id="log-level"' in js and 'id="log-auto"' in js
+    assert 'id="log-search"' in js and 'id="log-range"' in js
+    assert "diagnosticProblems" in js and "diagnosticEvents" in js
+    assert "diagnostic-event" in js and "log-detail-list" in js
+    assert "data-log-module" in js and "data-log-problem" in js
+    assert 'get("model-options")' in js
+    assert "data-route-provider" in js and "data-route-model" in js
+    assert "kind === \"tts\"" in js
     # 更新：真实检查更新 + 恢复点回滚
     assert "updates/check" in js
     assert "updates/transactions" in js

@@ -118,6 +118,43 @@ def test_model_router_contract_uses_core_then_astrbot_fallback(monkeypatch, tmp_
     assert local["source"] == "plugin"
 
 
+def test_model_options_read_loaded_provider_configuration(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+
+    class Provider:
+        def __init__(self, provider_id, provider_type, model, models=None):
+            self.provider_config = {
+                "id": provider_id,
+                "type": provider_type,
+                "model": model,
+                "models": models or [],
+            }
+            self.model_name = model
+
+        def get_model(self):
+            return self.model_name
+
+    chat = Provider("chat", "openai", "chat-current", ["chat-a", "chat-b"])
+    tts = Provider("speech", "tts", "tts-current", [])
+    ctx = context(tmp_path)
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[chat],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[tts],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    payload = asyncio.run(plugin._webui_model_options())
+    assert payload["capabilities"]["conversation"][0]["provider_id"] == "chat"
+    assert payload["capabilities"]["conversation"][0]["models"] == [
+        "chat-current",
+        "chat-a",
+        "chat-b",
+    ]
+    assert payload["capabilities"]["tts"][0]["models"] == ["tts-current"]
+    assert payload["capabilities"]["embedding"] == []
+
+
 def test_model_routing_page_returns_contract_without_secrets(monkeypatch, tmp_path):
     module = import_main(monkeypatch)
     plugin = module.UpdateManagerPlugin(

@@ -1362,6 +1362,8 @@ class PagesAPIMixin:
                 continue
             try:
                 changes[key] = self._coerce_page_value(key, value, schema[key])
+                if PagesAPIMixin._is_model_routing_field(key, schema[key]):
+                    changes[key] = normalize_routes(changes[key])
             except (TypeError, ValueError):
                 errors[key] = "INVALID_VALUE"
         if errors:

@@ -77,7 +77,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -459,6 +459,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             rollback=self._webui_rollback,
             settings_get=self._webui_settings_get,
             settings_save=self._webui_settings_save,
+            model_options=self._webui_model_options,
         )
 
     async def _webui_lifecycle(
@@ -508,19 +509,137 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         return result
 
     def _webui_provider_options(self) -> list[dict[str, str]]:
-        """best-effort 枚举宿主可用 provider，供路由编辑下拉/补全。"""
+        """Best-effort enumerate loaded AstrBot providers without exposing secrets."""
         manager = getattr(self.context, "provider_manager", None)
-        providers = getattr(manager, "providers", None) or ()
+        providers = getattr(manager, "inst_map", None)
+        if isinstance(providers, Mapping):
+            values = providers.values()
+        else:
+            values = getattr(manager, "providers", None) or ()
         options: dict[str, str] = {}
-        for item in providers:
-            provider_id = str(getattr(item, "id", "") or "").strip()
+        for item in values:
+            config = getattr(item, "provider_config", None)
+            provider_id = str(
+                getattr(item, "id", None)
+                or (config.get("id") if isinstance(config, Mapping) else "")
+                or ""
+            ).strip()
             if not provider_id:
                 continue
-            options.setdefault(provider_id, type(item).__name__)
+            provider_type = str(
+                (config.get("type") if isinstance(config, Mapping) else "")
+                or type(item).__name__
+            )
+            options.setdefault(provider_id, provider_type)
         return [
             {"provider_id": key, "type": value}
             for key, value in sorted(options.items())
         ]
+
+    @staticmethod
+    def _provider_id(provider: Any) -> str:
+        config = getattr(provider, "provider_config", None)
+        return str(
+            getattr(provider, "id", None)
+            or (config.get("id") if isinstance(config, Mapping) else "")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _provider_label(provider: Any) -> str:
+        config = getattr(provider, "provider_config", None)
+        return str(
+            (config.get("name") if isinstance(config, Mapping) else "")
+            or (config.get("type") if isinstance(config, Mapping) else "")
+            or type(provider).__name__
+        ).strip()
+
+    def _providers_for_model_kind(self, kind: str) -> list[Any]:
+        manager = getattr(self.context, "provider_manager", None)
+        if manager is None:
+            return []
+        aliases = {
+            "conversation": ("provider_insts",),
+            "embedding": ("embedding_provider_insts", "embed_provider_insts"),
+            "vision": ("provider_insts",),
+            "stt": ("stt_provider_insts",),
+            "tts": ("tts_provider_insts",),
+        }
+        values: list[Any] = []
+        for name in aliases.get(kind, ()):
+            candidates = getattr(manager, name, None) or ()
+            if isinstance(candidates, Mapping):
+                values.extend(candidates.values())
+            elif isinstance(candidates, (list, tuple, set)):
+                values.extend(candidates)
+        if kind == "conversation" and not values:
+            candidates = getattr(manager, "inst_map", {})
+            if isinstance(candidates, Mapping):
+                values.extend(candidates.values())
+        unique: dict[str, Any] = {}
+        for provider in values:
+            provider_id = self._provider_id(provider)
+            if provider_id:
+                unique.setdefault(provider_id, provider)
+        return list(unique.values())
+
+    async def _provider_models(self, provider: Any) -> list[str]:
+        """Read models already present in the loaded provider configuration.
+
+        The settings screen must remain responsive and must not make a remote
+        provider request merely to render a form. Providers that expose a
+        configured model list are supported, while the active model is always
+        included as the final fallback.
+        """
+        models: list[str] = []
+        configured = getattr(provider, "provider_config", None)
+        if isinstance(configured, Mapping):
+            for key in ("model", "model_name", "models", "model_list"):
+                value = configured.get(key)
+                if isinstance(value, str) and value.strip():
+                    models.append(value.strip())
+                elif isinstance(value, (list, tuple, set)):
+                    models.extend(
+                        item.strip()
+                        for item in value
+                        if isinstance(item, str) and item.strip()
+                    )
+        current = getattr(provider, "get_model", None)
+        if callable(current):
+            try:
+                value = current()
+            except Exception:
+                value = ""
+            if isinstance(value, str) and value.strip():
+                models.append(value.strip())
+        return list(dict.fromkeys(models))[:200]
+
+    async def _webui_model_options(self) -> dict[str, Any]:
+        routes = normalize_routes(self._get("model_routing", {}))
+        capabilities: dict[str, list[dict[str, Any]]] = {}
+        for kind in MODEL_KINDS:
+            rows = []
+            for provider in self._providers_for_model_kind(kind):
+                provider_id = self._provider_id(provider)
+                current_model = ""
+                getter = getattr(provider, "get_model", None)
+                if callable(getter):
+                    try:
+                        current_model = str(getter() or "").strip()
+                    except Exception:
+                        current_model = ""
+                rows.append(
+                    {
+                        "provider_id": provider_id,
+                        "display_name": self._provider_label(provider),
+                        "type": type(provider).__name__,
+                        "models": await self._provider_models(provider),
+                        "current_model": current_model,
+                        "in_use": routes.get(kind, {}).get("provider_id") == provider_id,
+                    }
+                )
+            capabilities[kind] = sorted(rows, key=lambda item: item["provider_id"])
+        return {"success": True, "capabilities": capabilities}
 
     async def _webui_settings_get(self) -> dict[str, Any]:
         config = self._public_config()

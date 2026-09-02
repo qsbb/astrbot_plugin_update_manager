@@ -175,6 +175,18 @@ class FakePlugin:
             raise ValueError(error)
         return result
 
+    async def _webui_model_options(self) -> dict:
+        return {
+            "success": True,
+            "capabilities": {
+                "conversation": [{"provider_id": "p1", "display_name": "测试模型", "models": ["m1"], "in_use": True}],
+                "embedding": [],
+                "vision": [],
+                "stt": [],
+                "tts": [],
+            },
+        }
+
     async def _webui_settings_get(self) -> dict:
         return {
             "success": True,
@@ -214,6 +226,7 @@ def _make_server(tmp_path, plugin: FakePlugin) -> WebUIServer:
         rollback=plugin._webui_rollback,
         settings_get=plugin._webui_settings_get,
         settings_save=plugin._webui_settings_save,
+        model_options=plugin._webui_model_options,
     )
 
 
@@ -247,8 +260,10 @@ def test_webui_diagnostics_logs_updates_settings_routes(tmp_path):
                 ("POST", f"{base}/api/diagnostics/logs", {}),
                 ("POST", f"{base}/api/updates/check", {}),
                 ("POST", f"{base}/api/settings", {}),
+                ("GET", f"{base}/api/model-options", None),
             ):
-                async with client.request(method, url, json=payload) as response:
+                kwargs = {"json": payload} if payload is not None else {}
+                async with client.request(method, url, **kwargs) as response:
                     assert response.status == 401, url
             async with client.get(f"{base}/api/updates/transactions") as response:
                 assert response.status == 401
@@ -275,6 +290,10 @@ def test_webui_diagnostics_logs_updates_settings_routes(tmp_path):
                 payload = await response.json()
                 assert payload["settings"]["log_level"] == "INFO"
                 assert payload["providers"][0]["provider_id"] == "p1"
+            async with client.get(f"{base}/api/model-options") as response:
+                assert response.status == 200
+                payload = await response.json()
+                assert payload["capabilities"]["conversation"][0]["models"] == ["m1"]
             for method, url, payload in (
                 ("POST", f"{base}/api/diagnostics/clear", {"confirm": True}),
                 ("POST", f"{base}/api/updates/check", {}),

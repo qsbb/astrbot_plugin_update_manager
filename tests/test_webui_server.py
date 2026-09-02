@@ -71,6 +71,43 @@ def test_standalone_webui_is_independent_from_plugin_page(tmp_path):
     asyncio.run(exercise())
 
 
+def test_model_options_route_requires_auth_and_uses_callback(tmp_path):
+    (tmp_path / "index.html").write_text("standalone", encoding="utf-8")
+    auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
+    auth.create_admin("owner", "owner-pass", "owner")
+
+    async def model_options():
+        return {"capabilities": {"conversation": [{"provider_id": "demo", "models": ["m1"]}]}}
+
+    server = WebUIServer(
+        auth,
+        static_root=tmp_path,
+        host="127.0.0.1",
+        port=free_port(),
+        modules=lambda: asyncio.sleep(0, result={}),
+        diagnostics=lambda: asyncio.sleep(0, result={}),
+        model_options=model_options,
+    )
+
+    async def exercise():
+        await server.start()
+        jar = aiohttp.CookieJar(unsafe=True)
+        async with aiohttp.ClientSession(cookie_jar=jar) as client:
+            async with client.get(server.url + "/api/model-options") as response:
+                assert response.status == 401
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "owner", "password": "owner-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.get(server.url + "/api/model-options") as response:
+                assert response.status == 200
+                assert (await response.json())["capabilities"]["conversation"][0]["models"] == ["m1"]
+        await server.stop()
+
+    asyncio.run(exercise())
+
+
 def test_wildcard_webui_url_uses_dashboard_host_without_wildcard(tmp_path):
     auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
     server = WebUIServer(

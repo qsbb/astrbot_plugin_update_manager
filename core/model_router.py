@@ -12,7 +12,14 @@ from typing import Any, Callable, Mapping
 
 MODEL_KINDS = ("conversation", "embedding", "vision", "stt", "tts")
 MODEL_ROUTER_CONTRACT = "series.model_router@1.0"
-_ROUTE_FIELDS = ("provider_id", "model", "voice")
+_ROUTE_FIELDS = ("provider_id", "model")
+_ROUTE_FIELDS_BY_KIND = {
+    "conversation": ("provider_id", "model"),
+    "embedding": ("provider_id", "model"),
+    "vision": ("provider_id", "model"),
+    "stt": ("provider_id", "model"),
+    "tts": ("provider_id", "model", "voice"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +59,8 @@ def normalize_routes(value: Any) -> dict[str, dict[str, str]]:
         raw = value.get(kind)
         if not isinstance(raw, Mapping):
             continue
-        item = {field: _text(raw.get(field)) for field in _ROUTE_FIELDS}
+        fields = _ROUTE_FIELDS_BY_KIND.get(kind, _ROUTE_FIELDS)
+        item = {field: _text(raw.get(field)) for field in fields}
         if any(item.values()):
             routes[kind] = item
     return routes
@@ -63,15 +71,17 @@ def route_from_config(kind: str, config: Any) -> ModelRoute | None:
     item = routes.get(kind)
     if not item:
         return None
-    configured = bool(item["provider_id"] or item["model"] or item["voice"])
+    configured = bool(
+        item.get("provider_id") or item.get("model") or item.get("voice")
+    )
     return ModelRoute(
         kind=kind,
         source="core",
-        provider_id=item["provider_id"],
-        model=item["model"],
-        voice=item["voice"],
+        provider_id=item.get("provider_id", ""),
+        model=item.get("model", ""),
+        voice=item.get("voice", ""),
         configured=configured,
-        available=bool(item["provider_id"] or item["model"]),
+        available=bool(item.get("provider_id") or item.get("model")),
     )
 
 

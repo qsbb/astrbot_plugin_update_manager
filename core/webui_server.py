@@ -43,6 +43,7 @@ class WebUIServer:
         rollback: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         settings_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        model_options: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.auth = auth
         self.static_root = static_root.resolve()
@@ -74,6 +75,7 @@ class WebUIServer:
         self.rollback = rollback
         self.settings_get = settings_get
         self.settings_save = settings_save
+        self.model_options = model_options
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._started = False
@@ -137,6 +139,7 @@ class WebUIServer:
             app.router.add_post("/api/updates/rollback", self._updates_rollback)
             app.router.add_get("/api/settings", self._settings_get)
             app.router.add_post("/api/settings", self._settings_save)
+            app.router.add_get("/api/model-options", self._model_options)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
@@ -496,3 +499,6 @@ class WebUIServer:
         return await self._call_capability(
             request, "settings_save", body=True, role_required="admin"
         )
+
+    async def _model_options(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "model_options")

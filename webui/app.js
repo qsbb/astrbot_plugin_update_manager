@@ -22,6 +22,13 @@ let state = {
   updatesCheck: null,
   transactions: null,
   settingsData: null,
+  modelOptions: null,
+  logModules: [],
+  logThreshold: "",
+  logRange: "all",
+  logQuery: "",
+  logExpanded: new Set(),
+  logNewKeys: new Set(),
   filter: "all",
   query: "",
   view: "modules",
@@ -59,12 +66,61 @@ function modulesView() {
   const offline = state.modules.length - normal;
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生产状态</div><h1>模块运营中心</h1><p>统一查看可信自有模块的运行状态、版本、契约与诊断入口。</p></div><div class="actions"><button class="btn" id="export">导出摘要</button><button class="btn primary" id="check">检查更新</button></div></div><div class="stats"><div class="stat"><label>可信模块</label><strong>${state.modules.length}</strong><small>来自可信登记</small></div><div class="stat"><label>运行正常</label><strong>${normal}</strong><small>核心链路可用</small></div><div class="stat"><label>需关注</label><strong>${offline}</strong><small>非阻断状态</small></div><div class="stat"><label>契约发现</label><strong>已接入</strong><small>版本化能力</small></div><div class="stat"><label>管理边界</label><strong>安全</strong><small>高危操作仍需确认</small></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>系列模块</h2><span>${filtered().length} 个匹配当前视图</span></div><div class="filters"><label class="search">⌕<input id="query" placeholder="搜索模块名称或 ID" value="${esc(state.query)}"></label><div class="seg"><button data-filter="all" class="${state.filter === "all" ? "active" : ""}">全部</button><button data-filter="normal" class="${state.filter === "normal" ? "active" : ""}">正常</button><button data-filter="offline" class="${state.filter === "offline" ? "active" : ""}">需关注</button></div><span class="grow"></span><button class="btn" id="reload">刷新状态</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>运行状态</th><th>契约</th><th>版本</th><th>更新</th><th>操作</th></tr></thead><tbody>${moduleRows()}</tbody></table></div><div class="footer"><span>只纳管可信登记中的凝心溯溪系列插件。</span><span>${state.modules.length} 个模块</span></div></section>${selectedDetail()}`;
 }
+function relativeTime(timestamp) {
+  const time = Date.parse(timestamp || "");
+  if (!Number.isFinite(time)) return timestamp || "未知时间";
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return `${Math.floor(seconds / 86400)} 天前`;
+}
+function logDetailRows(details) {
+  if (!details || typeof details !== "object" || !Object.keys(details).length) return `<span class="empty-cell">无附加详情</span>`;
+  return `<dl class="log-detail-list">${Object.entries(details).map(([key, value]) => `<div><dt>${esc(key)}</dt><dd>${esc(typeof value === "object" ? JSON.stringify(value) : value)}</dd></div>`).join("")}</dl>`;
+}
+function diagnosticEvents() {
+  const levels = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3 };
+  const now = Date.now();
+  const query = state.logQuery.trim().toLowerCase();
+  return (state.logs || []).filter(item => {
+    if (state.logModules.length && !state.logModules.includes(item.plugin_id)) return false;
+    if (state.logThreshold && (levels[item.level] ?? 0) < (levels[state.logThreshold] ?? 0)) return false;
+    const timestamp = Date.parse(item.timestamp || "");
+    if (state.logRange !== "all" && Number.isFinite(timestamp)) {
+      const ranges = { "15m": 900000, "1h": 3600000, today: 86400000 };
+      if (now - timestamp > ranges[state.logRange]) return false;
+    }
+    if (query) return `${item.plugin_name || ""} ${item.plugin_id || ""} ${item.code || ""} ${item.summary || ""} ${JSON.stringify(item.details || {})}`.toLowerCase().includes(query);
+    return true;
+  }).slice(-400).reverse();
+}
+function diagnosticProblems() {
+  const groups = {};
+  (state.logs || []).filter(item => item.level === "ERROR" || item.level === "WARNING").forEach(item => {
+    const key = `${item.plugin_id}:${item.code || "UNKNOWN"}`;
+    const current = groups[key] || { plugin_id: item.plugin_id, plugin_name: item.plugin_name || item.plugin_id, code: item.code || "UNKNOWN", level: item.level, count: 0, last: item.timestamp };
+    current.count += 1;
+    if (String(item.timestamp || "") > String(current.last || "")) current.last = item.timestamp;
+    if (item.level === "ERROR") current.level = "ERROR";
+    groups[key] = current;
+  });
+  return Object.values(groups).sort((a, b) => (b.level === "ERROR") - (a.level === "ERROR") || b.count - a.count);
+}
 function diagnosticsView() {
-  const rows = state.providers.length ? state.providers.map(item => `<tr><td>${esc(item.display_name)}</td><td><code>${esc(item.plugin_id)}</code></td><td><span class="status">${esc(item.status)}</span></td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">暂无诊断提供方</td></tr>`;
-  const members = (state.logMembers || []).map(item => `<span class="pill">${esc(item.display_name || item.plugin_id)} · ${esc(item.status)} · seq ${esc(item.next_seq ?? 0)}${item.gap ? " · 有断层" : ""}</span>`).join(" ");
-  const events = (state.logs || []).filter(item => !state.logLevel || item.level === state.logLevel).slice(-400).reverse();
-  const logRows = events.map(item => `<tr class="log-${esc(item.level.toLowerCase())}"><td><code>${esc(item.timestamp || "")}</code></td><td>${esc(item.plugin_name || item.plugin_id)}</td><td><span class="pill ${item.level === "ERROR" ? "managed" : item.level === "WARNING" ? "warn" : ""}">${esc(item.level)}</span></td><td><code>${esc(item.code || "-")}</code></td><td>${esc(item.summary || "")}</td><td class="log-details">${esc(item.details && Object.keys(item.details).length ? JSON.stringify(item.details) : "")}</td></tr>`).join("") || `<tr><td colspan="6" class="empty-cell">暂无日志，点击「加载日志」拉取。</td></tr>`;
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行诊断</h1><p>按 series.diagnostics 契约逐模块读取日志：游标续读、级别过滤、断层提示。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>清空日志</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>诊断提供方</h2><span>${state.providers.length} 个</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>插件 ID</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>诊断日志</h2><span>${members || "未加载"}</span></div><div class="filters"><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG"].map(level => `<option value="${level}" ${state.logLevel === level ? "selected" : ""}>${level}</option>`).join("")}</select></div></div><div class="table-wrap log-table"><table class="table"><thead><tr><th>时间</th><th>模块</th><th>级别</th><th>代码</th><th>摘要</th><th>详情</th></tr></thead><tbody>${logRows}</tbody></table></div></section>`;
+  const problems = diagnosticProblems();
+  const members = (state.logMembers || []).map(item => `<span class="pill ${item.gap ? "warn" : ""}">${esc(item.display_name || item.plugin_id)} · ${esc(item.status)} · seq ${esc(item.next_seq ?? 0)}${item.gap ? " · 有断层" : ""}</span>`).join(" ");
+  const modules = [...new Map((state.logs || []).map(item => [item.plugin_id, item.plugin_name || item.plugin_id])).entries()];
+  const events = diagnosticEvents();
+  const problemRows = problems.length ? problems.slice(0, 8).map(item => `<button class="problem-item" data-log-problem="${esc(item.plugin_id)}" data-log-code="${esc(item.code)}"><span class="pill ${item.level === "ERROR" ? "managed" : "warn"}">${esc(item.level)}</span><b>${esc(item.plugin_name)}</b><code>${esc(item.code)}</code><small>${item.count} 次 · ${esc(relativeTime(item.last))}</small></button>`).join("") : `<p class="empty-cell">当前缓冲区没有警告或错误。</p>`;
+  const eventCards = events.length ? events.map(item => {
+    const key = `${item.plugin_id}:${item.seq}`;
+    const expanded = state.logExpanded.has(key);
+    const context = expanded ? (state.logs || []).filter(row => row.plugin_id === item.plugin_id && Math.abs(Number(row.seq || 0) - Number(item.seq || 0)) <= 3 && row.seq !== item.seq).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).map(row => `<button class="log-context-item" data-log-seq="${esc(row.seq)}"><code>${esc(row.seq)}</code> ${esc(row.summary || "")}</button>`).join("") : "";
+    return `<article class="diagnostic-event ${expanded ? "expanded" : ""} ${state.logNewKeys.has(key) ? "new-event" : ""}" data-log-event="${esc(key)}"><button class="diagnostic-event-head" data-log-toggle="${esc(key)}"><time title="${esc(item.timestamp || "")}">${esc(relativeTime(item.timestamp))}</time><span class="event-module">${esc(item.plugin_name || item.plugin_id)}</span><span class="pill ${item.level === "ERROR" ? "managed" : item.level === "WARNING" ? "warn" : ""}">${esc(item.level)}</span><b>${esc(item.summary || "未命名事件")}</b><span class="event-chevron">${expanded ? "收起" : "详情"}</span></button>${expanded ? `<div class="diagnostic-event-detail"><div class="event-meta"><span>代码 <code>${esc(item.code || "-")}</code></span><span>序号 <code>${esc(item.seq)}</code></span></div>${logDetailRows(item.details)}${context ? `<div class="log-context"><strong>同模块上下文</strong>${context}</div>` : ""}</div>` : ""}</article>`;
+  }).join("") : `<div class="empty-cell">暂无匹配日志，请调整过滤条件或点击「加载日志」。</div>`;
+  const selectedModules = modules.map(([id, name]) => `<button class="filter-chip ${state.logModules.includes(id) ? "active" : ""}" data-log-module="${esc(id)}">${esc(name)}</button>`).join("");
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行诊断</h1><p>先看问题聚合，再展开事件详情和上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>清空日志</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>当前问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span>${events.length} 条匹配 · ${members || "未加载"}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list">${eventCards}</div></section>`;
 }
 function updatesView() {
   const checkedAt = state.modules.find(item => item.versions_checked_at)?.versions_checked_at || "";
@@ -77,14 +133,36 @@ function updatesView() {
   const isOwner = state.session?.role === "owner";
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生命周期</div><h1>更新与回滚</h1><p>检查更新对比 GitHub 最新版本；回滚按事务恢复点恢复更新前版本（仅 owner）。</p></div><div class="actions"><button class="btn" id="reload-transactions">刷新恢复点</button><button class="btn primary" id="check-updates" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>检查更新</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>版本状态</h2><span>${checkedAt ? `上次检查：${esc(checkedAt)}` : "尚未检查"}</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>当前版本</th><th>最新版本</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>回滚恢复点</h2><span>来自核事务记录，只接受核生成的备份</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>事务</th><th>模块</th><th>版本变化</th><th>时间</th><th>操作</th></tr></thead><tbody>${txRows}</tbody></table></div><p class="form-hint">${isOwner ? "回滚会覆盖当前代码并热重载，执行前需确认。" : "回滚仅 owner 可执行。"}</p></section>`;
 }
+function modelOptionsFor(kind) {
+  const options = state.modelOptions?.capabilities?.[kind];
+  if (Array.isArray(options)) return options;
+  return (state.settingsData?.providers || []).map(item => ({ ...item, display_name: item.display_name || item.provider_id, models: [] }));
+}
+function providerSelect(kind, selected, canWrite) {
+  const options = [...modelOptionsFor(kind)];
+  if (selected && !options.some(item => item.provider_id === selected)) options.unshift({ provider_id: selected, display_name: selected, models: [], in_use: true });
+  const body = [`<option value="">回退 AstrBot 原生 Provider</option>`, ...options.map(item => `<option value="${esc(item.provider_id)}" ${item.provider_id === selected ? "selected" : ""}>${esc(item.display_name || item.provider_id)} · ${esc(item.provider_id)}${item.in_use ? "（使用中）" : ""}</option>`)].join("");
+  return `<select class="select route-provider" data-route-provider="${esc(kind)}" ${canWrite ? "" : "disabled"}>${body}</select>`;
+}
+function modelSelect(kind, providerId, selected, canWrite) {
+  const provider = modelOptionsFor(kind).find(item => item.provider_id === providerId);
+  const models = provider?.models || [];
+  const hasSelected = models.includes(selected);
+  if (!providerId || !models.length || (selected && !hasSelected)) return `<input class="route-model" data-route-model="${esc(kind)}" type="text" value="${esc(selected)}" placeholder="模型名（可自定义）" ${canWrite ? "" : "disabled"} />`;
+  return `<select class="select route-model" data-route-model="${esc(kind)}" ${canWrite ? "" : "disabled"}><option value="">选择模型…</option>${models.map(model => `<option value="${esc(model)}" ${model === selected ? "selected" : ""}>${esc(model)}</option>`).join("")}<option value="__custom__">自定义输入…</option></select>`;
+}
 function settingsView() {
   const s = state.settingsData?.settings || {};
   const route = s.model_routing || {};
   const canWrite = state.session?.role === "owner" || state.session?.role === "admin";
   const labels = [["conversation", "对话 / LLM"], ["embedding", "向量 / Embedding"], ["vision", "识图 / 视觉"], ["stt", "语音识别 / STT"], ["tts", "语音合成 / TTS"]];
-  const routeRows = labels.map(([kind, label]) => { const item = route[kind] || {}; return `<tr><td><b>${label}</b></td>${[["provider_id", "Provider ID"], ["model", "模型名"], ["voice", "音色（TTS/STT）"]].map(([field, ph]) => `<td><input type="text" list="provider-options" data-setting-route="${kind}.${field}" value="${esc(item[field] || "")}" placeholder="${ph}" ${canWrite ? "" : "disabled"} /></td>`).join("")}</tr>`; }).join("");
+  const routeRows = labels.map(([kind, label]) => {
+    const item = route[kind] || {};
+    const voice = kind === "tts" ? `<td><input class="route-voice" data-setting-route="${kind}.voice" type="text" value="${esc(item.voice || "")}" placeholder="音色（可选）" ${canWrite ? "" : "disabled"} /></td>` : "";
+    return `<tr><td><b>${label}</b><small>${kind === "tts" ? "Provider · 模型 · 音色" : "Provider · 模型"}</small></td><td>${providerSelect(kind, item.provider_id || "", canWrite)}</td><td>${modelSelect(kind, item.provider_id || "", item.model || "", canWrite)}</td>${voice}</tr>`;
+  }).join("");
   const resolvedRows = Object.entries(state.routes?.routes || {}).map(([kind, item]) => { const label = (labels.find(entry => entry[0] === kind) || [kind, kind])[1]; return `<tr><td>${esc(label)}</td><td><code>${esc(item.provider_id || "未配置")}</code></td><td>${esc(item.model || "自动")}</td><td>${esc(item.source || "unavailable")}</td><td><span class="status ${item.available ? "" : "off"}">${item.available ? "可用" : "不可用"}</span></td></tr>`; }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生 Provider</span></div></div><datalist id="provider-options">${(state.settingsData?.providers || []).map(item => `<option value="${esc(item.provider_id)}">`).join("")}</datalist><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label><code>auto_update_enabled</code><small>bool · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label><code>log_level</code><small>str · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_host</code><small>str · WebUI 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_port</code><small>int · WebUI 端口（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_public_url</code><small>str · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>series.model_router@1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生 Provider。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生 Provider</span></div></div><div class="route-note">Provider 和模型来自 AstrBot 当前已加载配置；没有可枚举模型的 provider 保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label><code>auto_update_enabled</code><small>bool · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label><code>log_level</code><small>str · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_host</code><small>str · WebUI 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_port</code><small>int · WebUI 端口（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_public_url</code><small>str · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>series.model_router@1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生 Provider。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
 }
 function controlView() {
   const control = state.control || { mode: "native", members: [], revision: 0 };
@@ -169,10 +247,14 @@ function dashboard() {
 function bindDashboard() {
   document.getElementById("logout")?.addEventListener("click", logout); document.getElementById("rail-logout")?.addEventListener("click", logout); document.getElementById("mobile-logout")?.addEventListener("click", logout);
   document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("reload")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
-  document.getElementById("refresh-diagnostics")?.addEventListener("click", () => loadDiagnostics()); document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-level")?.addEventListener("change", event => { state.logLevel = event.target.value || ""; dashboard(); }); document.getElementById("refresh-routes")?.addEventListener("click", () => loadSettings()); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl()); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
+  document.getElementById("refresh-diagnostics")?.addEventListener("click", () => loadDiagnostics()); document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("refresh-routes")?.addEventListener("click", () => loadSettings()); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl()); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
+  document.querySelectorAll("[data-log-module]").forEach(node => node.addEventListener("click", () => { const id = node.dataset.logModule; state.logModules = state.logModules.includes(id) ? state.logModules.filter(item => item !== id) : [...state.logModules, id]; dashboard(); })); document.querySelectorAll("[data-log-toggle]").forEach(node => node.addEventListener("click", () => { const key = node.dataset.logToggle; if (state.logExpanded.has(key)) state.logExpanded.delete(key); else state.logExpanded.add(key); dashboard(); })); document.querySelectorAll("[data-log-problem]").forEach(node => node.addEventListener("click", () => { state.logModules = [node.dataset.logProblem]; state.logThreshold = node.querySelector(".managed") ? "ERROR" : "WARNING"; state.logQuery = node.dataset.logCode || ""; dashboard(); })); const logSearch = document.getElementById("log-search"); logSearch?.addEventListener("input", () => { state.logQuery = logSearch.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("log-search"); next?.focus(); next?.setSelectionRange(state.logQuery.length, state.logQuery.length); }); });
+  const bindRouteModels = () => document.querySelectorAll("[data-route-model]").forEach(node => node.addEventListener("change", () => { if (node.value !== "__custom__") return; const input = document.createElement("input"); input.className = "route-model"; input.dataset.routeModel = node.dataset.routeModel; input.type = "text"; input.placeholder = "模型名（可自定义）"; input.disabled = node.disabled; node.replaceWith(input); input.focus(); }));
+  document.querySelectorAll("[data-route-provider]").forEach(node => node.addEventListener("change", () => { const kind = node.dataset.routeProvider; const model = document.querySelector(`[data-route-model="${CSS.escape(kind)}"]`); const next = modelSelect(kind, node.value, "", !(model?.disabled)); if (model) { const wrapper = model.parentElement; wrapper.innerHTML = next; bindRouteModels(); } }));
+  bindRouteModels();
   document.getElementById("check-updates")?.addEventListener("click", () => checkUpdates()); document.getElementById("reload-transactions")?.addEventListener("click", () => loadTransactions()); document.querySelectorAll("[data-rollback]").forEach(node => node.addEventListener("click", () => rollbackUpdate(node.dataset.rollback)));
   document.querySelectorAll("[data-view]").forEach(node => node.addEventListener("click", () => { state.view = node.dataset.view || "modules"; state.selectedModule = node.dataset.module || ""; if (state.view === "diagnostics") loadDiagnostics(); else if (state.view === "settings") loadSettings(); else if (state.view === "updates") { dashboard(); loadTransactions(); } else if (state.view === "control") loadControl(); else dashboard(); }));
-  document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", () => loadDiagnostics())); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
+  document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", async () => { state.logModules = [node.dataset.diagnostic]; await loadDiagnostics(); })); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
   document.querySelectorAll("[data-filter]").forEach(node => node.addEventListener("click", () => { state.filter = node.dataset.filter; dashboard(); })); const query = document.getElementById("query"); query?.addEventListener("input", () => { state.query = query.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("query"); next?.focus(); next?.setSelectionRange(state.query.length, state.query.length); }); });
   document.querySelectorAll("[data-control-plugin]").forEach(node => node.addEventListener("click", () => loadControlPlugin(node.dataset.controlPlugin)));
   document.getElementById("close-control-detail")?.addEventListener("click", () => { state.selectedControlPlugin = ""; state.controlSchema = null; state.controlSnapshot = null; state.panelsList = null; state.panelData = null; state.selectedPanel = ""; dashboard(); });
@@ -194,7 +276,9 @@ async function loadDiagnosticLogs(reset = false) {
     const { cursors, streams } = logCursors();
     const result = await post("diagnostics/logs", { cursors, streams, limit: 500 });
     state.logMembers = result.members || [];
-    state.logs = [...state.logs, ...(result.events || [])];
+    const incoming = result.events || [];
+    state.logNewKeys = new Set(incoming.map(item => `${item.plugin_id}:${item.seq}`));
+    state.logs = [...state.logs, ...incoming];
     if (state.logs.length > 3000) state.logs = state.logs.slice(-3000);
     dashboard();
   } catch (error) { showToast(error.message, true); }
@@ -222,6 +306,7 @@ async function rollbackUpdate(txId) {
 async function loadSettings() {
   try {
     state.settingsData = await get("settings");
+    try { state.modelOptions = await get("model-options"); } catch (error) { state.modelOptions = null; }
     try { state.routes = await get("model-routing"); } catch (error) { state.routes = null; }
     if (state.view === "settings") dashboard();
   } catch (error) { showToast(error.message, true); }
@@ -229,7 +314,21 @@ async function loadSettings() {
 async function saveSettings() {
   if (!(state.session?.role === "owner" || state.session?.role === "admin")) { showToast("设置修改仅 admin 及以上可执行", true); return; }
   const routes = {};
-  document.querySelectorAll("[data-setting-route]").forEach(node => { const [kind, field] = String(node.dataset.settingRoute).split("."); const value = node.value.trim(); if (!value) return; routes[kind] = routes[kind] || {}; routes[kind][field] = value; });
+  document.querySelectorAll("[data-route-provider]").forEach(node => {
+    const kind = node.dataset.routeProvider;
+    const model = document.querySelector(`[data-route-model="${CSS.escape(kind)}"]`);
+    const voice = document.querySelector(`[data-setting-route="${CSS.escape(kind)}.voice"]`);
+    const providerId = node.value.trim();
+    const modelValue = model?.value === "__custom__" ? "" : (model?.value || "").trim();
+    if (!providerId && !modelValue && !voice?.value.trim()) return;
+    routes[kind] = { provider_id: providerId, model: modelValue };
+    if (kind === "tts" && voice?.value.trim()) routes[kind].voice = voice.value.trim();
+  });
+  document.querySelectorAll("[data-setting-route]").forEach(node => {
+    if (node.dataset.settingRoute.endsWith(".voice")) return;
+    const [kind, field] = String(node.dataset.settingRoute).split(".");
+    if (!routes[kind] && node.value.trim()) routes[kind] = { [field]: node.value.trim() };
+  });
   const payload = { model_routing: routes, auto_update_enabled: !!document.getElementById("setting-auto-update")?.checked, log_level: document.getElementById("setting-log-level")?.value || "INFO" };
   const host = document.getElementById("setting-webui-host")?.value.trim() || "";
   const portRaw = document.getElementById("setting-webui-port")?.value.trim() || "";
