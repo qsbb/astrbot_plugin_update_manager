@@ -76,6 +76,13 @@ TRUSTED_SERIES = (
         "管理可信插件的安全更新、回滚与自动化调度。",
     ),
     TrustedPlugin(
+        "通",
+        "astrbot_plugin_companion_phone",
+        "凝心溯溪-通",
+        "https://github.com/qsbb/astrbot_plugin_companion_phone",
+        "给虚拟恋人配一部安卓手机：真机/Redroid 双模式的读屏、点按、输入、滑动与启动应用，白名单即操作边界。",
+    ),
+    TrustedPlugin(
         "枢",
         "astrbot_plugin_orchestration_hub",
         "凝心溯溪-枢",

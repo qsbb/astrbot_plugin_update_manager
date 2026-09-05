@@ -1,12 +1,12 @@
 # 凝心溯溪系列插件开发规范
 
-> **文档定位**：本文件是凝心溯溪系列的唯一现行技术规范，治理范围为 8 个插件（知、言、序、情、境、声、临、核）。规范正本只存于核仓库根目录（本文件），随核发布；其余仓库不再分发副本。
+> **文档定位**：本文件是凝心溯溪系列的唯一现行技术规范，治理范围为 9 个插件（知、言、序、情、境、声、临、核、通）。规范正本只存于核仓库根目录（本文件），随核发布；其余仓库不再分发副本。
 >
 > - 取代 `docs/CONVENTIONS-公共规范快照.md`（核仓库内，2026-07-24 历史快照，仅作追溯，不再指导开发）。
 > - 与《开发协作约定.md》（流程层：需求归属、开发流程、环境事实）互补——约定管"谁在什么流程下做什么"，本规范管"代码必须长什么样"。
 > - 平台层依据：AstrBot `AGENTS.md` 工程规范与 AstrBot 源码事实（`astrbot.core.provider`、`ProviderManager`、dashboard provider API、`pyproject.toml`）。
 > - 事实基线：以 2026-09-02 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
-> - **治理范围：8 个插件（知、言、序、情、境、声、临、核）。枢（`astrbot_plugin_orchestration_hub`）未接入系列治理，按 2026-09-02 决定忽略——不适用本规范、不纳入契约要求与开发范围。**
+> - **治理范围：9 个插件（知、言、序、情、境、声、临、核、通）。枢（`astrbot_plugin_orchestration_hub`）未接入系列治理，按 2026-09-02 决定忽略——不适用本规范、不纳入契约要求与开发范围。**
 
 ---
 
@@ -36,6 +36,7 @@
 | 声 | `astrbot_plugin_voice_hub` | 语音：双 TTS 后端、多音色、AI 语音导演、PCM 契约、可取消交付 |
 | 临 | `astrbot_plugin_embodiment_bridge` | 具身桥接：VR/MR 设备 Protocol 1.0、SSE、STT/TTS、动作意图、空间感知 |
 | 核 | `astrbot_plugin_update_manager` | 更新与治理：安全更新/回滚、每日规则、系列诊断、模型路由、配置接管 |
+| 通 | `astrbot_plugin_companion_phone` | 手机操作：真机/Redroid 双模式的读屏、点按、输入、滑动与启动应用；白名单即操作边界，含会话门控与双层高危拦截 |
 
 > 枢（`astrbot_plugin_orchestration_hub`）已忽略：不在治理范围内，本规范不约束它。其单字「枢」视为已分配，不得释放给其他插件复用；若未来重新接入，按第 12 章清单从零执行。
 
@@ -60,6 +61,7 @@
 | 声 | 无聊天命令 | 通过 LLM 工具与配置触发 |
 | 临 | 无聊天命令 | 通过协议/SSE 桥接触发 |
 | 核 | `/aup` | `command_group`（管理员权限） |
+| 通 | `/phone` | `command_group`（管理员权限） |
 
 - 新增前缀前必须查重（含别名）；命令名不含空格，多级语义用 `command_group`。
 - 管理员命令统一挂 `@filter.permission_type(filter.PermissionType.ADMIN)`。
@@ -246,6 +248,7 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
 | 声 | ✓ | ✓ | — | — | ✓（owner） |
 | 临 | ✓ | ✓ | — | — | 只读消费 |
 | 核 | ✓（聚合方） | 网关 | 网关 | — | ✓（owner） |
+| 通 | ✓ | — | ✓ | — | — |
 
 ---
 
@@ -369,7 +372,8 @@ astrbot_plugin_xxx/
 | 声 | astrbot_plugin_voice_hub | 0.9.1 | >=4.16,<5 |
 | 临 | astrbot_plugin_embodiment_bridge | 1.1.3 | >=4.26,<5 |
 | 核 | astrbot_plugin_update_manager | 0.16.0 | >=4.16,<5 |
+| 通 | astrbot_plugin_companion_phone | 0.0.3 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
 
-契约实现矩阵见 5.7；钩子槽位分配见第 4 节；命令前缀分配见 2.3。
+契约实现矩阵见 5.7；钩子槽位分配见第 4 节；命令前缀分配见 2.3。通（0.0.3）于 2026-09-06 接入治理。

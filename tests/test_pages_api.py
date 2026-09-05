@@ -1777,6 +1777,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         "声",
         "临",
         "核",
+        "通",
         "枢",
     ]
     assert all(
@@ -2005,9 +2006,9 @@ def test_recommendation_latest_check_is_parallel_forced_and_failure_isolated(
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert len(payload["items"]) == 9
+    assert len(payload["items"]) == 10
     assert peak > 1
-    assert force_values == [True] * 9
+    assert force_values == [True] * 10
     failed = next(
         item
         for item in payload["items"]
@@ -2040,7 +2041,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
     monkeypatch.setattr(plugin, "_request_json", cached_payload)
     payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
     assert payload["success"] is True
-    assert force_values == [False] * 9
+    assert force_values == [False] * 10
 
     # 缺省仍是手动强制刷新语义。
     force_values.clear()
@@ -2050,7 +2051,7 @@ def test_check_latest_honours_cached_request_and_rejects_bad_flag(
 
     monkeypatch.setattr(plugin, "_request_json", empty_payload)
     assert unwrap(asyncio.run(plugin._pages_check_recommendations()))["success"] is True
-    assert force_values == [True] * 9
+    assert force_values == [True] * 10
 
     # 非布尔值必须拒绝，不能被静默当成真值。
     force_values.clear()
@@ -2220,7 +2221,7 @@ def test_recommendations_get_is_local_and_does_not_probe_remote_versions(
     monkeypatch.setattr(plugin.registry, "github_latest", latest)
     payload = unwrap(asyncio.run(plugin._pages_recommendations()))
     assert payload["success"] is True
-    assert len(payload["items"]) == 9
+    assert len(payload["items"]) == 10
     assert calls == []
     assert all(item["version_status"] == "unknown" for item in payload["items"])
     assert all(item["checked_at"] is None for item in payload["items"])
