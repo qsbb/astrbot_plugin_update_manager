@@ -372,7 +372,7 @@ astrbot_plugin_xxx/
 | 声 | astrbot_plugin_voice_hub | 0.9.1 | >=4.16,<5 |
 | 临 | astrbot_plugin_embodiment_bridge | 1.1.3 | >=4.26,<5 |
 | 核 | astrbot_plugin_update_manager | 0.16.0 | >=4.16,<5 |
-| 通 | astrbot_plugin_companion_phone | 0.0.3 | >=4.16,<5 |
+| 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
 
