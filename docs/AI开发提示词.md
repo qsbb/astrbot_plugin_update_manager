@@ -8,7 +8,7 @@
 
 你将开发 AstrBot 插件 `astrbot_plugin_update_manager`。开始任何设计或编码前，必须按顺序完整阅读并遵循：
 
-1. 公共现行规范：[`../../CONVENTIONS.md`](../../CONVENTIONS.md)；这是唯一现行系列规范。
+1. 公共现行规范：[`../CONVENTIONS.md`](../CONVENTIONS.md)（本仓库根目录）；这是唯一现行系列规范。
 2. 详细开发规划：[`开发规划.html`](开发规划.html)。
 3. 规范基线快照：[`CONVENTIONS-公共规范快照.md`](CONVENTIONS-公共规范快照.md)；它只用于追溯，若与公共规范冲突，以公共现行规范为准。
 
