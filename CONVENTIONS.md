@@ -5,7 +5,7 @@
 > - 取代 `docs/CONVENTIONS-公共规范快照.md`（核仓库内，2026-07-24 历史快照，仅作追溯，不再指导开发）。
 > - 与《开发协作约定.md》（流程层：需求归属、开发流程、环境事实）互补——约定管"谁在什么流程下做什么"，本规范管"代码必须长什么样"。
 > - 平台层依据：AstrBot `AGENTS.md` 工程规范与 AstrBot 源码事实（`astrbot.core.provider`、`ProviderManager`、dashboard provider API、`pyproject.toml`）。
-> - 事实基线：以 2026-09-11 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
+> - 事实基线：以 2026-09-02 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
 > - **治理范围：9 个插件（知、言、序、情、境、声、临、核、通）。枢（`astrbot_plugin_orchestration_hub`）未接入系列治理，按 2026-09-02 决定忽略——不适用本规范、不纳入契约要求与开发范围。**
 
 ---
@@ -120,16 +120,6 @@
 - 统一使用 `astrbot.api.logger`，消息前缀 `[plugin-short]`（如 `[update-manager]`）。
 - 级别纪律：ERROR=需要人介入；WARNING=已降级但仍可用；INFO=状态变化；DEBUG=细节。
 - 日志与审计中的错误文本必须先经 `redact()`（核 `core/adapters/storage.py`）脱敏；任何情况下不打印凭据。
-
-### 3.7 提示词注入的时间标注（注入即标注）
-
-向 LLM 上下文注入任何**过去产生的内容**（历史消息、插话合并、群聊记录、记忆条目等）时，必须遵守：
-
-1. **每条必带真实时间标注**。内容产生时刻作为锚点随文本给出；禁止把无时间信息的历史内容丢给模型，让其凭直觉猜测新旧与先后。
-2. **间隔换算由代码完成，不让模型心算**。相对标签统一使用以下桶：`<5s` 刚刚；`<60s` N秒前；`<1h` N分钟前；`<24h` N小时前；更早给「昨天 HH:MM」「MM-DD HH:MM」，跨年给「YYYY-MM-DD HH:MM」。参考实现：言 `core/time_labels.py`（与私伴 `_format_elapsed` 同族）。
-3. **时间/身份字段是结构元数据，不占用内容字符预算**。预算口径与无标注时保持一致，标注额外附加（言动态续接、知记忆注入已照此实现）。
-4. **秒级连发必须给结论性提示**。同一轮内多条用户消息间隔仅数秒时，注入文本须明确写出「这 N 条消息是用户在 X 秒内连续发出的」之类结论，防止模型误读为跨时段对话后逐条回复。
-5. **常开，不加开关**。时间标注是正确性基础设施，不是可选增强；不做配置项。
 
 ---
 
@@ -370,18 +360,18 @@ astrbot_plugin_xxx/
 
 ---
 
-## 附录 A. 现行状态快照（2026-09-11）
+## 附录 A. 现行状态快照（2026-09-02）
 
 | 字 | plugin_id | 版本 | astrbot_version |
 |----|-----------|------|-----------------|
-| 知 | astrbot_plugin_active_learner | 1.5.5 | >=4.16,<5 |
-| 言 | astrbot_plugin_conversation_flow | 0.8.14 | >=4.16,<5 |
+| 知 | astrbot_plugin_active_learner | 1.5.3 | >=4.16,<5 |
+| 言 | astrbot_plugin_conversation_flow | 0.8.13 | >=4.16,<5 |
 | 序 | astrbot_plugin_identity_guardian | 0.5.4 | >=4.17,<5 |
 | 情 | astrbot_plugin_relationship | 0.9.6 | >=4.16,<5 |
 | 境 | astrbot_plugin_environment_awareness | 0.3.1 | >=4.16,<5 |
 | 声 | astrbot_plugin_voice_hub | 0.9.1 | >=4.16,<5 |
-| 临 | astrbot_plugin_embodiment_bridge | 1.4.0 | >=4.26,<5 |
-| 核 | astrbot_plugin_update_manager | 0.16.2 | >=4.16,<5 |
+| 临 | astrbot_plugin_embodiment_bridge | 1.1.3 | >=4.26,<5 |
+| 核 | astrbot_plugin_update_manager | 0.16.0 | >=4.16,<5 |
 | 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
