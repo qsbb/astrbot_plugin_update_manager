@@ -211,7 +211,7 @@ async def webui_panel_stream(self, panel, context=None): ...  # 仅在声明 sse
 ```
 
 - 声明：`{name: "series.webui@2.0", version: "2.0", plugin_id, series_id, capabilities, panels}`；能力至少按实际使用声明 `generic_table / generic_actions / revision / idempotency / file_upload / artifacts / audio_preview / jobs / sse`。核只暴露自己支持的能力，未知能力进入 `unsupported_capabilities`。
-- 动作元数据：`id / label / confirm / effect / revision_required / idempotency_required / min_role / payload_fields / timeout_seconds`。非幂等动作必须携带 `X-Request-Id`，revision 动作携带 `X-Expected-Revision`，冲突返回 409。
+- 动作元数据：`id / label / confirm / effect / revision_required / idempotency_required / min_role / payload_fields / timeout_seconds`。非幂等动作必须携带 `X-Request-Id`，revision 动作携带 `X-Expected-Revision`，冲突返回 409。同一 request_id 的已完成调用返回缓存结果并标记 `idempotent_replay`；并发重复返回 `ACTION_IN_PROGRESS`，复用给不同动作返回 `IDEMPOTENCY_CONFLICT`。
 - 文件字段：前端先上传到核 `ArtifactStore`，网关在动作调用前把字段替换为 `{artifact_id, filename, mime, size, data}`；插件不得依赖上传临时路径。
 - 导出/音频：插件在面板数据或动作结果中返回 `artifacts: [...]` / `audio: {filename, mime, data}`，核将 `bytes` 或 `content_base64` 写入短时制品区，响应只暴露 `artifact_id`；前端按 MIME 内联下载或 `<audio controls>` 试听。
 - 长任务由插件返回 `job_id` 约定，核 `JobManager` 只保存进度、状态、取消标记与结果摘要；业务状态始终归插件所有。

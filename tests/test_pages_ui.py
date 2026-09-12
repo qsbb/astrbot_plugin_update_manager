@@ -787,7 +787,10 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     assert ".webui-address-row" in css
     assert 'id="webui-manual"' in html
     assert 'id="webui-manual-url"' in html
+    assert 'id="webui-open-frame"' in html
     assert "function legacyCopyText" in js
+    assert "function openStandaloneWebUiInFrame" in js
+    assert "window.location.assign(url)" in js
     assert "function revealWebUiUrl" in js
     assert "openWebUiBlocked" in js
     assert ".webui-manual" in css
