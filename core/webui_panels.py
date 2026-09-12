@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
 import inspect
+import json
 import re
 import threading
 import time
@@ -53,6 +55,24 @@ _ALLOWED_PANEL_ID = re.compile(r"^[a-z0-9_]{1,48}$")
 _ALLOWED_ACTION_ID = re.compile(r"^[a-z0-9_]{1,48}$")
 
 
+def _action_fingerprint(
+    payload: Mapping[str, Any] | None, context: Mapping[str, Any]
+) -> str:
+    """Hash the stable request content without ever logging the payload."""
+    safe_payload = payload if isinstance(payload, Mapping) else {}
+    document = {
+        "payload": safe_payload,
+        "expected_revision": context.get("expected_revision"),
+    }
+    try:
+        encoded = json.dumps(
+            document, sort_keys=True, ensure_ascii=False, default=repr
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        encoded = repr(document).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class WebUIPanelsGateway:
     """把可信插件的 webui 面板契约安全地暴露给独立 WebUI。"""
 
@@ -60,7 +80,7 @@ class WebUIPanelsGateway:
         self.adapter = adapter
         self._idempotency_lock = threading.Lock()
         self._idempotency_records: dict[tuple[str, str, str], dict[str, Any]] = {}
-        self._idempotency_inflight: set[tuple[str, str, str, str]] = set()
+        self._idempotency_inflight: set[tuple[str, str, str, str, str]] = set()
 
     @staticmethod
     def _canonical(plugin_id: str) -> str:
@@ -177,9 +197,12 @@ class WebUIPanelsGateway:
             raise PermissionError("ROLE_FORBIDDEN")
         if effect == "non_idempotent" and not request_id:
             raise ValueError("IDEMPOTENCY_REQUIRED")
+        fingerprint = _action_fingerprint(payload, context_dict)
         idempotency_key = (canonical, panel, request_id) if request_id else None
         if idempotency_key is not None:
-            replay = self._begin_idempotent_action(idempotency_key, action=action)
+            replay = self._begin_idempotent_action(
+                idempotency_key, action=action, fingerprint=fingerprint
+            )
             if replay is not None:
                 return replay
         if not isinstance(payload, Mapping):
@@ -220,7 +243,10 @@ class WebUIPanelsGateway:
             raise
         if idempotency_key is not None:
             self._finish_idempotent_action(
-                idempotency_key, action=action, result=materialized
+                idempotency_key,
+                action=action,
+                fingerprint=fingerprint,
+                result=materialized,
             )
         try:
             diagnostic_event(
@@ -258,20 +284,27 @@ class WebUIPanelsGateway:
             self._idempotency_records.pop(oldest, None)
 
     def _begin_idempotent_action(
-        self, key: tuple[str, str, str], *, action: str
+        self,
+        key: tuple[str, str, str],
+        *,
+        action: str,
+        fingerprint: str,
     ) -> dict[str, Any] | None:
         with self._idempotency_lock:
             self._cleanup_idempotency()
             cached = self._idempotency_records.get(key)
             if cached is not None:
-                if cached.get("action") != action:
+                if (
+                    cached.get("action") != action
+                    or cached.get("fingerprint") != fingerprint
+                ):
                     raise ValueError("IDEMPOTENCY_CONFLICT")
                 return {**dict(cached["result"]), "idempotent_replay": True}
-            inflight = (*key, action)
+            inflight = (*key, action, fingerprint)
             if inflight in self._idempotency_inflight:
                 raise ValueError("ACTION_IN_PROGRESS")
             if any(
-                item[:3] == key and item[3] != action
+                item[:3] == key and item[3:] != (action, fingerprint)
                 for item in self._idempotency_inflight
             ):
                 raise ValueError("IDEMPOTENCY_CONFLICT")
@@ -285,16 +318,22 @@ class WebUIPanelsGateway:
             }
 
     def _finish_idempotent_action(
-        self, key: tuple[str, str, str], *, action: str, result: dict[str, Any]
+        self,
+        key: tuple[str, str, str],
+        *,
+        action: str,
+        fingerprint: str,
+        result: dict[str, Any],
     ) -> None:
         with self._idempotency_lock:
             self._idempotency_inflight = {
                 item
                 for item in self._idempotency_inflight
-                if item != (*key, action)
+                if item != (*key, action, fingerprint)
             }
             self._idempotency_records[key] = {
                 "action": action,
+                "fingerprint": fingerprint,
                 "result": dict(result),
                 "created_at": time.time(),
             }

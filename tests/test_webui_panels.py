@@ -229,6 +229,21 @@ def test_panels_gateway_replays_same_request_id_and_rejects_conflict():
     assert first["applied"] == {"relationship_type": "lover"}
     assert second["idempotent_replay"] is True
     assert len([call for call in plugin.calls if call[0] == "action"]) == 1
+    try:
+        asyncio.run(
+            gateway.action(
+                PLUGIN_ID,
+                "overview",
+                "set_type",
+                {"relationship_type": "friend"},
+                "admin",
+                context={"request_id": "req-replay"},
+            )
+        )
+    except ValueError as exc:
+        assert "IDEMPOTENCY_CONFLICT" in str(exc)
+    else:
+        raise AssertionError("same request id with different payload must conflict")
 
     class TwoActionPlugin(FakePanelPlugin):
         def webui_panels_contract(self):
