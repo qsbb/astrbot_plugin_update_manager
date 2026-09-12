@@ -355,7 +355,7 @@ astrbot_plugin_xxx/
   source /data/dsh/home/dsh/venv/bin/activate
   python -m pytest tests/ -x -q
   ```
-- 全系列当前本地基线 3,099 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
+- 全系列当前本地基线 3,140 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
 - UI 结构断言：用 `test_pages_ui.py` 对前端源码做关键控件/接口存在性断言，防止界面回退。
 
 ---
@@ -411,14 +411,14 @@ astrbot_plugin_xxx/
 
 | 字 | plugin_id | 版本 | astrbot_version |
 |----|-----------|------|-----------------|
-| 知 | astrbot_plugin_active_learner | 1.6.0 | >=4.16,<5 |
-| 言 | astrbot_plugin_conversation_flow | 0.10.0 | >=4.16,<5 |
-| 序 | astrbot_plugin_identity_guardian | 0.6.0 | >=4.17,<5 |
-| 情 | astrbot_plugin_relationship | 0.10.0 | >=4.16,<5 |
-| 境 | astrbot_plugin_environment_awareness | 0.4.0 | >=4.16,<5 |
-| 声 | astrbot_plugin_voice_hub | 0.10.0 | >=4.16,<5 |
-| 临 | astrbot_plugin_embodiment_bridge | 1.5.0 | >=4.26,<5 |
-| 核 | astrbot_plugin_update_manager | 0.17.0 | >=4.16,<5 |
+| 知 | astrbot_plugin_active_learner | 1.7.0 | >=4.16,<5 |
+| 言 | astrbot_plugin_conversation_flow | 0.11.0 | >=4.16,<5 |
+| 序 | astrbot_plugin_identity_guardian | 0.7.0 | >=4.17,<5 |
+| 情 | astrbot_plugin_relationship | 0.11.0 | >=4.16,<5 |
+| 境 | astrbot_plugin_environment_awareness | 0.5.0 | >=4.16,<5 |
+| 声 | astrbot_plugin_voice_hub | 0.11.0 | >=4.16,<5 |
+| 临 | astrbot_plugin_embodiment_bridge | 1.6.0 | >=4.26,<5 |
+| 核 | astrbot_plugin_update_manager | 0.18.0 | >=4.16,<5 |
 | 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
