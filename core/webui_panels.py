@@ -331,12 +331,15 @@ class WebUIPanelsGateway:
                 for item in self._idempotency_inflight
                 if item != (*key, action, fingerprint)
             }
-            self._idempotency_records[key] = {
-                "action": action,
-                "fingerprint": fingerprint,
-                "result": dict(result),
-                "created_at": time.time(),
-            }
+            # 业务校验失败属于可纠正错误，不固化到幂等缓存；
+            # 只有成功结果才允许后续同 request_id 重放。
+            if result.get("success") is not False:
+                self._idempotency_records[key] = {
+                    "action": action,
+                    "fingerprint": fingerprint,
+                    "result": dict(result),
+                    "created_at": time.time(),
+                }
             self._cleanup_idempotency()
 
     async def stream(
