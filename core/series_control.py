@@ -106,6 +106,15 @@ class SeriesControlGateway:
                 }
         return {"schema_version": 1, "mode": mode, "revision": revision, "members": members}
 
+    @property
+    def mode(self) -> str:
+        return str(self._state.get("mode") or "native")
+
+    @property
+    def managed(self) -> bool:
+        """统一接管总开关：仅 managed 模式允许核写入与 managed 面板。"""
+        return self.mode == "managed"
+
     def _save(self) -> None:
         self.store.write("series-control.json", self._state)
 
@@ -196,6 +205,8 @@ class SeriesControlGateway:
         return {"success": True, "plugin_id": canonical, "revision": member["revision"], "validation": _public_snapshot(result)}
 
     async def apply(self, plugin_id: str, patch: Mapping[str, Any], expected_revision: int, role: str) -> dict[str, Any]:
+        if not self.managed:
+            raise PermissionError("TAKEOVER_DISABLED")
         if CONTROL_ROLES.get(role, -1) < CONTROL_ROLES["admin"]:
             raise PermissionError("ROLE_REQUIRED")
         canonical, instance = await self._instance(plugin_id)
@@ -216,6 +227,8 @@ class SeriesControlGateway:
         return {"success": True, "plugin_id": canonical, "revision": member["revision"], "status": "applied"}
 
     async def reset(self, plugin_id: str, fields: list[str] | None, role: str) -> dict[str, Any]:
+        if not self.managed:
+            raise PermissionError("TAKEOVER_DISABLED")
         if CONTROL_ROLES.get(role, -1) < CONTROL_ROLES["admin"]:
             raise PermissionError("ROLE_REQUIRED")
         canonical = self._canonical(plugin_id)

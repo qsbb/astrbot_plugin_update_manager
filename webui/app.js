@@ -14,6 +14,7 @@ let state = {
   panelData: null,
   selectedPanel: "",
   selectedControlPlugin: "",
+  takeoverDisabled: false,
   logs: [],
   logMembers: [],
   logLevel: "",
@@ -187,7 +188,8 @@ function controlDetail() {
 function controlFieldsTab(schema, snapshot) {
   const fields = schema?.schema?.fields || {};
   const values = snapshot?.snapshot?.fields || {};
-  const canWrite = state.session?.role === "owner" || state.session?.role === "admin";
+  const managed = schema?.mode === "managed";
+  const canWrite = (state.session?.role === "owner" || state.session?.role === "admin") && managed;
   const rowsHtml = Object.entries(fields).map(([name, def]) => {
     const value = values[name] || {};
     const current = value.effective_value ?? def.default ?? "";
@@ -201,10 +203,16 @@ function controlFieldsTab(schema, snapshot) {
     const note = def.control === "read_only" ? `<span class="pill">只读</span>` : "";
     return `<div class="form-row"><label><code>${esc(name)}</code><small>${esc(def.type || "")}${def.description ? " · " + esc(def.description) : ""}</small></label><div class="form-input">${input}</div><div class="form-meta">${source}${note}</div></div>`;
   }).join("") || `<p class="empty-cell">该插件未声明可管理字段。</p>`;
-  return `<div class="form-hint">${canWrite ? "修改后点击「应用修改」：先校验再写入覆盖层，带 revision 乐观锁。" : "当前角色为 viewer，仅可查看字段。"}</div><div class="form-grid">${rowsHtml}</div><div class="form-actions"><button class="btn primary" id="control-apply" ${canWrite ? "" : "disabled"}>应用修改</button><button class="btn" id="control-reset" ${canWrite ? "" : "disabled"}>重置全部覆盖</button><button class="btn" id="control-refresh-fields">刷新字段</button></div>`;
+  const hint = !managed
+    ? "统一接管未启用：字段以插件 native 配置为准，开启统一接管后才能在此修改。"
+    : canWrite
+      ? "修改后点击「应用修改」：先校验再写入覆盖层，带 revision 乐观锁。"
+      : "当前角色为 viewer，仅可查看字段。";
+  return `<div class="form-hint">${hint}</div><div class="form-grid">${rowsHtml}</div><div class="form-actions"><button class="btn primary" id="control-apply" ${canWrite ? "" : "disabled"}>应用修改</button><button class="btn" id="control-reset" ${canWrite ? "" : "disabled"}>重置全部覆盖</button><button class="btn" id="control-refresh-fields">刷新字段</button></div>`;
 }
 function controlPanelsTab() {
   const pluginId = state.selectedControlPlugin;
+  if (state.takeoverDisabled) return `<p class="empty-cell">统一接管未启用：managed 面板已关闭，请使用该插件的独立 Page。</p><p class="form-hint">开启“统一接管”后，核会重新加载该模块面板。</p>`;
   if (!state.panelsList) return `<p class="empty-cell">尚未加载面板。${`<button class="btn primary" id="panel-load">加载该插件面板</button>`}</p><p class="form-hint">面板来自插件的 series.webui@1.0 契约，未实现契约的插件此区为空。</p>`;
   const panels = state.panelsList.panels || [];
   if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未实现 series.webui@1.0 契约）。</p>`;
@@ -349,6 +357,7 @@ async function loadControlPlugin(pluginId) {
   state.selectedPanel = "";
   state.controlSchema = null;
   state.controlSnapshot = null;
+  state.takeoverDisabled = false;
   const [schemaResult, snapshotResult, panelsResult] = await Promise.allSettled([
     get(`series/${encodeURIComponent(pluginId)}/control/schema`),
     get(`series/${encodeURIComponent(pluginId)}/control/snapshot`),
@@ -357,6 +366,7 @@ async function loadControlPlugin(pluginId) {
   if (schemaResult.status === "fulfilled") state.controlSchema = schemaResult.value;
   if (snapshotResult.status === "fulfilled") state.controlSnapshot = snapshotResult.value;
   if (panelsResult.status === "fulfilled") state.panelsList = panelsResult.value;
+  else state.takeoverDisabled = String(panelsResult.reason?.message || panelsResult.reason || "").includes("TAKEOVER_DISABLED");
   const panelCount = state.panelsList?.panels?.length || 0;
   if (!state.controlSchema && panelCount > 0) state.controlTab = "panels";
   if (!state.controlSchema && panelCount === 0) showToast("该插件未提供统一接管或管理面板契约", true);

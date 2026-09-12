@@ -245,6 +245,19 @@ def test_panels_gateway_rejects_undeclared_action():
         raise AssertionError("undeclared action must be rejected")
 
 
+def test_webui_takeover_requires_managed_mode():
+    from types import SimpleNamespace
+    from astrbot_plugin_update_manager.core.webui_server import WebUIServer
+
+    server = object.__new__(WebUIServer)
+    server.series_control = SimpleNamespace(managed=False)
+    assert server._takeover_enabled() is False
+    server.series_control = SimpleNamespace(managed=True)
+    assert server._takeover_enabled() is True
+    server.series_control = None
+    assert server._takeover_enabled() is False
+
+
 def test_panels_gateway_rejects_untrusted_plugin():
     gateway = WebUIPanelsGateway(FakeAdapter(FakePanelPlugin()))
     try:
@@ -365,6 +378,7 @@ def _make_server(tmp_path, *, panels=None, lifecycle=None):
         model_routing=model_routing,
         panels=panels,
         lifecycle=lifecycle,
+        series_control=SimpleNamespace(managed=True),
     )
 
 

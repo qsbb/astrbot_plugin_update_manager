@@ -349,6 +349,11 @@ class WebUIServer:
             return self._json({"success": False, "error": "INVALID_FIELDS"}, 400)
         return await self._series_call(request, "reset", request.match_info["plugin_id"], fields)
 
+    def _takeover_enabled(self) -> bool:
+        """核存在但未启用 managed 时，不暴露 managed 面板，回退 standalone Page。"""
+        control = getattr(self, "series_control", None)
+        return bool(control is not None and getattr(control, "managed", False))
+
     async def _panels_dispatch(
         self, request: web.Request, method: str, *args: Any
     ) -> web.Response:
@@ -357,6 +362,8 @@ class WebUIServer:
             return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
         if self.panels is None:
             return self._json({"success": False, "error": "PANELS_UNAVAILABLE"}, 503)
+        if not self._takeover_enabled():
+            return self._json({"success": False, "error": "TAKEOVER_DISABLED"}, 409)
         try:
             function = getattr(self.panels, method)
             if method == "action":

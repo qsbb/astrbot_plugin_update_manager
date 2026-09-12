@@ -197,6 +197,7 @@ def series_control_set_mode(self, mode) -> dict: ...   # native | managed
 - schema 的 fields 描述：`{type, default, minimum/maximum, control: overrideable|read_only, secret, source, native_value, effective_value, managed_configured}`。
 - 覆盖层存插件自己的 data 目录 `series-control.json`（原子写 + 自身 revision）；核另存全系列 overlay。
 - `native`：插件自身配置生效；`managed`：核覆盖生效；关闭接管立即回退，无残留状态。
+- **接管总开关联动**：`native` 模式同时禁止核写入配置覆盖层、禁止核 WebUI 暴露 managed 面板（返回 `TAKEOVER_DISABLED`）；模块完整回退到自己的 standalone Page 与 native 配置。`managed` 模式才同时启用配置接管与 managed 面板。
 - capabilities 至少声明 `read_schema / read_snapshot / validate_patch / apply_patch / reset_override`。
 - 校验失败拒绝整批 patch，不部分应用；apply 前必须先 validate。
 
@@ -216,6 +217,7 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
 - **双模式**：插件自己的 Plugin Page / `register_web_api` 是 standalone fallback，必须保留；`series.webui@1.0` 是核存在时的 managed 适配层。核缺失、核 WebUI 关闭或核版本不兼容时，standalone 行为必须完全不变。
 - 契约声明建议增加：`version`（契约版本，不是插件版本）、`standalone.available/pages`、`managed.supported/level`（none/read/actions/full）、`capabilities`、`state_owner="plugin"`、`preferred_surface`（kernel/standalone/dual）。
 - 核聚合 managed 面板时只通过 `series.webui` 进程内方法调用，**不得透明代理插件的原生 Page API**；插件状态、锁、revision 始终归插件所有。
+- **接管关闭时**：核 WebUI 不加载/不调用任何 managed 面板，返回 `TAKEOVER_DISABLED`；用户使用插件自己的 Plugin Page。核缺失时同一模块也必须独立可用。
 - 面板/动作声明必须可校验：未声明的 panel/action 网关侧 fail-closed；核调用应有有界超时；非幂等动作在协议支持 revision/幂等键前只保留在 Page。
 
 ### 5.4 `series.model_router@1.0`（只读模型路由）

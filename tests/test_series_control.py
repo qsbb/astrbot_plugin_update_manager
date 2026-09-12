@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1].parent))
 
 from astrbot_plugin_update_manager.core.adapters.storage import AtomicJsonStore
 from astrbot_plugin_update_manager.core.series_control import SeriesControlGateway
@@ -32,6 +36,14 @@ def test_control_native_and_revision(tmp_path):
     gateway = SeriesControlGateway(FakeAdapter(), AtomicJsonStore(tmp_path))
     async def run():
         assert (await gateway.schema("astrbot_plugin_active_learner"))["success"]
+        assert gateway.mode == "native"
+        try:
+            await gateway.apply("astrbot_plugin_active_learner", {"enabled": False}, 0, "admin")
+        except PermissionError as exc:
+            assert str(exc) == "TAKEOVER_DISABLED"
+        else:
+            raise AssertionError("native mode must not apply overrides")
+        await gateway.set_mode("managed", "owner")
         result = await gateway.apply("astrbot_plugin_active_learner", {"enabled": False}, 0, "admin")
         assert result["revision"] == 1
         try:
