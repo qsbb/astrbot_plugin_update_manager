@@ -1,6 +1,15 @@
 ## [Unreleased]
 
-- 开发中（未发版）：新增 `series.ui@1.0` Glass Aurora 统一 UI 库、页面 vendored 副本同步/漂移审计，并开始将各插件 Plugin Page 接入统一样式与交互组件。
+
+## 0.19.0 - 2026-09-13
+
+### 新增
+
+- 新增 `series.ui@1.0` Glass Aurora 统一 UI 库（token、组件、交互 API、组件目录与漂移审计），并将 8 个在维 Plugin Page 全部迁移到同版本组件库和稳定 `.si-*` 类名契约。
+
+### 既有未发布内容
+
+- 新增 `series.ui@1.0` Glass Aurora 统一 UI 库、页面 vendored 副本同步/漂移审计，并开始将各插件 Plugin Page 接入统一样式与交互组件。
 
 ## 0.18.0 - 2026-09-12
 

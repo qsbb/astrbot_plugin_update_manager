@@ -77,7 +77,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
