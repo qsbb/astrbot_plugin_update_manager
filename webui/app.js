@@ -232,10 +232,19 @@ function panelContent(data) {
   const actions = (data.actions || []).map(action => {
     const fields = (action.payload_fields || []).map(field => field.type === "select"
       ? `<label><span>${esc(field.label || field.name)}</span><select data-panel-field="${esc(field.name)}">${(field.options || []).map(opt => `<option value="${esc(opt[0])}">${esc(opt[1])}</option>`).join("")}</select></label>`
-      : `<label><span>${esc(field.label || field.name)}</span><input type="${field.type === "number" ? "number" : "text"}" data-panel-field="${esc(field.name)}" placeholder="${esc(field.hint || "")}" /></label>`).join("");
+      : field.type === "file"
+        ? `<label><span>${esc(field.label || field.name)}</span><input type="file" data-panel-file="${esc(field.name)}" /></label>`
+        : `<label><span>${esc(field.label || field.name)}</span><input type="${field.type === "number" ? "number" : "text"}" data-panel-field="${esc(field.name)}" placeholder="${esc(field.hint || "")}" /></label>`).join("");
     return `<div class="panel-action">${fields ? `<div class="panel-action-form">${fields}</div>` : ""}<button class="btn ${action.danger ? "danger" : "primary"}" data-panel-action="${esc(action.id)}" data-action-effect="${esc(action.effect || "idempotent")}" data-action-revision-required="${action.revision_required ? "true" : "false"}" data-action-idempotency-required="${action.idempotency_required ? "true" : "false"}">${esc(action.label || action.id)}</button></div>`;
   }).join("");
-  return `${data.title ? `<div class="section-title"><h3>${esc(data.title)}</h3>${data.description ? `<span>${esc(data.description)}</span>` : ""}</div>` : ""}${table}${actions ? `<div class="panel-actions">${actions}</div>` : ""}${data.footer ? `<p class="form-hint">${esc(data.footer)}</p>` : ""}`;
+  const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+  const artifactHtml = artifacts.length
+    ? `<div class="artifact-list">${artifacts.map(item => `<a class="btn" href="/api/artifacts/${encodeURIComponent(item.artifact_id || "")}" target="_blank" rel="noopener">${esc(item.filename || item.artifact_id || "下载")}</a>`).join("")}</div>`
+    : "";
+  const audioHtml = data.audio?.artifact_id
+    ? `<audio controls preload="none" src="/api/artifacts/${encodeURIComponent(data.audio.artifact_id)}"></audio>`
+    : "";
+  return `${data.title ? `<div class="section-title"><h3>${esc(data.title)}</h3>${data.description ? `<span>${esc(data.description)}</span>` : ""}</div>` : ""}${table}${actions ? `<div class="panel-actions">${actions}</div>` : ""}${artifactHtml}${audioHtml}${data.footer ? `<p class="form-hint">${esc(data.footer)}</p>` : ""}`;
 }
 function controlLifecycleTab() {
   const pluginId = state.selectedControlPlugin;
@@ -452,6 +461,20 @@ async function loadPanelData(panelId) {
     dashboard();
   } catch (error) { showToast(error.message, true); }
 }
+async function uploadArtifact(file, pluginId, panelId) {
+  const form = new FormData();
+  form.append("plugin_id", pluginId);
+  form.append("panel", panelId);
+  form.append("file", file);
+  const response = await fetch(`${API_PREFIX}/artifacts`, {
+    method: "POST",
+    credentials: "same-origin",
+    body: form,
+  });
+  const data = parse(await response.json());
+  if (!response.ok || data?.success === false) throw new Error(data.error || "上传失败");
+  return data.artifact_id;
+}
 async function runPanelAction(actionId) {
   const pluginId = state.selectedControlPlugin;
   const panelId = state.selectedPanel;
@@ -459,13 +482,26 @@ async function runPanelAction(actionId) {
   if (!pluginId || !panelId || !action) return;
   const payload = {};
   let missing = false;
+  const fileUploads = [];
   (action.payload_fields || []).forEach(field => {
+    if (field.type === "file") {
+      const fileNode = document.querySelector(`[data-panel-file="${CSS.escape(field.name)}"]`);
+      const file = fileNode?.files?.[0];
+      if (field.required && !file) missing = true;
+      if (file) fileUploads.push([field.name, file]);
+      return;
+    }
     const node = document.querySelector(`[data-panel-field="${CSS.escape(field.name)}"]`);
     const value = node ? node.value : "";
     if (field.required && !value) missing = true;
     payload[field.name] = field.type === "number" ? (value === "" ? null : Number(value)) : value;
   });
   if (missing) { showToast("请填写动作所需的必填字段", true); return; }
+  try {
+    for (const [name, file] of fileUploads) {
+      payload[name] = await uploadArtifact(file, pluginId, panelId);
+    }
+  } catch (error) { showToast(error.message, true); return; }
   if (action.confirm && !confirm(action.confirm)) return;
   const headers = { "X-Request-Id": (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`) };
   if (action.revision_required && state.panelData?.revision != null) headers["X-Expected-Revision"] = String(state.panelData.revision);

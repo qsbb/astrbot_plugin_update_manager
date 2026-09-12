@@ -13,6 +13,7 @@ from aiohttp import web
 
 from .transaction import TransactionError
 
+from .webui_artifacts import ArtifactStore
 from .webui_auth import WebUIAuth, WebUIAuthError
 from .webui_jobs import JobManager
 
@@ -82,6 +83,7 @@ class WebUIServer:
         self._started = False
         self._lock = asyncio.Lock()
         self.jobs = JobManager()
+        self.artifacts = ArtifactStore()
 
     @property
     def started(self) -> bool:
@@ -136,6 +138,8 @@ class WebUIServer:
             app.router.add_post("/api/series/{plugin_id}/lifecycle/{action}", self._lifecycle_action)
             app.router.add_get("/api/jobs/{job_id}", self._job_status)
             app.router.add_post("/api/jobs/{job_id}/cancel", self._job_cancel)
+            app.router.add_post("/api/artifacts", self._artifact_upload)
+            app.router.add_get("/api/artifacts/{artifact_id}", self._artifact_download)
             app.router.add_post("/api/diagnostics/logs", self._diagnostics_logs)
             app.router.add_post("/api/diagnostics/clear", self._diagnostics_clear)
             app.router.add_post("/api/updates/check", self._updates_check)
@@ -430,6 +434,62 @@ class WebUIServer:
 
     async def _panels_action(self, request: web.Request) -> web.Response:
         return await self._panels_dispatch(request, "action")
+
+    async def _artifact_upload(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if role not in {"admin", "owner"}:
+            return self._json({"success": False, "error": "ROLE_FORBIDDEN"}, 403)
+        reader = await request.multipart()
+        plugin_id = ""
+        panel = ""
+        filename = "artifact.bin"
+        mime = "application/octet-stream"
+        data = b""
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == "file":
+                filename = part.filename or filename
+                mime = part.headers.get("Content-Type") or mime
+                data = await part.read(decode=False)
+            elif part.name in {"plugin_id", "panel"}:
+                value = (await part.text()).strip()
+                if part.name == "plugin_id":
+                    plugin_id = value
+                else:
+                    panel = value
+        try:
+            record = self.artifacts.put(
+                plugin_id=plugin_id,
+                panel=panel,
+                filename=filename,
+                mime=mime,
+                data=data,
+            )
+        except ValueError as exc:
+            return self._json({"success": False, "error": str(exc)}, 400)
+        return self._json({"success": True, **self.artifacts.snapshot(record.artifact_id)})
+
+    async def _artifact_download(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        item = self.artifacts.get(request.match_info["artifact_id"])
+        if item is None:
+            return self._json({"success": False, "error": "ARTIFACT_NOT_FOUND"}, 404)
+        filename = item.filename.replace('"', "")
+        return web.Response(
+            body=item.data,
+            content_type=item.mime or "application/octet-stream",
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     async def _job_status(self, request: web.Request) -> web.Response:
         role = self._series_role(request)
