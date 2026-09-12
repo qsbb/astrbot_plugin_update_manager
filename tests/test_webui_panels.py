@@ -112,6 +112,79 @@ def test_panels_gateway_accepts_tuple_panels_and_missing_version():
     assert listing["panels"][0]["id"] == "overview"
 
 
+def test_panels_gateway_enforces_revision_and_idempotency_context():
+    class ContextPanelPlugin(FakePanelPlugin):
+        def __init__(self):
+            super().__init__()
+            self.contexts = []
+
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@1.1",
+                "version": "1.1",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "panels": [
+                    {
+                        "id": "overview",
+                        "title": "关系总览",
+                        "actions": [
+                            {
+                                "id": "set_type",
+                                "label": "设置",
+                                "effect": "non_idempotent",
+                                "revision_required": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+
+        async def webui_panel_action(self, panel, action, payload, context=None):
+            self.contexts.append(dict(context or {}))
+            return {"success": True, "message": "ok"}
+
+    plugin = ContextPanelPlugin()
+    gateway = WebUIPanelsGateway(FakeAdapter(plugin))
+
+    try:
+        asyncio.run(gateway.action(PLUGIN_ID, "overview", "set_type", {}, "admin"))
+    except ValueError as exc:
+        assert "IDEMPOTENCY_REQUIRED" in str(exc)
+    else:
+        raise AssertionError("non-idempotent action must require request id")
+
+    try:
+        asyncio.run(
+            gateway.action(
+                PLUGIN_ID,
+                "overview",
+                "set_type",
+                {},
+                "admin",
+                context={"request_id": "req-1"},
+            )
+        )
+    except ValueError as exc:
+        assert "REVISION_REQUIRED" in str(exc)
+    else:
+        raise AssertionError("revision_required action must require expected revision")
+
+    result = asyncio.run(
+        gateway.action(
+            PLUGIN_ID,
+            "overview",
+            "set_type",
+            {},
+            "admin",
+            context={"request_id": "req-1", "expected_revision": 7},
+        )
+    )
+    assert result["success"] is True
+    assert plugin.contexts[-1]["request_id"] == "req-1"
+    assert plugin.contexts[-1]["expected_revision"] == 7
+
+
 def test_panels_gateway_rejects_empty_panels():
     class EmptyPanelPlugin(FakePanelPlugin):
         def webui_panels_contract(self):

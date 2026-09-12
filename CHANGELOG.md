@@ -1,8 +1,6 @@
-# 更新日志
-
-本项目遵循语义化版本（Semantic Versioning），版本号不带 `v` 前缀。
-
 ## [Unreleased]
+
+- 开发中（未发版）：`series.module@1.0` 注册与展示、`series.webui@1.1` 动作上下文、WebUI 模块面板解耦。
 
 ## 0.16.4 - 2026-09-12
 

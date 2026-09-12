@@ -176,6 +176,47 @@ class DiagnosticProvider:
     self_declared: bool = False
 
 
+def _normalize_module_contract(value: Any) -> dict[str, Any] | None:
+    """Validate series.module@1.0; return a bounded plain-data summary."""
+    if not isinstance(value, dict) or value.get("name") != "series.module@1.0":
+        return None
+    version = value.get("version")
+    if not isinstance(version, str) or version.split(".", 1)[0] != "1":
+        return None
+    plugin_id = value.get("plugin_id")
+    display_name = value.get("display_name")
+    role = value.get("role")
+    if not all(isinstance(item, str) and item.strip() for item in (plugin_id, display_name, role)):
+        return None
+    standalone = value.get("standalone")
+    standalone = standalone if isinstance(standalone, dict) else {}
+    pages = standalone.get("pages")
+    return {
+        "name": "series.module@1.0",
+        "version": version,
+        "plugin_id": plugin_id.strip(),
+        "display_name": display_name.strip(),
+        "role": role.strip(),
+        "standalone": {
+            "available": bool(standalone.get("available")),
+            "entry": str(standalone.get("entry") or ""),
+            "pages": [str(item) for item in pages if isinstance(item, str)]
+            if isinstance(pages, (list, tuple))
+            else [],
+        },
+        "capabilities": [
+            str(item)
+            for item in value.get("capabilities", [])
+            if isinstance(item, str)
+        ]
+        if isinstance(value.get("capabilities"), (list, tuple))
+        else [],
+        "panels": [str(item) for item in value.get("panels", []) if isinstance(item, str)]
+        if isinstance(value.get("panels"), (list, tuple))
+        else [],
+    }
+
+
 class PagesAPIMixin:
     """为支持 Plugin Pages 的 AstrBot 注册最小管理面 API。"""
 
@@ -1199,12 +1240,14 @@ class PagesAPIMixin:
             "webui_panels": 0,
             "runtime": False,
             "model_router": False,
+            "module": None,
             "standalone": None,
         }
         allowed_contracts = {
             "series.diagnostics",
             "series.control",
             "series.webui",
+            "series.module",
             "series.model_router",
             "update_manager.series_runtime",
         }
@@ -1212,6 +1255,7 @@ class PagesAPIMixin:
             "diagnostic_log_contract",
             "series_control_contract",
             "webui_panels_contract",
+            "series_module_contract",
             "series_runtime_contract",
             "series_model_router_contract",
         ):
@@ -1231,6 +1275,12 @@ class PagesAPIMixin:
             if not isinstance(name, str) or name not in allowed_contracts:
                 continue
             # series.webui 的旧契约允许缺失 version；其余要求 1.x。
+            if name == "series.module":
+                module = _normalize_module_contract(value)
+                if module is not None:
+                    count += 1
+                    details["module"] = module
+                continue
             if name == "series.webui" and version in (None, ""):
                 count += 1
                 details["webui"] = True

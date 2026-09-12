@@ -360,13 +360,29 @@ class WebUIServer:
         try:
             function = getattr(self.panels, method)
             if method == "action":
-                value = await function(
-                    request.match_info["plugin_id"],
-                    request.match_info["panel"],
-                    request.match_info["action"],
-                    await self._body(request) or {},
-                    role,
-                )
+                context = {
+                    "request_id": request.headers.get("X-Request-Id", ""),
+                    "expected_revision": request.headers.get("X-Expected-Revision", ""),
+                    "actor": {"role": role},
+                }
+                try:
+                    value = await function(
+                        request.match_info["plugin_id"],
+                        request.match_info["panel"],
+                        request.match_info["action"],
+                        await self._body(request) or {},
+                        role,
+                        context=context,
+                    )
+                except TypeError:
+                    # 兼容不接受 context 的旧网关实现。
+                    value = await function(
+                        request.match_info["plugin_id"],
+                        request.match_info["panel"],
+                        request.match_info["action"],
+                        await self._body(request) or {},
+                        role,
+                    )
             else:
                 call_args = (request.match_info["plugin_id"],) + args
                 value = await function(*call_args)
@@ -383,7 +399,12 @@ class WebUIServer:
             return self._json({"success": False, "error": "PANEL_TIMEOUT"}, 504)
         except (ValueError, TypeError) as exc:
             error = str(exc) or "PANEL_FAILED"
-            status = 409 if error == "REVISION_CONFLICT" else 400
+            status = 409 if error in {
+                "REVISION_CONFLICT",
+                "IDEMPOTENCY_REQUIRED",
+                "IDEMPOTENCY_CONFLICT",
+                "ACTION_IN_PROGRESS",
+            } else 400
             return self._json({"success": False, "error": error}, status)
         except Exception as exc:  # noqa: BLE001 — 独立服务必须兜底，避免拖垮整个 WebUI
             return self._json(

@@ -18,10 +18,12 @@ import inspect
 import re
 from typing import Any, Mapping
 
+from ..series_diagnostics import diagnostic_event
 from .adapters.astrbot import AstrBotAdapter
 from .trusted import DIAGNOSTIC_SERIES_ID, TRUSTED_BY_ID
 
 CONTRACT_NAME = "series.webui@1.0"
+CONTRACT_NAMES = {"series.webui@1.0", "series.webui@1.1"}
 CONTRACT_CALL_TIMEOUT_SECONDS = 3.0
 
 PANEL_ROLES = {"viewer": 0, "admin": 1, "owner": 2}
@@ -54,7 +56,10 @@ class WebUIPanelsGateway:
         if instance is None:
             raise LookupError("PLUGIN_NOT_LOADED")
         contract = await _maybe_await_call(instance, "webui_panels_contract")
-        if not isinstance(contract, Mapping) or contract.get("name") != CONTRACT_NAME:
+        if (
+            not isinstance(contract, Mapping)
+            or contract.get("name") not in CONTRACT_NAMES
+        ):
             raise LookupError("CONTRACT_UNAVAILABLE")
         if str(contract.get("series_id")) != DIAGNOSTIC_SERIES_ID:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
@@ -62,7 +67,7 @@ class WebUIPanelsGateway:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         version = contract.get("version")
         # 兼容旧契约缺失 version；显式声明时只接受 1.x。
-        if version not in (None, "", "1", "1.0", 1, 1.0):
+        if version not in (None, "", "1", "1.0", "1.1", 1, 1.0, 1.1):
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         if not _declared_panels(contract):
             raise LookupError("CONTRACT_UNAVAILABLE")
@@ -107,25 +112,45 @@ class WebUIPanelsGateway:
         action: str,
         payload: Mapping[str, Any] | None,
         role: str = "",
+        context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         panel = _require_panel_id(panel)
         action = _require_action_id(action)
         if PANEL_ROLES.get(role, -1) < PANEL_ROLES["admin"]:
             raise PermissionError("ROLE_FORBIDDEN")
-        _canonical, instance, contract = await self._instance(plugin_id)
-        _require_declared_action(contract, panel, action)
+        canonical, instance, contract = await self._instance(plugin_id)
+        declaration = _require_declared_action(contract, panel, action)
+        context_dict = dict(context) if isinstance(context, Mapping) else {}
+        _validate_action_context(declaration, role, context_dict)
         if not isinstance(payload, Mapping):
             payload = {}
-        result = await _maybe_await_call(
+        result = await _maybe_await_call_action(
             instance,
-            "webui_panel_action",
             panel,
             action,
             dict(payload),
+            context_dict,
             timeout=CONTRACT_CALL_TIMEOUT_SECONDS,
         )
         if not isinstance(result, Mapping):
             raise ValueError("PANEL_ACTION_INVALID")
+        try:
+            diagnostic_event(
+                "webui.panel.action",
+                "WebUI 面板动作",
+                details={
+                    "plugin_id": canonical,
+                    "panel": panel,
+                    "action": action,
+                    "role": role,
+                    "request_id": str(context_dict.get("request_id") or ""),
+                    "effect": str(declaration.get("effect") or "idempotent")
+                    if isinstance(declaration, Mapping)
+                    else "dynamic",
+                },
+            )
+        except Exception:
+            pass
         return dict(result)
 
 
@@ -140,6 +165,7 @@ async def _maybe_await_call(
     method: str,
     *args: Any,
     timeout: float | None = CONTRACT_CALL_TIMEOUT_SECONDS,
+    **kwargs: Any,
 ) -> Any:
     function = getattr(instance, method, None)
     if not callable(function):
@@ -147,9 +173,9 @@ async def _maybe_await_call(
     # 同步方法不能直接在 aiohttp 事件循环里执行；先生成可等待对象，
     # 再统一施加有界超时，避免卡死整个 WebUI。
     if inspect.iscoroutinefunction(function):
-        awaitable = function(*args)
+        awaitable = function(*args, **kwargs)
     else:
-        awaitable = asyncio.to_thread(function, *args)
+        awaitable = asyncio.to_thread(function, *args, **kwargs)
     if timeout is None or timeout <= 0:
         result = await awaitable
     else:
@@ -188,23 +214,81 @@ def _require_declared_panel(contract: Mapping[str, Any], panel: str) -> None:
 
 def _require_declared_action(
     contract: Mapping[str, Any], panel: str, action: str
-) -> None:
+) -> Mapping[str, Any]:
     declared = _declared_panels(contract)
     if not declared:
-        return
+        raise ValueError("UNKNOWN_PANEL")
     panel_decl = declared.get(panel)
     if panel_decl is None:
         raise ValueError("UNKNOWN_PANEL")
     actions = _as_sequence(panel_decl.get("actions"))
     if not actions:
+        return {}
+    for item in actions:
+        if isinstance(item, Mapping) and str(item.get("id") or "") == action:
+            return item
+    raise ValueError("UNKNOWN_ACTION")
+
+
+def _validate_action_context(
+    declaration: Mapping[str, Any], role: str, context: Mapping[str, Any]
+) -> None:
+    if not isinstance(declaration, Mapping):
         return
-    known = {
-        str(item.get("id") or "")
-        for item in actions
-        if isinstance(item, Mapping)
-    }
-    if action not in known:
-        raise ValueError("UNKNOWN_ACTION")
+    min_role = str(declaration.get("min_role") or "admin")
+    if PANEL_ROLES.get(role, -1) < PANEL_ROLES.get(min_role, PANEL_ROLES["admin"]):
+        raise PermissionError("ROLE_FORBIDDEN")
+    effect = str(declaration.get("effect") or "idempotent")
+    if effect == "non_idempotent" and not str(context.get("request_id") or "").strip():
+        raise ValueError("IDEMPOTENCY_REQUIRED")
+    if bool(declaration.get("revision_required")) and context.get(
+        "expected_revision"
+    ) in (None, ""):
+        raise ValueError("REVISION_REQUIRED")
+
+
+async def _maybe_await_call_action(
+    instance: Any,
+    panel: str,
+    action: str,
+    payload: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    timeout: float | None = CONTRACT_CALL_TIMEOUT_SECONDS,
+) -> Any:
+    """调用 webui_panel_action；兼容不接受 context 的旧插件。"""
+    function = getattr(instance, "webui_panel_action", None)
+    if not callable(function):
+        raise LookupError("CONTRACT_UNAVAILABLE")
+    try:
+        signature = inspect.signature(function)
+        accepts_context = (
+            "context" in signature.parameters
+            or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+        )
+    except (TypeError, ValueError):
+        accepts_context = False
+    if accepts_context:
+        return await _maybe_await_call(
+            instance,
+            "webui_panel_action",
+            panel,
+            action,
+            payload,
+            context=context,
+            timeout=timeout,
+        )
+    return await _maybe_await_call(
+        instance,
+        "webui_panel_action",
+        panel,
+        action,
+        payload,
+        timeout=timeout,
+    )
 
 
 def _require_panel_id(panel: str) -> str:

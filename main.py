@@ -288,6 +288,24 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             timeout_seconds=timeout_seconds,
         )
 
+    def series_module_contract(self) -> dict[str, object]:
+        """series.module@1.0：声明模块身份、独立入口与统一接管能力。"""
+        return {
+            "name": "series.module@1.0",
+            "version": "1.0",
+            "series_id": "ningxin_suxi",
+            "plugin_id": "astrbot_plugin_update_manager",
+            "display_name": "核",
+            "role": "kernel",
+            "standalone": {
+                "available": true,
+                "entry": "/pages/manager",
+                "pages": ["manager"],
+            },
+            "capabilities": ["diagnostics_aggregate", "control_gateway", "webui_gateway", "model_router", "lifecycle"],
+            "panels": [],
+        }
+
     def diagnostic_log_contract(self) -> dict[str, object]:
         return {
             "name": "series.diagnostics",

@@ -38,6 +38,11 @@ members:
   version_source: main.py:__version__
   local_required: false
 contracts:
+- name: series.module
+  version: '1.0'
+  provider: '*'
+  method: series_module_contract
+  required: true
 - name: series.diagnostics
   version: '1.0'
   provider: '*'
