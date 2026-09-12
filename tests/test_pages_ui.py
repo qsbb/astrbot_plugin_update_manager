@@ -767,6 +767,15 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     assert ".hero > div:first-child" in css
 
 
+def test_webui_control_plugin_loads_panels_independently():
+    """插件面板不应因缺少 series.control 而不可达。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    assert "Promise.allSettled" in js
+    assert "state.panelsList = panelsResult.value" in js
+    assert "loadPanelData(state.panelsList.panels[0].id)" in js
+    assert "contract_details?.webui_panels" in js
+
+
 def test_manager_page_exposes_unified_model_routing_fields():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")

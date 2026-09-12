@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## 0.16.4 - 2026-09-12
+
+- 核 WebUI 模块列表返回结构化契约详情（diagnostics/control/webui/runtime/model_router、面板数量、standalone 声明），前端模块卡片与详情页展示“字段接管/管理面板/Standalone”状态。
+- 打开插件管理台改为并行加载 control schema/snapshot 与 `series.webui` 面板；没有 `series.control` 但有面板的插件也能直接进入面板，不再因 control 失败而不可达。
+
 ## 0.16.3 - 2026-09-12
 
 - 修复核 Page 的“复制 WebUI 链接”：Clipboard API 不可用时回退 `execCommand("copy")`，再失败则显示可选中/可右键的只读地址框；移除 sandbox iframe 中会被静默拦截的 `window.prompt`。

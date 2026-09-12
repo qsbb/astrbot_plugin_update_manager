@@ -1192,6 +1192,15 @@ class PagesAPIMixin:
         if instance is None:
             return {"contracts": 0, "contract_source": "unavailable"}
         count = 0
+        details = {
+            "diagnostics": False,
+            "control": False,
+            "webui": False,
+            "webui_panels": 0,
+            "runtime": False,
+            "model_router": False,
+            "standalone": None,
+        }
         allowed_contracts = {
             "series.diagnostics",
             "series.control",
@@ -1224,12 +1233,35 @@ class PagesAPIMixin:
             # series.webui 的旧契约允许缺失 version；其余要求 1.x。
             if name == "series.webui" and version in (None, ""):
                 count += 1
+                details["webui"] = True
+                panels = value.get("panels")
+                if isinstance(panels, (list, tuple)):
+                    details["webui_panels"] = len(panels)
+                standalone = value.get("standalone")
+                if isinstance(standalone, dict):
+                    details["standalone"] = {
+                        "available": bool(standalone.get("available")),
+                        "pages": [str(item) for item in standalone.get("pages", []) if isinstance(item, str)]
+                        if isinstance(standalone.get("pages"), (list, tuple))
+                        else [],
+                    }
                 continue
             if isinstance(version, str) and version.split(".", 1)[0] == "1":
                 count += 1
+                if name == "series.diagnostics":
+                    details["diagnostics"] = True
+                elif name == "series.control":
+                    details["control"] = True
+                elif name == "series.webui":
+                    details["webui"] = True
+                elif name == "series.model_router":
+                    details["model_router"] = True
+                elif name == "update_manager.series_runtime":
+                    details["runtime"] = True
         return {
             "contracts": count,
             "contract_source": "self_declared" if count else "unavailable",
+            "contract_details": details,
         }
 
     async def _webui_diagnostics_payload(self) -> dict[str, Any]:

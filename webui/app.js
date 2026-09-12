@@ -54,12 +54,12 @@ function filtered() { return state.modules.filter(item => (state.filter === "all
 function color(id) { const colors = ["#3b82b9", "#7653a6", "#cb4d48", "#db7d27", "#2c927c", "#3975aa", "#414a55", "#be385c"]; let sum = 0; for (const char of id) sum += char.charCodeAt(0); return colors[sum % colors.length]; }
 function moduleRows() {
   const list = filtered();
-  return list.length ? list.map(item => `<tr><td><button class="module module-button" data-module="${esc(item.plugin_id)}"><span class="mark" style="--color:${color(item.plugin_id)}">${esc(item.display_name.slice(-1))}</span><span><b>${esc(item.display_name)}</b><small>${esc(item.plugin_id)}</small></span></button></td><td><span class="status ${item.status === "normal" ? "" : "off"}">${item.status === "normal" ? "正常" : "已停用/未加载"}</span></td><td><span class="pill">${item.contracts} 条契约</span></td><td><code>v${esc(item.version || "未知")}</code></td><td>${item.version_status === "not_checked" ? `<span class="pill">未检查</span>` : item.update_available ? `<span class="pill managed">有更新</span>` : `<span class="pill native">最新</span>`}</td><td><button class="link" data-diagnostic="${esc(item.plugin_id)}">诊断</button></td></tr>`).join("") : `<tr><td colspan="6" style="padding:40px;text-align:center;color:#667085">没有匹配的可信模块。</td></tr>`;
+  return list.length ? list.map(item => `<tr><td><button class="module module-button" data-module="${esc(item.plugin_id)}"><span class="mark" style="--color:${color(item.plugin_id)}">${esc(item.display_name.slice(-1))}</span><span><b>${esc(item.display_name)}</b><small>${esc(item.plugin_id)}</small></span></button></td><td><span class="status ${item.status === "normal" ? "" : "off"}">${item.status === "normal" ? "正常" : "已停用/未加载"}</span></td><td><span class="pill">${item.contracts} 条契约</span>${item.contract_details?.control ? `<span class="pill managed">控制</span>` : ""}${item.contract_details?.webui_panels ? `<span class="pill native">面板 ${item.contract_details.webui_panels}</span>` : ""}</td><td><code>v${esc(item.version || "未知")}</code></td><td>${item.version_status === "not_checked" ? `<span class="pill">未检查</span>` : item.update_available ? `<span class="pill managed">有更新</span>` : `<span class="pill native">最新</span>`}</td><td><button class="link" data-diagnostic="${esc(item.plugin_id)}">诊断</button></td></tr>`).join("") : `<tr><td colspan="6" style="padding:40px;text-align:center;color:#667085">没有匹配的可信模块。</td></tr>`;
 }
 function selectedDetail() {
   const item = state.modules.find(value => value.plugin_id === state.selectedModule);
   if (!item) return "";
-  return `<section class="workspace module-detail"><div class="workspace-head"><div class="section-title"><h2>${esc(item.display_name)}</h2><button class="btn" id="close-module-detail">返回列表</button></div><p class="detail-copy">${esc(item.plugin_id)} · v${esc(item.version || "未知")} · ${item.status === "normal" ? "运行正常" : "需要关注"}</p><div class="detail-grid"><div><span>加载</span><strong>${item.loaded ? "是" : "否"}</strong></div><div><span>激活</span><strong>${item.activated ? "是" : "否"}</strong></div><div><span>契约</span><strong>${item.contracts}</strong></div><div><span>管理来源</span><strong>可信登记</strong></div></div><p class="detail-note">字段接管、专属面板与生命周期操作在「系列接管」管理台完成；此处展示运行状态与诊断入口。</p><button class="btn primary" data-control-open="${esc(item.plugin_id)}">打开管理台</button></div></section>`;
+  return `<section class="workspace module-detail"><div class="workspace-head"><div class="section-title"><h2>${esc(item.display_name)}</h2><button class="btn" id="close-module-detail">返回列表</button></div><p class="detail-copy">${esc(item.plugin_id)} · v${esc(item.version || "未知")} · ${item.status === "normal" ? "运行正常" : "需要关注"}</p><div class="detail-grid"><div><span>加载</span><strong>${item.loaded ? "是" : "否"}</strong></div><div><span>激活</span><strong>${item.activated ? "是" : "否"}</strong></div><div><span>契约</span><strong>${item.contracts}</strong></div><div><span>统一接管</span><strong>${item.contract_details?.control ? "字段已接入" : "未接入"}</strong></div><div><span>管理面板</span><strong>${item.contract_details?.webui_panels || 0} 个</strong></div><div><span>Standalone</span><strong>${item.contract_details?.standalone?.available ? "已声明" : "未声明"}</strong></div></div><p class="detail-note">字段接管、专属面板与生命周期操作在「系列接管」管理台完成；此处展示运行状态与诊断入口。</p><button class="btn primary" data-control-open="${esc(item.plugin_id)}">打开管理台</button></div></section>`;
 }
 function modulesView() {
   const normal = state.modules.filter(x => x.status === "normal").length;
@@ -170,10 +170,11 @@ function controlView() {
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>核只保存覆盖层；关闭接管后插件自身配置立即恢复生效。字段接管、插件面板与生命周期操作全部在本控制台完成。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前模式：${esc(control.mode)}</h2><span>revision ${esc(control.revision)}</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>运行来源</th><th>状态原因</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>${controlDetail()}`;
 }
 function controlDetail() {
+  if (!state.selectedControlPlugin) return "";
   const schema = state.controlSchema;
-  if (!schema || !state.selectedControlPlugin) return "";
-  const member = (state.control?.members || []).find(item => item.plugin_id === schema.plugin_id);
-  const displayName = member?.display_name || schema.plugin_id;
+  const pluginId = schema?.plugin_id || state.selectedControlPlugin;
+  const member = (state.control?.members || []).find(item => item.plugin_id === pluginId);
+  const displayName = member?.display_name || pluginId;
   const snapshot = state.controlSnapshot || { snapshot: { fields: {} } };
   const tabs = [["fields", "字段接管"], ["panels", "插件面板"], ["lifecycle", "生命周期"]];
   const strip = `<div class="tab-strip">${tabs.map(([id, label]) => `<button class="${state.controlTab === id ? "active" : ""}" data-control-tab="${id}">${label}</button>`).join("")}</div>`;
@@ -181,7 +182,7 @@ function controlDetail() {
   if (state.controlTab === "panels") body = controlPanelsTab();
   else if (state.controlTab === "lifecycle") body = controlLifecycleTab();
   else body = controlFieldsTab(schema, snapshot);
-  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(displayName)} 管理台</h2><span>${esc(state.selectedControlPlugin)} · revision ${esc(schema.revision)}</span></div><button class="btn" id="close-control-detail">返回列表</button></div>${strip}<div class="control-body">${body}</div></section>`;
+  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(displayName)} 管理台</h2><span>${esc(pluginId)} · revision ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回列表</button></div>${strip}<div class="control-body">${body}</div></section>`;
 }
 function controlFieldsTab(schema, snapshot) {
   const fields = schema?.schema?.fields || {};
@@ -341,16 +342,26 @@ async function saveSettings() {
 async function loadModelRouting() { try { state.routes = await get("model-routing"); state.view = "settings"; dashboard(); } catch (error) { showToast(error.message, true); } }
 async function loadControl() { try { state.control = await get("series/control"); state.view = "control"; dashboard(); } catch (error) { showToast(error.message, true); } }
 async function loadControlPlugin(pluginId) {
-  try {
-    state.selectedControlPlugin = pluginId;
-    state.controlTab = "fields";
-    state.panelsList = null;
-    state.panelData = null;
-    state.selectedPanel = "";
-    state.controlSchema = await get(`series/${encodeURIComponent(pluginId)}/control/schema`);
-    state.controlSnapshot = await get(`series/${encodeURIComponent(pluginId)}/control/snapshot`);
-    state.view = "control"; dashboard();
-  } catch (error) { showToast(error.message, true); }
+  state.selectedControlPlugin = pluginId;
+  state.controlTab = "fields";
+  state.panelsList = null;
+  state.panelData = null;
+  state.selectedPanel = "";
+  state.controlSchema = null;
+  state.controlSnapshot = null;
+  const [schemaResult, snapshotResult, panelsResult] = await Promise.allSettled([
+    get(`series/${encodeURIComponent(pluginId)}/control/schema`),
+    get(`series/${encodeURIComponent(pluginId)}/control/snapshot`),
+    get(`series/${encodeURIComponent(pluginId)}/panels`)
+  ]);
+  if (schemaResult.status === "fulfilled") state.controlSchema = schemaResult.value;
+  if (snapshotResult.status === "fulfilled") state.controlSnapshot = snapshotResult.value;
+  if (panelsResult.status === "fulfilled") state.panelsList = panelsResult.value;
+  const panelCount = state.panelsList?.panels?.length || 0;
+  if (!state.controlSchema && panelCount > 0) state.controlTab = "panels";
+  if (!state.controlSchema && panelCount === 0) showToast("该插件未提供统一接管或管理面板契约", true);
+  state.view = "control"; dashboard();
+  if (panelCount > 0) loadPanelData(state.panelsList.panels[0].id);
 }
 function controlFieldInputs() { return [...document.querySelectorAll("[data-control-field]")]; }
 function collectControlPatch(schema, snapshot) {
