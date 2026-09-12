@@ -18,6 +18,8 @@ import base64
 import binascii
 import inspect
 import re
+import threading
+import time
 from typing import Any, Mapping
 
 from ..series_diagnostics import diagnostic_event
@@ -42,6 +44,8 @@ SUPPORTED_CAPABILITIES = {
     "sse",
 }
 CONTRACT_CALL_TIMEOUT_SECONDS = 3.0
+IDEMPOTENCY_TTL_SECONDS = 10 * 60
+MAX_IDEMPOTENCY_RECORDS = 1000
 
 PANEL_ROLES = {"viewer": 0, "admin": 1, "owner": 2}
 
@@ -54,6 +58,9 @@ class WebUIPanelsGateway:
 
     def __init__(self, adapter: AstrBotAdapter) -> None:
         self.adapter = adapter
+        self._idempotency_lock = threading.Lock()
+        self._idempotency_records: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._idempotency_inflight: set[tuple[str, str, str, str]] = set()
 
     @staticmethod
     def _canonical(plugin_id: str) -> str:
@@ -158,36 +165,63 @@ class WebUIPanelsGateway:
     ) -> dict[str, Any]:
         panel = _require_panel_id(panel)
         action = _require_action_id(action)
-        if PANEL_ROLES.get(role, -1) < PANEL_ROLES["admin"]:
-            raise PermissionError("ROLE_FORBIDDEN")
         canonical, instance, contract = await self._instance(plugin_id)
         declaration = _require_declared_action(contract, panel, action)
         context_dict = dict(context) if isinstance(context, Mapping) else {}
-        _validate_action_context(declaration, role, context_dict)
+        request_id = str(context_dict.get("request_id") or "").strip()
+        effect = str(declaration.get("effect") or "idempotent")
+        min_role = str(declaration.get("min_role") or "admin")
+        if PANEL_ROLES.get(role, -1) < PANEL_ROLES.get(
+            min_role, PANEL_ROLES["admin"]
+        ):
+            raise PermissionError("ROLE_FORBIDDEN")
+        if effect == "non_idempotent" and not request_id:
+            raise ValueError("IDEMPOTENCY_REQUIRED")
+        idempotency_key = (canonical, panel, request_id) if request_id else None
+        if idempotency_key is not None:
+            replay = self._begin_idempotent_action(idempotency_key, action=action)
+            if replay is not None:
+                return replay
         if not isinstance(payload, Mapping):
             payload = {}
-        normalized_payload = await _resolve_declared_artifacts(
-            dict(payload),
-            declaration=declaration,
-            plugin_id=canonical,
-            panel=panel,
-            artifact_reader=artifact_reader,
-        )
         try:
-            declared_timeout = float(declaration.get("timeout_seconds"))
-        except (TypeError, ValueError):
-            declared_timeout = CONTRACT_CALL_TIMEOUT_SECONDS
-        timeout = min(60.0, max(1.0, declared_timeout))
-        result = await _maybe_await_call_action(
-            instance,
-            panel,
-            action,
-            normalized_payload,
-            context_dict,
-            timeout=timeout,
-        )
-        if not isinstance(result, Mapping):
-            raise ValueError("PANEL_ACTION_INVALID")
+            _validate_action_context(declaration, role, context_dict)
+            normalized_payload = await _resolve_declared_artifacts(
+                dict(payload),
+                declaration=declaration,
+                plugin_id=canonical,
+                panel=panel,
+                artifact_reader=artifact_reader,
+            )
+            try:
+                declared_timeout = float(declaration.get("timeout_seconds"))
+            except (TypeError, ValueError):
+                declared_timeout = CONTRACT_CALL_TIMEOUT_SECONDS
+            timeout = min(60.0, max(1.0, declared_timeout))
+            result = await _maybe_await_call_action(
+                instance,
+                panel,
+                action,
+                normalized_payload,
+                context_dict,
+                timeout=timeout,
+            )
+            if not isinstance(result, Mapping):
+                raise ValueError("PANEL_ACTION_INVALID")
+            materialized = _materialize_panel_artifacts(
+                dict(result),
+                plugin_id=canonical,
+                panel=panel,
+                artifact_writer=artifact_writer,
+            )
+        except Exception:
+            if idempotency_key is not None:
+                self._abort_idempotent_action(idempotency_key)
+            raise
+        if idempotency_key is not None:
+            self._finish_idempotent_action(
+                idempotency_key, action=action, result=materialized
+            )
         try:
             diagnostic_event(
                 "webui.panel.action",
@@ -197,20 +231,74 @@ class WebUIPanelsGateway:
                     "panel": panel,
                     "action": action,
                     "role": role,
-                    "request_id": str(context_dict.get("request_id") or ""),
-                    "effect": str(declaration.get("effect") or "idempotent")
-                    if isinstance(declaration, Mapping)
-                    else "dynamic",
+                    "request_id": request_id,
+                    "effect": effect,
                 },
             )
         except Exception:
             pass
-        return _materialize_panel_artifacts(
-            dict(result),
-            plugin_id=canonical,
-            panel=panel,
-            artifact_writer=artifact_writer,
-        )
+        return materialized
+
+    def _cleanup_idempotency(self) -> None:
+        now = time.time()
+        stale = [
+            key
+            for key, record in self._idempotency_records.items()
+            if now - float(record.get("created_at") or 0) > IDEMPOTENCY_TTL_SECONDS
+        ]
+        for key in stale:
+            self._idempotency_records.pop(key, None)
+        while len(self._idempotency_records) > MAX_IDEMPOTENCY_RECORDS:
+            oldest = min(
+                self._idempotency_records,
+                key=lambda key: float(
+                    self._idempotency_records[key].get("created_at") or 0
+                ),
+            )
+            self._idempotency_records.pop(oldest, None)
+
+    def _begin_idempotent_action(
+        self, key: tuple[str, str, str], *, action: str
+    ) -> dict[str, Any] | None:
+        with self._idempotency_lock:
+            self._cleanup_idempotency()
+            cached = self._idempotency_records.get(key)
+            if cached is not None:
+                if cached.get("action") != action:
+                    raise ValueError("IDEMPOTENCY_CONFLICT")
+                return {**dict(cached["result"]), "idempotent_replay": True}
+            inflight = (*key, action)
+            if inflight in self._idempotency_inflight:
+                raise ValueError("ACTION_IN_PROGRESS")
+            if any(
+                item[:3] == key and item[3] != action
+                for item in self._idempotency_inflight
+            ):
+                raise ValueError("IDEMPOTENCY_CONFLICT")
+            self._idempotency_inflight.add(inflight)
+            return None
+
+    def _abort_idempotent_action(self, key: tuple[str, str, str]) -> None:
+        with self._idempotency_lock:
+            self._idempotency_inflight = {
+                item for item in self._idempotency_inflight if item[:3] != key
+            }
+
+    def _finish_idempotent_action(
+        self, key: tuple[str, str, str], *, action: str, result: dict[str, Any]
+    ) -> None:
+        with self._idempotency_lock:
+            self._idempotency_inflight = {
+                item
+                for item in self._idempotency_inflight
+                if item != (*key, action)
+            }
+            self._idempotency_records[key] = {
+                "action": action,
+                "result": dict(result),
+                "created_at": time.time(),
+            }
+            self._cleanup_idempotency()
 
     async def stream(
         self,

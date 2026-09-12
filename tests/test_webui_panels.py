@@ -203,6 +203,70 @@ def test_panels_gateway_reports_unsupported_2_0_capabilities():
     assert listing["unsupported_capabilities"] == []
 
 
+def test_panels_gateway_replays_same_request_id_and_rejects_conflict():
+    plugin = FakePanelPlugin()
+    gateway = WebUIPanelsGateway(FakeAdapter(plugin))
+    first = asyncio.run(
+        gateway.action(
+            PLUGIN_ID,
+            "overview",
+            "set_type",
+            {"relationship_type": "lover"},
+            "admin",
+            context={"request_id": "req-replay"},
+        )
+    )
+    second = asyncio.run(
+        gateway.action(
+            PLUGIN_ID,
+            "overview",
+            "set_type",
+            {"relationship_type": "lover"},
+            "admin",
+            context={"request_id": "req-replay"},
+        )
+    )
+    assert first["applied"] == {"relationship_type": "lover"}
+    assert second["idempotent_replay"] is True
+    assert len([call for call in plugin.calls if call[0] == "action"]) == 1
+
+    class TwoActionPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            contract = super().webui_panels_contract()
+            contract["panels"][0]["actions"] = [
+                {"id": "set_type", "label": "设置", "effect": "non_idempotent"},
+                {"id": "clear_type", "label": "清除", "effect": "non_idempotent"},
+            ]
+            return contract
+
+    gateway = WebUIPanelsGateway(FakeAdapter(TwoActionPlugin()))
+    asyncio.run(
+        gateway.action(
+            PLUGIN_ID,
+            "overview",
+            "set_type",
+            {},
+            "admin",
+            context={"request_id": "req-conflict"},
+        )
+    )
+    try:
+        asyncio.run(
+            gateway.action(
+                PLUGIN_ID,
+                "overview",
+                "clear_type",
+                {},
+                "admin",
+                context={"request_id": "req-conflict"},
+            )
+        )
+    except ValueError as exc:
+        assert "IDEMPOTENCY_CONFLICT" in str(exc)
+    else:
+        raise AssertionError("request id reuse across actions must conflict")
+
+
 def test_panels_gateway_materializes_and_resolves_artifacts():
     class ArtifactPanelPlugin(FakePanelPlugin):
         def __init__(self):

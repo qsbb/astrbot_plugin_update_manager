@@ -242,17 +242,28 @@ function controlPanelsTab() {
   if (state.panelData && state.selectedPanel) content = panelContent(state.panelData);
   return `<div class="panel-nav">${buttons}</div>${capabilityHint}<div class="panel-body">${content || `<p class="empty-cell">选择一个面板查看。</p>`}</div>`;
 }
+function roleRank(role) { return ({ viewer: 0, admin: 1, owner: 2 })[role] ?? -1; }
+function actionAllowed(action) { return roleRank(state.session?.role) >= roleRank(action.min_role || "admin"); }
 function panelContent(data) {
   const columns = data.columns || [];
   const rows = data.rows || [];
   const table = columns.length ? `<div class="table-wrap"><table class="table"><thead><tr>${columns.map(col => `<th>${esc(col.label || col.key)}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.map(row => `<tr>${columns.map(col => `<td>${esc(row[col.key] ?? "—")}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${columns.length}" class="empty-cell">暂无数据</td></tr>`}</tbody></table></div>` : "";
   const actions = (data.actions || []).map(action => {
-    const fields = (action.payload_fields || []).map(field => field.type === "select"
-      ? `<label><span>${esc(field.label || field.name)}</span><select data-panel-field="${esc(field.name)}">${(field.options || []).map(opt => `<option value="${esc(opt[0])}">${esc(opt[1])}</option>`).join("")}</select></label>`
-      : field.type === "file"
-        ? `<label><span>${esc(field.label || field.name)}</span><input type="file" data-panel-file="${esc(field.name)}" /></label>`
-        : `<label><span>${esc(field.label || field.name)}</span><input type="${field.type === "number" ? "number" : "text"}" data-panel-field="${esc(field.name)}" placeholder="${esc(field.hint || "")}" /></label>`).join("");
-    return `<div class="panel-action">${fields ? `<div class="panel-action-form">${fields}</div>` : ""}<button class="btn ${action.danger ? "danger" : "primary"}" data-panel-action="${esc(action.id)}" data-action-effect="${esc(action.effect || "idempotent")}" data-action-revision-required="${action.revision_required ? "true" : "false"}" data-action-idempotency-required="${action.idempotency_required ? "true" : "false"}">${esc(action.label || action.id)}</button></div>`;
+    const allowed = actionAllowed(action);
+    const disabled = allowed ? "" : "disabled";
+    const fields = (action.payload_fields || []).map(field => {
+      const name = esc(field.name);
+      const label = esc(field.label || field.name);
+      const hint = esc(field.hint || "");
+      const value = field.default == null ? "" : esc(field.default);
+      if (field.type === "select") return `<label><span>${label}</span><select data-panel-field="${name}" ${disabled}>${(field.options || []).map(opt => `<option value="${esc(opt[0])}" ${String(opt[0]) === String(field.default ?? "") ? "selected" : ""}>${esc(opt[1])}</option>`).join("")}</select></label>`;
+      if (field.type === "file") return `<label><span>${label}</span><input type="file" data-panel-file="${name}" ${field.multiple ? "multiple" : ""} ${disabled} /></label>`;
+      if (field.type === "bool" || field.type === "boolean") return `<label><span>${label}</span><span class="switch"><input type="checkbox" data-panel-field="${name}" data-field-type="bool" ${field.default ? "checked" : ""} ${disabled} /><span>${hint || "启用"}</span></span></label>`;
+      if (field.type === "textarea") return `<label><span>${label}</span><textarea data-panel-field="${name}" data-field-type="text" placeholder="${hint}" ${disabled}>${value}</textarea></label>`;
+      const inputType = field.type === "number" ? "number" : field.type === "password" || field.secret ? "password" : "text";
+      return `<label><span>${label}</span><input type="${inputType}" data-panel-field="${name}" data-field-type="${field.type === "number" ? "number" : "text"}" value="${value}" placeholder="${hint}" ${disabled} /></label>`;
+    }).join("");
+    return `<div class="panel-action">${fields ? `<div class="panel-action-form">${fields}</div>` : ""}<button class="btn ${action.danger ? "danger" : "primary"}" data-panel-action="${esc(action.id)}" data-action-effect="${esc(action.effect || "idempotent")}" data-action-revision-required="${action.revision_required ? "true" : "false"}" data-action-idempotency-required="${action.idempotency_required ? "true" : "false"}" ${disabled}>${esc(action.label || action.id)}${allowed ? "" : ` · 需要 ${esc(action.min_role || "admin")}`}</button></div>`;
   }).join("");
   const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
   const artifactHtml = artifacts.length
@@ -624,20 +635,24 @@ async function runPanelAction(actionId) {
   (action.payload_fields || []).forEach(field => {
     if (field.type === "file") {
       const fileNode = document.querySelector(`[data-panel-file="${CSS.escape(field.name)}"]`);
-      const file = fileNode?.files?.[0];
-      if (field.required && !file) missing = true;
-      if (file) fileUploads.push([field.name, file]);
+      const files = [...(fileNode?.files || [])];
+      if (field.required && !files.length) missing = true;
+      files.forEach(file => fileUploads.push([field.name, file, field.multiple === true]));
       return;
     }
     const node = document.querySelector(`[data-panel-field="${CSS.escape(field.name)}"]`);
+    if (field.type === "bool" || field.type === "boolean") { payload[field.name] = !!node?.checked; return; }
     const value = node ? node.value : "";
     if (field.required && !value) missing = true;
-    payload[field.name] = field.type === "number" ? (value === "" ? null : Number(value)) : value;
+    if (field.type === "number") payload[field.name] = value === "" ? null : Number(value);
+    else if (value !== "" || field.secret !== true) payload[field.name] = value;
   });
   if (missing) { showToast("请填写动作所需的必填字段", true); return; }
   try {
-    for (const [name, file] of fileUploads) {
-      payload[name] = await uploadArtifact(file, pluginId, panelId);
+    for (const [name, file, multiple] of fileUploads) {
+      const artifactId = await uploadArtifact(file, pluginId, panelId);
+      if (multiple) payload[name] = [...(Array.isArray(payload[name]) ? payload[name] : []), artifactId];
+      else payload[name] = artifactId;
     }
   } catch (error) { showToast(error.message, true); return; }
   if (action.confirm && !confirm(action.confirm)) return;
