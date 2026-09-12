@@ -97,6 +97,28 @@ def _contract_methods(repo: pathlib.Path) -> set[str]:
     return methods
 
 
+def _json_literal_name_errors(repo: pathlib.Path) -> list[str]:
+    """捕捉 Python 源码里误写的 JSON ``true/false/null`` 字面量。
+
+    这类代码能通过 ``py_compile``，但一调用契约方法就会在运行时 ``NameError``。
+    审计只做静态观察，帮助在进服务器前发现该问题。
+    """
+    found: list[str] = []
+    for path in repo.rglob("*.py"):
+        if ".git" in path.parts or "tests" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in {"true", "false", "null"}:
+                found.append(
+                    f"{path.relative_to(repo).as_posix()}:{node.lineno}:{node.id}"
+                )
+    return sorted(found)
+
+
 def _request_context_files(root: pathlib.Path) -> list[pathlib.Path]:
     found: list[pathlib.Path] = []
     for repo in sorted(root.glob("astrbot_plugin_*")):
@@ -154,6 +176,11 @@ def audit(
             (errors if spec.get("local_required", False) else warnings).append(message)
             member_report[plugin_id] = item
             continue
+        invalid_literals = _json_literal_name_errors(repo)
+        if invalid_literals:
+            errors.append(
+                f"{plugin_id}: JSON-style Python literals: {invalid_literals}"
+            )
         metadata = _metadata_version(repo)
         changelog = _changelog_top(repo)
         code = _code_version(repo, str(spec.get("version_source") or ""))

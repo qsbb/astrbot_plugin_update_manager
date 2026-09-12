@@ -315,7 +315,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "display_name": "核",
             "role": "kernel",
             "standalone": {
-                "available": true,
+                "available": True,
                 "entry": "/pages/manager",
                 "pages": ["manager"],
             },

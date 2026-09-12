@@ -89,3 +89,19 @@ def test_audit_detects_request_context_hash_mismatch(tmp_path):
 
     assert report["request_context"]["consistent"] is False
     assert any("request_context hash mismatch" in error for error in report["errors"])
+
+
+def test_audit_flags_json_style_python_literals(tmp_path):
+    repo = tmp_path / "astrbot_plugin_fake"
+    repo.mkdir()
+    (repo / "metadata.yaml").write_text("version: 1.0.0\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text("# 更新日志\n\n## 1.0.0 - 2026-01-01\n", encoding="utf-8")
+    (repo / "main.py").write_text(
+        '__version__ = "1.0.0"\n\n\ndef contract():\n    return {"available": true}\n',
+        encoding="utf-8",
+    )
+    registry = _write_registry(tmp_path, [])
+
+    report = audit(tmp_path, registry)
+
+    assert any("JSON-style Python literals" in error for error in report["errors"])

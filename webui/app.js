@@ -647,6 +647,15 @@ async function runPanelAction(actionId) {
     const result = await post(`series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}/actions/${encodeURIComponent(actionId)}`, payload, headers);
     showToast(result.message || "操作完成");
     if (result.job_id) { pollJob(result.job_id, panelId); return; }
+    if ((Array.isArray(result.artifacts) && result.artifacts.length) || result.audio?.artifact_id) {
+      state.panelData = {
+        ...(state.panelData || {}),
+        artifacts: [...(state.panelData?.artifacts || []), ...(result.artifacts || [])],
+        audio: result.audio || state.panelData?.audio || null,
+      };
+      dashboard();
+      return;
+    }
     await loadPanelData(panelId);
   } catch (error) { showToast(error.message, true); }
 }

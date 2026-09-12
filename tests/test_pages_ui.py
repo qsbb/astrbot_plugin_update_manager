@@ -113,6 +113,7 @@ def test_standalone_webui_control_console_takes_over_series_plugins():
     assert "/actions/" in js
     assert "function panelContent" in js
     assert "payload_fields" in js
+    assert "result.artifacts" in js and "result.audio?.artifact_id" in js
     assert 'data-panel-select' in js and 'data-panel-action' in js
     # 生命周期：owner 门控 + 确认 + force 选项
     assert "async function runLifecycle" in js
