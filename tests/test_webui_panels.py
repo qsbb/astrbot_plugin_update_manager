@@ -93,6 +93,69 @@ def test_panels_gateway_happy_path():
     assert result["applied"] == {"relationship_type": "lover"}
 
 
+def test_panels_gateway_accepts_tuple_panels_and_missing_version():
+    """兼容历史 tuple 声明与缺失 version 的旧契约。"""
+
+    class TuplePanelPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@1.0",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "panels": (
+                    {"id": "overview", "title": "关系总览"},
+                ),
+            }
+
+    gateway = WebUIPanelsGateway(FakeAdapter(TuplePanelPlugin()))
+    listing = asyncio.run(gateway.panels(PLUGIN_ID))
+    assert listing["panels"][0]["id"] == "overview"
+
+
+def test_panels_gateway_rejects_unsupported_contract_version():
+    class FuturePanelPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            contract = super().webui_panels_contract()
+            contract["version"] = "2.0"
+            return contract
+
+    gateway = WebUIPanelsGateway(FakeAdapter(FuturePanelPlugin()))
+    try:
+        asyncio.run(gateway.panels(PLUGIN_ID))
+    except LookupError as exc:
+        assert "CONTRACT_VERSION_UNSUPPORTED" in str(exc)
+    else:
+        raise AssertionError("unsupported contract version must be rejected")
+
+
+def test_panels_gateway_rejects_undeclared_action():
+    class DeclaredActionPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@1.0",
+                "version": "1.0",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "panels": [
+                    {
+                        "id": "overview",
+                        "title": "关系总览",
+                        "actions": [{"id": "set_type", "label": "设置"}],
+                    }
+                ],
+            }
+
+    gateway = WebUIPanelsGateway(FakeAdapter(DeclaredActionPlugin()))
+    try:
+        asyncio.run(
+            gateway.action(PLUGIN_ID, "overview", "drop_everything", {}, "owner")
+        )
+    except ValueError as exc:
+        assert "UNKNOWN_ACTION" in str(exc)
+    else:
+        raise AssertionError("undeclared action must be rejected")
+
+
 def test_panels_gateway_rejects_untrusted_plugin():
     gateway = WebUIPanelsGateway(FakeAdapter(FakePanelPlugin()))
     try:

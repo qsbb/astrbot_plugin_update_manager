@@ -143,6 +143,12 @@
 
 **新插槽规则**：新插件在 200–800 内选择未占用槽位（当前空闲：200、450、650、750），同时在代码注释与本表登记。调整已占用槽位 = 破坏性变更，升主版本并全系列回归。
 
+**兼容性与 finalizer 例外**（仅限已登记的历史实现，新插件不得使用）：
+
+- AstrBot 内置 session-control 兼容场景：言的 `preempt_native_follow_up` 与群聊正文恢复监听使用 `maxsize`，必须早于核心 handler；理由与边界见言 main.py 注释。
+- LLM 请求 finalizer：言 `-40`、情 `-30`，用于在所有 200–800 注入完成后做最终搬运/收敛；负值区间不开放给新插件。
+- finalizer 不保证是全局最后一步（外部低优先级 hook 可能更晚），因此需要最终顺序保证的逻辑不得只依赖负值优先级。
+
 ---
 
 ## 5. 跨插件契约体系
@@ -207,6 +213,10 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
 - 数据走**通用渲染契约**：`{success, title, description, columns: [{key, label}], rows: [...], actions: [...]}`——前端零定制即可统一接管。
 - 动作可带 `confirm` 提示文本与 `payload_fields`（`name/label/type/required`）；执行要求 admin+ 角色（网关侧二次校验）；返回 `{success, message}`。
 - **新插件需要管理界面时优先实现本契约**，由核 WebUI 统一接管，不再新建独立控制台（见第 9 节）。
+- **双模式**：插件自己的 Plugin Page / `register_web_api` 是 standalone fallback，必须保留；`series.webui@1.0` 是核存在时的 managed 适配层。核缺失、核 WebUI 关闭或核版本不兼容时，standalone 行为必须完全不变。
+- 契约声明建议增加：`version`（契约版本，不是插件版本）、`standalone.available/pages`、`managed.supported/level`（none/read/actions/full）、`capabilities`、`state_owner="plugin"`、`preferred_surface`（kernel/standalone/dual）。
+- 核聚合 managed 面板时只通过 `series.webui` 进程内方法调用，**不得透明代理插件的原生 Page API**；插件状态、锁、revision 始终归插件所有。
+- 面板/动作声明必须可校验：未声明的 panel/action 网关侧 fail-closed；核调用应有有界超时；非幂等动作在协议支持 revision/幂等键前只保留在 Page。
 
 ### 5.4 `series.model_router@1.0`（只读模型路由）
 
@@ -321,6 +331,9 @@ astrbot_plugin_xxx/
 - **Plugin Page**（`pages/manager/`）：运行在 dashboard iframe，经 bridge-sdk 接入，宿主 JWT 鉴权；必须带 zh-CN/en-US 双语 i18n；i18n 页面元数据（title/description）齐全。
 - **核独立 WebUI**（仅核，`webui/`）：自有 aiohttp 服务与会话 Cookie；首屏永远是登录页；不提供注册入口；管理员账户只在核 Page 创建和维护。
 - **边界规则**：新插件需要管理面时，实现 `series.webui@1.0` 面板交给核统一接管；不新建第二个独立控制台、不复制核的鉴权体系。
+- **standalone 优先原则**：Plugin Page 是允许且必须保留的单插件入口；只装一个插件、没有核时，全部配置/上传/预览/管理动作必须仍可通过 Plugin Page 完成。
+- **managed 是增强不是替代**：装核后，核通过 `series.webui` 聚合面板；Page 继续可用，可作为备用入口。核不得删除、停用或假定 Page 不可达，也不得代理原生 Page API。
+- **状态单写者**：Page handler 与 `webui_panel_action` 必须调用同一业务服务/锁/revision；核只做发现、鉴权、转发和审计，不复制插件状态。
 - 前端改动保持组件化、无重复代码（AstrBot WebUI 工程要求）。
 - 若向 AstrBot dashboard 贡献：对话框标题基类 `text-h3 pa-4 pb-0 pl-6`，按钮 `variant="text"` / `variant="tonal"`；后端 API/schema 变更后执行 `pnpm generate:api` 重新生成前端客户端。
 

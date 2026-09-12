@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## 0.16.2 - 2026-09-12
+
+- 修复 `series.webui@1.0` 网关对面板契约的兼容性：接受 JSON list 与历史 tuple 声明，兼容缺失 `version` 的旧契约并拒绝不支持的 major。
+- 面板/动作调用增加声明校验与 3 秒有界超时：未声明的面板或动作在网关侧 fail-closed，卡死的插件不再挂起核 WebUI。
+- 保留插件独立 Pages 作为 standalone fallback：只装单插件时仍由 AstrBot Dashboard 直接可用；装核后核通过 `series.webui` 统一接管，不代理原生 Page API。
+
 ## 0.16.1 - 2026-09-06
 
 - 可信清单新增凝心溯溪-通（astrbot_plugin_companion_phone）：真机/Redroid 双模式的安卓手机操作插件。

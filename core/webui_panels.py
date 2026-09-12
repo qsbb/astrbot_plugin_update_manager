@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 from typing import Any, Mapping
@@ -21,6 +22,7 @@ from .adapters.astrbot import AstrBotAdapter
 from .trusted import DIAGNOSTIC_SERIES_ID, TRUSTED_BY_ID
 
 CONTRACT_NAME = "series.webui@1.0"
+CONTRACT_CALL_TIMEOUT_SECONDS = 3.0
 
 PANEL_ROLES = {"viewer": 0, "admin": 1, "owner": 2}
 
@@ -41,7 +43,7 @@ class WebUIPanelsGateway:
             raise LookupError("PLUGIN_NOT_TRUSTED")
         return trusted.plugin_id
 
-    async def _instance(self, plugin_id: str) -> tuple[str, Any]:
+    async def _instance(self, plugin_id: str) -> tuple[str, Any, Mapping[str, Any]]:
         canonical = self._canonical(plugin_id)
         getter = getattr(self.adapter, "get_plugin_instance", None)
         if not callable(getter):
@@ -58,14 +60,15 @@ class WebUIPanelsGateway:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         if str(contract.get("plugin_id")) not in {canonical, plugin_id}:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
-        return canonical, instance
+        version = contract.get("version")
+        # 兼容旧契约缺失 version；显式声明时只接受 1.x。
+        if version not in (None, "", "1", "1.0", 1, 1.0):
+            raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
+        return canonical, instance, contract
 
     async def panels(self, plugin_id: str) -> dict[str, Any]:
-        _canonical, instance = await self._instance(plugin_id)
-        contract = await _maybe_await_call(instance, "webui_panels_contract")
-        panels = contract.get("panels")
-        if not isinstance(panels, list):
-            panels = []
+        canonical, _instance, contract = await self._instance(plugin_id)
+        panels = _as_sequence(contract.get("panels"))
         panels = [
             {
                 "id": str(item.get("id") or ""),
@@ -76,12 +79,18 @@ class WebUIPanelsGateway:
             if isinstance(item, Mapping)
             and _ALLOWED_PANEL_ID.match(str(item.get("id") or ""))
         ]
-        return {"plugin_id": _canonical, "panels": panels}
+        return {"plugin_id": canonical, "panels": panels}
 
     async def data(self, plugin_id: str, panel: str) -> dict[str, Any]:
         panel = _require_panel_id(panel)
-        _canonical, instance = await self._instance(plugin_id)
-        payload = await _maybe_await_call(instance, "webui_panel_data", panel)
+        _canonical, instance, contract = await self._instance(plugin_id)
+        _require_declared_panel(contract, panel)
+        payload = await _maybe_await_call(
+            instance,
+            "webui_panel_data",
+            panel,
+            timeout=CONTRACT_CALL_TIMEOUT_SECONDS,
+        )
         if not isinstance(payload, Mapping):
             raise ValueError("PANEL_DATA_INVALID")
         if not isinstance(payload.get("success"), bool):
@@ -101,11 +110,17 @@ class WebUIPanelsGateway:
         action = _require_action_id(action)
         if PANEL_ROLES.get(role, -1) < PANEL_ROLES["admin"]:
             raise PermissionError("ROLE_FORBIDDEN")
-        _canonical, instance = await self._instance(plugin_id)
+        _canonical, instance, contract = await self._instance(plugin_id)
+        _require_declared_action(contract, panel, action)
         if not isinstance(payload, Mapping):
             payload = {}
         result = await _maybe_await_call(
-            instance, "webui_panel_action", panel, action, dict(payload)
+            instance,
+            "webui_panel_action",
+            panel,
+            action,
+            dict(payload),
+            timeout=CONTRACT_CALL_TIMEOUT_SECONDS,
         )
         if not isinstance(result, Mapping):
             raise ValueError("PANEL_ACTION_INVALID")
@@ -118,11 +133,64 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
-async def _maybe_await_call(instance: Any, method: str, *args: Any) -> Any:
+async def _maybe_await_call(
+    instance: Any,
+    method: str,
+    *args: Any,
+    timeout: float | None = CONTRACT_CALL_TIMEOUT_SECONDS,
+) -> Any:
     function = getattr(instance, method, None)
     if not callable(function):
         raise LookupError("CONTRACT_UNAVAILABLE")
-    return await _maybe_await(function(*args))
+    awaitable = _maybe_await(function(*args))
+    if timeout is None or timeout <= 0:
+        return await awaitable
+    return await asyncio.wait_for(awaitable, timeout=timeout)
+
+
+def _as_sequence(value: Any) -> list[Any]:
+    """契约字段既接受 JSON list，也接受历史 tuple 声明。"""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _declared_panels(contract: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    declared: dict[str, Mapping[str, Any]] = {}
+    for item in _as_sequence(contract.get("panels")):
+        if not isinstance(item, Mapping):
+            continue
+        panel_id = str(item.get("id") or "")
+        if _ALLOWED_PANEL_ID.match(panel_id):
+            declared[panel_id] = item
+    return declared
+
+
+def _require_declared_panel(contract: Mapping[str, Any], panel: str) -> None:
+    declared = _declared_panels(contract)
+    if declared and panel not in declared:
+        raise ValueError("UNKNOWN_PANEL")
+
+
+def _require_declared_action(
+    contract: Mapping[str, Any], panel: str, action: str
+) -> None:
+    declared = _declared_panels(contract)
+    if not declared:
+        return
+    panel_decl = declared.get(panel)
+    if panel_decl is None:
+        raise ValueError("UNKNOWN_PANEL")
+    actions = _as_sequence(panel_decl.get("actions"))
+    if not actions:
+        return
+    known = {
+        str(item.get("id") or "")
+        for item in actions
+        if isinstance(item, Mapping)
+    }
+    if action not in known:
+        raise ValueError("UNKNOWN_ACTION")
 
 
 def _require_panel_id(panel: str) -> str:
