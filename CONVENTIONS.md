@@ -222,7 +222,11 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
 
 - 核暴露 `resolve_model_route(kind, plugin_override=None)` 与 `model_routes_snapshot()`；契约只读、不修改 AstrBot 配置。
 - 回退顺序：插件显式配置 → 核配置 → AstrBot 原生 → `unavailable`。
-- kinds：`conversation / embedding / vision / stt / tts`；**voice 字段仅对 tts 有意义**（0.16.0 起保存与解析时静默丢弃其他 kind 的 voice）。
+- kinds：`conversation / fast / reasoning / embedding / vision / stt / tts`；**voice 字段仅对 tts 有意义**（0.16.0 起保存与解析时静默丢弃其他 kind 的 voice）。
+  - `conversation`：主对话模型；
+  - `fast`：快速/廉价模型，统一用于静默预判、分段裁判、消息收口、轻量分类等辅助调用；
+  - `reasoning`：推理/长任务模型，统一用于工具循环、复杂规划与深度分析；
+  - 插件不得为这些通用角色各写一套 provider fallback；本地显式配置 > 核路由 > AstrBot 原生。
 - 配套 `GET /api/model-options` 只读已加载 provider 配置与已配置模型清单，不触发远程模型探测。
 
 ### 5.5 `active_learner.knowledge@1.0`（知识桥接，知 → 序）

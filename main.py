@@ -331,7 +331,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     def _astrbot_provider_for_kind(self, kind: str) -> Any:
         """Best-effort native provider discovery without invoking a provider."""
         context = self.context
-        if kind == "conversation":
+        if kind in {"conversation", "fast", "reasoning"}:
             for name in ("get_using_provider", "get_default_provider"):
                 getter = getattr(context, name, None)
                 if callable(getter):
@@ -344,6 +344,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             return None
         manager = getattr(context, "provider_manager", None)
         aliases = {
+            "fast": ("provider_insts",),
+            "reasoning": ("provider_insts",),
             "embedding": ("embedding_provider_insts", "embed_provider_insts"),
             "vision": ("provider_insts",),
             "stt": ("stt_provider_insts",),
@@ -369,8 +371,25 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             except Exception:
                 pass
         manager = getattr(self.context, "provider_manager", None)
-        providers = getattr(manager, "providers", None) or ()
-        return any(str(getattr(item, "id", "") or "") == provider_id for item in providers)
+        candidates: list[Any] = []
+        for name in ("provider_insts", "stt_provider_insts", "tts_provider_insts", "embedding_provider_insts"):
+            values = getattr(manager, name, None) or ()
+            if isinstance(values, Mapping):
+                candidates.extend(values.values())
+            elif isinstance(values, (list, tuple, set)):
+                candidates.extend(values)
+        inst_map = getattr(manager, "inst_map", None)
+        if isinstance(inst_map, Mapping):
+            candidates.extend(inst_map.values())
+        for item in candidates:
+            config = getattr(item, "provider_config", None)
+            item_id = ""
+            if isinstance(config, Mapping):
+                item_id = str(config.get("id") or "")
+            item_id = item_id or str(getattr(item, "id", "") or "")
+            if item_id == provider_id:
+                return True
+        return False
 
     def resolve_model_route(
         self, kind: str, *, plugin_override: Any = None
@@ -578,6 +597,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             return []
         aliases = {
             "conversation": ("provider_insts",),
+            "fast": ("provider_insts",),
+            "reasoning": ("provider_insts",),
             "embedding": ("embedding_provider_insts", "embed_provider_insts"),
             "vision": ("provider_insts",),
             "stt": ("stt_provider_insts",),
@@ -590,7 +611,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 values.extend(candidates.values())
             elif isinstance(candidates, (list, tuple, set)):
                 values.extend(candidates)
-        if kind == "conversation" and not values:
+        if kind in {"conversation", "fast", "reasoning"} and not values:
             candidates = getattr(manager, "inst_map", {})
             if isinstance(candidates, Mapping):
                 values.extend(candidates.values())

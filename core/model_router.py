@@ -10,11 +10,21 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
 
-MODEL_KINDS = ("conversation", "embedding", "vision", "stt", "tts")
+MODEL_KINDS = (
+    "conversation",
+    "fast",
+    "reasoning",
+    "embedding",
+    "vision",
+    "stt",
+    "tts",
+)
 MODEL_ROUTER_CONTRACT = "series.model_router@1.0"
 _ROUTE_FIELDS = ("provider_id", "model")
 _ROUTE_FIELDS_BY_KIND = {
     "conversation": ("provider_id", "model"),
+    "fast": ("provider_id", "model"),
+    "reasoning": ("provider_id", "model"),
     "embedding": ("provider_id", "model"),
     "vision": ("provider_id", "model"),
     "stt": ("provider_id", "model"),

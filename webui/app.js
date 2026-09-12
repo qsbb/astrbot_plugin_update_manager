@@ -155,7 +155,7 @@ function settingsView() {
   const s = state.settingsData?.settings || {};
   const route = s.model_routing || {};
   const canWrite = state.session?.role === "owner" || state.session?.role === "admin";
-  const labels = [["conversation", "对话 / LLM"], ["embedding", "向量 / Embedding"], ["vision", "识图 / 视觉"], ["stt", "语音识别 / STT"], ["tts", "语音合成 / TTS"]];
+  const labels = [["conversation", "对话 / LLM"], ["fast", "快速模型 / Fast"], ["reasoning", "推理模型 / Reasoning"], ["embedding", "向量 / Embedding"], ["vision", "识图 / 视觉"], ["stt", "语音识别 / STT"], ["tts", "语音合成 / TTS"]];
   const routeRows = labels.map(([kind, label]) => {
     const item = route[kind] || {};
     const voice = kind === "tts" ? `<td><input class="route-voice" data-setting-route="${kind}.voice" type="text" value="${esc(item.voice || "")}" placeholder="音色（可选）" ${canWrite ? "" : "disabled"} /></td>` : "";
