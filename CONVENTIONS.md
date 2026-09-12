@@ -274,6 +274,7 @@ async def webui_panel_stream(self, panel, context=None): ...  # 仅在声明 sse
 
 流水线约束：
 
+- 核 `contracts.yaml` 的 `flows.series.proactive_delivery` 是机器可读注册表；审计会校验每一步引用的契约是否存在。
 - 每个跨插件请求都必须带 `series_id=ningxin_suxi`、明确目标与超时；调用链不通过 HTTP 或共享文件。
 - `event_key` 去重、发送额度与“已评估但未发送”状态由言/境在各自 domain 中记录，核只做路由与政策配置，不持有业务正文。
 - 主动投递失败不进入普通对话重试链；同一事件只有严重度升级或有效期更新才允许重新判断。
