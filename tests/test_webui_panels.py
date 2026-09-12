@@ -200,7 +200,102 @@ def test_panels_gateway_reports_unsupported_2_0_capabilities():
     gateway = WebUIPanelsGateway(FakeAdapter(FuturePanelPlugin()))
     listing = asyncio.run(gateway.panels(PLUGIN_ID))
     assert listing["capabilities"] == ["audio_preview", "file_upload", "revision"]
-    assert listing["unsupported_capabilities"] == ["audio_preview", "file_upload"]
+    assert listing["unsupported_capabilities"] == []
+
+
+def test_panels_gateway_materializes_and_resolves_artifacts():
+    class ArtifactPanelPlugin(FakePanelPlugin):
+        def __init__(self):
+            super().__init__()
+            self.payload = None
+
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@2.0",
+                "version": "2.0",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "capabilities": ["artifacts", "file_upload"],
+                "panels": [
+                    {
+                        "id": "overview",
+                        "title": "总览",
+                        "actions": [
+                            {
+                                "id": "import_file",
+                                "label": "导入",
+                                "payload_fields": [
+                                    {"name": "source", "type": "file", "required": True}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+
+        async def webui_panel_data(self, panel, *, artifact_writer=None):
+            return {
+                "success": True,
+                "columns": [],
+                "rows": [],
+                "actions": [],
+                "artifacts": [
+                    {
+                        "filename": "export.json",
+                        "mime": "application/json",
+                        "data": b"{\"ok\":true}",
+                    }
+                ],
+            }
+
+        async def webui_panel_action(
+            self, panel, action, payload, context=None, *, artifact_reader=None
+        ):
+            item = payload["source"]
+            self.payload = item
+            return {"success": True, "size": item["size"]}
+
+    plugin = ArtifactPanelPlugin()
+    gateway = WebUIPanelsGateway(FakeAdapter(plugin))
+    artifacts = {}
+
+    def write(plugin_id, panel, *, filename, mime, data):
+        artifact_id = "a" * 32
+        artifacts[artifact_id] = {
+            "artifact_id": artifact_id,
+            "plugin_id": plugin_id,
+            "panel": panel,
+            "filename": filename,
+            "mime": mime,
+            "size": len(data),
+            "data": data,
+        }
+        return {key: value for key, value in artifacts[artifact_id].items() if key != "data"}
+
+    def read(artifact_id, plugin_id, panel):
+        item = artifacts[artifact_id]
+        assert item["plugin_id"] == plugin_id
+        assert item["panel"] == panel
+        return item
+
+    data = asyncio.run(
+        gateway.data(PLUGIN_ID, "overview", artifact_writer=write)
+    )
+    assert data["artifacts"][0]["artifact_id"] == "a" * 32
+    assert "data" not in data["artifacts"][0]
+
+    result = asyncio.run(
+        gateway.action(
+            PLUGIN_ID,
+            "overview",
+            "import_file",
+            {"source": "a" * 32},
+            "admin",
+            artifact_reader=read,
+        )
+    )
+    assert result == {"success": True, "size": 11}
+    assert plugin.payload["filename"] == "export.json"
 
 
 def test_panels_gateway_streams_sse_events():

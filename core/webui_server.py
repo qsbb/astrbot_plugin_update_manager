@@ -363,6 +363,44 @@ class WebUIServer:
         control = getattr(self, "series_control", None)
         return bool(control is not None and getattr(control, "managed", False))
 
+    def _read_panel_artifact(
+        self, artifact_id: str, plugin_id: str, panel: str
+    ) -> dict[str, Any]:
+        item = self.artifacts.get(artifact_id)
+        if item is None:
+            raise LookupError("ARTIFACT_NOT_FOUND")
+        if item.plugin_id and item.plugin_id != plugin_id:
+            raise PermissionError("ARTIFACT_SCOPE_MISMATCH")
+        if item.panel and item.panel != panel:
+            raise PermissionError("ARTIFACT_SCOPE_MISMATCH")
+        return {
+            "artifact_id": item.artifact_id,
+            "plugin_id": item.plugin_id,
+            "panel": item.panel,
+            "filename": item.filename,
+            "mime": item.mime,
+            "size": len(item.data),
+            "data": item.data,
+        }
+
+    def _write_panel_artifact(
+        self,
+        plugin_id: str,
+        panel: str,
+        *,
+        filename: str,
+        mime: str,
+        data: bytes,
+    ) -> dict[str, Any]:
+        record = self.artifacts.put(
+            plugin_id=plugin_id,
+            panel=panel,
+            filename=filename,
+            mime=mime,
+            data=data,
+        )
+        return self.artifacts.snapshot(record.artifact_id) or {}
+
     async def _panels_dispatch(
         self, request: web.Request, method: str, *args: Any
     ) -> web.Response:
@@ -382,23 +420,57 @@ class WebUIServer:
                     "actor": {"role": role},
                 }
                 try:
-                    value = await function(
-                        request.match_info["plugin_id"],
-                        request.match_info["panel"],
-                        request.match_info["action"],
-                        await self._body(request) or {},
-                        role,
-                        context=context,
+                    signature = inspect.signature(function)
+                    parameters = signature.parameters.values()
+                    accepts_context = (
+                        "context" in signature.parameters
+                        or any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters
+                        )
                     )
-                except TypeError:
-                    # 兼容不接受 context 的旧网关实现。
-                    value = await function(
-                        request.match_info["plugin_id"],
-                        request.match_info["panel"],
-                        request.match_info["action"],
-                        await self._body(request) or {},
-                        role,
+                    accepts_artifacts = (
+                        "artifact_reader" in signature.parameters
+                        or any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters
+                        )
                     )
+                except (TypeError, ValueError):
+                    accepts_context = False
+                    accepts_artifacts = False
+                kwargs = {}
+                if accepts_context:
+                    kwargs["context"] = context
+                if accepts_artifacts:
+                    kwargs["artifact_reader"] = self._read_panel_artifact
+                value = await function(
+                    request.match_info["plugin_id"],
+                    request.match_info["panel"],
+                    request.match_info["action"],
+                    await self._body(request) or {},
+                    role,
+                    **kwargs,
+                )
+            elif method == "data":
+                call_args = (request.match_info["plugin_id"],) + args
+                try:
+                    signature = inspect.signature(function)
+                    accepts_writer = (
+                        "artifact_writer" in signature.parameters
+                        or any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in signature.parameters.values()
+                        )
+                    )
+                except (TypeError, ValueError):
+                    accepts_writer = False
+                if accepts_writer:
+                    value = await function(
+                        *call_args, artifact_writer=self._write_panel_artifact
+                    )
+                else:
+                    value = await function(*call_args)
             else:
                 call_args = (request.match_info["plugin_id"],) + args
                 value = await function(*call_args)

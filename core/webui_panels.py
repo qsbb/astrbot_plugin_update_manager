@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import inspect
 import re
 from typing import Any, Mapping
@@ -33,6 +35,11 @@ SUPPORTED_CAPABILITIES = {
     "idempotency",
     "generic_table",
     "generic_actions",
+    "file_upload",
+    "artifacts",
+    "audio_preview",
+    "jobs",
+    "sse",
 }
 CONTRACT_CALL_TIMEOUT_SECONDS = 3.0
 
@@ -109,9 +116,15 @@ class WebUIPanelsGateway:
             "unsupported_capabilities": unsupported,
         }
 
-    async def data(self, plugin_id: str, panel: str) -> dict[str, Any]:
+    async def data(
+        self,
+        plugin_id: str,
+        panel: str,
+        *,
+        artifact_writer: Any | None = None,
+    ) -> dict[str, Any]:
         panel = _require_panel_id(panel)
-        _canonical, instance, contract = await self._instance(plugin_id)
+        canonical, instance, contract = await self._instance(plugin_id)
         _require_declared_panel(contract, panel)
         payload = await _maybe_await_call(
             instance,
@@ -124,7 +137,12 @@ class WebUIPanelsGateway:
         if not isinstance(payload.get("success"), bool):
             payload = dict(payload)
             payload.setdefault("success", True)
-        return dict(payload)
+        return _materialize_panel_artifacts(
+            dict(payload),
+            plugin_id=canonical,
+            panel=panel,
+            artifact_writer=artifact_writer,
+        )
 
     async def action(
         self,
@@ -134,6 +152,8 @@ class WebUIPanelsGateway:
         payload: Mapping[str, Any] | None,
         role: str = "",
         context: Mapping[str, Any] | None = None,
+        *,
+        artifact_reader: Any | None = None,
     ) -> dict[str, Any]:
         panel = _require_panel_id(panel)
         action = _require_action_id(action)
@@ -145,11 +165,18 @@ class WebUIPanelsGateway:
         _validate_action_context(declaration, role, context_dict)
         if not isinstance(payload, Mapping):
             payload = {}
+        normalized_payload = await _resolve_declared_artifacts(
+            dict(payload),
+            declaration=declaration,
+            plugin_id=canonical,
+            panel=panel,
+            artifact_reader=artifact_reader,
+        )
         result = await _maybe_await_call_action(
             instance,
             panel,
             action,
-            dict(payload),
+            normalized_payload,
             context_dict,
             timeout=CONTRACT_CALL_TIMEOUT_SECONDS,
         )
@@ -367,6 +394,132 @@ async def _maybe_await_call_action(
         timeout=timeout,
     )
 
+
+
+async def _resolve_declared_artifacts(
+    payload: dict[str, Any],
+    *,
+    declaration: Mapping[str, Any],
+    plugin_id: str,
+    panel: str,
+    artifact_reader: Any | None,
+) -> dict[str, Any]:
+    """把动作里声明的 file 字段从 artifact_id 解析成标准制品描述。
+
+    series.webui@2.0 的 file 字段由核 WebUI 先上传到 ArtifactStore，再在动作调用前
+    解析为 ``{artifact_id, filename, mime, size, data}``。插件不接触核内部对象，也
+    不需要读取上传临时路径。
+    """
+    fields = _as_sequence(declaration.get("payload_fields"))
+    file_fields = [
+        item
+        for item in fields
+        if isinstance(item, Mapping) and str(item.get("type") or "") == "file"
+    ]
+    if not file_fields:
+        return payload
+    if artifact_reader is None:
+        raise ValueError("ARTIFACT_TRANSPORT_UNAVAILABLE")
+    for field in file_fields:
+        name = str(field.get("name") or "").strip()
+        if not name or name not in payload:
+            continue
+        raw = payload.get(name)
+        multiple = bool(field.get("multiple"))
+        values = raw if multiple else [raw]
+        if not isinstance(values, list):
+            raise ValueError(f"INVALID_ARTIFACT_FIELD:{name}")
+        if len(values) > 20:
+            raise ValueError(f"TOO_MANY_ARTIFACTS:{name}")
+        resolved: list[dict[str, Any]] = []
+        for value in values:
+            artifact_id = str(value or "").strip()
+            if not artifact_id:
+                if bool(field.get("required")):
+                    raise ValueError(f"ARTIFACT_REQUIRED:{name}")
+                continue
+            try:
+                item = artifact_reader(artifact_id, plugin_id, panel)
+                if inspect.isawaitable(item):
+                    item = await item
+            except LookupError:
+                raise
+            except PermissionError:
+                raise
+            if not isinstance(item, Mapping):
+                raise ValueError(f"ARTIFACT_NOT_FOUND:{name}")
+            data = item.get("data")
+            if not isinstance(data, (bytes, bytearray)):
+                raise ValueError(f"ARTIFACT_CONTENT_INVALID:{name}")
+            resolved.append(
+                {
+                    "artifact_id": str(item.get("artifact_id") or artifact_id),
+                    "filename": str(item.get("filename") or "artifact.bin"),
+                    "mime": str(item.get("mime") or "application/octet-stream"),
+                    "size": len(data),
+                    "data": bytes(data),
+                }
+            )
+        payload[name] = resolved if multiple else (resolved[0] if resolved else None)
+    return payload
+
+
+def _materialize_panel_artifacts(
+    payload: dict[str, Any],
+    *,
+    plugin_id: str,
+    panel: str,
+    artifact_writer: Any | None,
+) -> dict[str, Any]:
+    """把插件返回的 bytes/base64 制品写入核制品区，响应只携带短期 ID。"""
+    for key in ("artifacts", "audio"):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        multiple = key == "artifacts"
+        items = raw if isinstance(raw, list) else [raw]
+        if multiple and not isinstance(raw, list):
+            raise ValueError("ARTIFACT_OUTPUT_INVALID")
+        rendered: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, Mapping):
+                raise ValueError("ARTIFACT_OUTPUT_INVALID")
+            descriptor = dict(item)
+            if descriptor.get("artifact_id"):
+                descriptor.pop("data", None)
+                descriptor.pop("content_base64", None)
+                rendered.append(descriptor)
+                continue
+            data = descriptor.pop("data", None)
+            if data is None and isinstance(descriptor.get("content_base64"), str):
+                try:
+                    data = base64.b64decode(
+                        descriptor.pop("content_base64"), validate=True
+                    )
+                except (ValueError, binascii.Error):
+                    raise ValueError("ARTIFACT_CONTENT_INVALID")
+            else:
+                descriptor.pop("content_base64", None)
+            if not isinstance(data, (bytes, bytearray)):
+                raise ValueError("ARTIFACT_CONTENT_INVALID")
+            if artifact_writer is None:
+                raise ValueError("ARTIFACT_TRANSPORT_UNAVAILABLE")
+            snapshot = artifact_writer(
+                plugin_id,
+                panel,
+                filename=str(descriptor.get("filename") or "artifact.bin"),
+                mime=str(descriptor.get("mime") or "application/octet-stream"),
+                data=bytes(data),
+            )
+            if inspect.isawaitable(snapshot):
+                # 制品写入由网关内部完成；此处保持纯函数接口，异步写入应在外层处理。
+                raise ValueError("ARTIFACT_WRITER_ASYNC_UNSUPPORTED")
+            if not isinstance(snapshot, Mapping):
+                raise ValueError("ARTIFACT_WRITE_FAILED")
+            descriptor.update(snapshot)
+            rendered.append(descriptor)
+        payload[key] = rendered if multiple else (rendered[0] if rendered else None)
+    return payload
 
 def _require_panel_id(panel: str) -> str:
     panel = str(panel or "")
