@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>凝心 UI 1.0 · Glass Aurora</title>
+  <link rel="stylesheet" href="./series-ui.css" />
+</head>
+<body data-series-ui="1">
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">凝心 UI 1.0</p>
+        <h1>Glass Aurora</h1>
+        <p>所有系列 Plugin Page 共用的玻璃拟态组件目录。</p>
+      </div>
+      <div class="toolbar">
+        <button type="button">普通按钮</button>
+        <button class="primary" type="button">主要操作</button>
+        <button class="danger" type="button">危险操作</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="section-heading">
+        <div><h2>表单组件</h2><p class="muted">输入、选择、开关、范围和提示。</p></div>
+        <span class="pill">Form</span>
+      </div>
+      <div class="form-grid">
+        <label>文本输入<input type="text" placeholder="输入内容" /></label>
+        <label>下拉选择<select><option>选项一</option><option>选项二</option></select></label>
+        <label>文本域<textarea rows="3" placeholder="多行内容"></textarea></label>
+        <label class="switch"><input type="checkbox" checked /><span>启用功能</span></label>
+        <label>范围<input type="range" min="0" max="100" value="68" /></label>
+      </div>
+      <p class="field-hint">字段说明和校验信息统一使用 muted/field-hint。</p>
+    </section>
+
+    <section class="cards">
+      <article class="metric"><span>可信模块</span><strong>8</strong><small>全部已纳管</small></article>
+      <article class="metric"><span>运行正常</span><strong>7</strong><small>健康检查通过</small></article>
+      <article class="metric"><span>更新可用</span><strong>3</strong><small>等待发布</small></article>
+      <article class="metric"><span>契约告警</span><strong>0</strong><small>revision 一致</small></article>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><div><h2>状态与数据</h2><p class="muted">表格、胶囊、进度和空状态。</p></div><span class="pill ok">正常</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>模块</th><th>状态</th><th>版本</th><th>进度</th></tr></thead>
+          <tbody>
+            <tr><td>知</td><td><span class="pill ok">运行正常</span></td><td>1.7.0</td><td><div class="progress"><i style="width:100%"></i></div></td></tr>
+            <tr><td>声</td><td><span class="pill warn">有更新</span></td><td>0.11.0</td><td><div class="progress"><i style="width:62%"></i></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><div><h2>反馈组件</h2><p class="muted">页面只能通过 window.SeriesUI 触发。</p></div></div>
+      <div class="toolbar">
+        <button type="button" data-preview-toast>Toast</button>
+        <button type="button" data-preview-confirm>确认框</button>
+        <button type="button" data-preview-prompt>输入框</button>
+      </div>
+    </section>
+  </main>
+  <script src="./series-ui.js"></script>
+  <script>
+    document.querySelector("[data-preview-toast]")?.addEventListener("click", () => SeriesUI.toast("组件库 Toast 已生效"));
+    document.querySelector("[data-preview-confirm]")?.addEventListener("click", async () => {
+      if (await SeriesUI.confirm({ title: "确认操作", message: "这是统一确认框。" })) SeriesUI.toast("已确认");
+    });
+    document.querySelector("[data-preview-prompt]")?.addEventListener("click", async () => {
+      const value = await SeriesUI.prompt({ title: "输入内容", message: "返回输入值。", input: { label: "文本" } });
+      if (value !== null) SeriesUI.toast(`输入：${value}`);
+    });
+  </script>
+</body>
+</html>
