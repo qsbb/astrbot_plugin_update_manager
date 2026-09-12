@@ -368,6 +368,8 @@ astrbot_plugin_xxx/
 - **standalone 优先原则**：Plugin Page 是允许且必须保留的单插件入口；只装一个插件、没有核时，全部配置/上传/预览/管理动作必须仍可通过 Plugin Page 完成。
 - **managed 是增强不是替代**：装核后，核通过 `series.webui` 聚合面板；Page 继续可用，可作为备用入口。核不得删除、停用或假定 Page 不可达，也不得代理原生 Page API。
 - **状态单写者**：Page handler 与 `webui_panel_action` 必须调用同一业务服务/锁/revision；核只做发现、鉴权、转发和审计，不复制插件状态。
+- **统一 UI 库（必选）**：所有 Plugin Page 必须加载同版本的 `series-ui.css` / `series-ui.js`，视觉统一为 Glass Aurora。正本只存于核 `ui/`，同步副本由 `core/series_ui.py` 生成并由系列审计校验哈希；页面自有 CSS 只允许写布局和业务专属组件，禁止重定义 button/input/select/table/card/modal/toast/pill 等通用控件，新增通用控件只能在正本添加。
+- **交互单写者**：Toast、确认框、输入框弹层、忙碌态和剪贴板交互必须通过 `window.SeriesUI`，页面不得再造第二套通用交互组件。
 - 前端改动保持组件化、无重复代码（AstrBot WebUI 工程要求）。
 - 若向 AstrBot dashboard 贡献：对话框标题基类 `text-h3 pa-4 pb-0 pl-6`，按钮 `variant="text"` / `variant="tonal"`；后端 API/schema 变更后执行 `pnpm generate:api` 重新生成前端客户端。
 

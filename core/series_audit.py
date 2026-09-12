@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from .series_ui import verify as verify_series_ui
+
 IGNORED_REPOS = {"astrbot_plugin_orchestration_hub"}
 KERNEL_PLUGIN_ID = "astrbot_plugin_update_manager"
 REQUEST_CONTEXT_EXPECTED = 6
@@ -316,6 +318,10 @@ def audit(
     if conventions:
         errors.append(f"CONVENTIONS copies outside kernel: {conventions}")
 
+    kernel_ui = root / KERNEL_PLUGIN_ID / "ui"
+    if kernel_ui.is_dir():
+        errors.extend(verify_series_ui(root))
+
     return {
         "schema_version": registry.get("schema_version", 0),
         "series_id": registry.get("series_id", ""),
@@ -330,6 +336,7 @@ def audit(
             "hash_groups": groups,
         },
         "conventions_copies_outside_kernel": conventions,
+        "ui_library": {"name": "series.ui", "version": "1.0.0", "clean": not verify_series_ui(root)},
         "warnings": warnings,
         "errors": errors,
     }
