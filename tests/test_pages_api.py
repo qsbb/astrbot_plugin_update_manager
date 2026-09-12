@@ -274,12 +274,19 @@ def test_webui_modules_requires_session_and_filters_to_trusted_registry(
     monkeypatch.setattr(plugin.catalog, "scan", scan)
     monkeypatch.setattr(plugin.adapter, "get_plugin_instance", get_instance)
     payload = unwrap(asyncio.run(plugin._pages_webui_modules()))
-    assert {item["plugin_id"] for item in payload["modules"]} == {
-        "astrbot_plugin_update_manager",
-    }
-    assert payload["modules"][0]["contracts"] == 1
-    assert all(
-        item["contract_source"] == "self_declared" for item in payload["modules"]
+    module_ids = {item["plugin_id"] for item in payload["modules"]}
+    assert "astrbot_plugin_update_manager" in module_ids
+    assert "astrbot_plugin_future_module" not in module_ids
+    assert "astrbot_plugin_third_party" not in module_ids
+    nuclear = next(
+        item
+        for item in payload["modules"]
+        if item["plugin_id"] == "astrbot_plugin_update_manager"
+    )
+    assert nuclear["contracts"] == 1
+    assert nuclear["contract_source"] == "self_declared"
+    assert any(
+        item["status"] == "not_installed" for item in payload["modules"]
     )
 
 

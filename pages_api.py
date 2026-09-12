@@ -1196,6 +1196,42 @@ class PagesAPIMixin:
                     "versions_checked_at": checked_at,
                 }
             )
+        for trusted in TRUSTED_SERIES:
+            plugin_id = trusted.plugin_id
+            if plugin_id == "astrbot_plugin_orchestration_hub":
+                continue
+            if plugin_id in seen:
+                continue
+            seen.add(plugin_id)
+            per_state = state_items.get(plugin_id)
+            per_state = per_state if isinstance(per_state, dict) else {}
+            modules.append(
+                {
+                    "plugin_id": plugin_id,
+                    "display_name": trusted.display_name,
+                    "version": "",
+                    "activated": False,
+                    "loaded": False,
+                    "eligible": False,
+                    "contracts": 0,
+                    "contract_source": "unavailable",
+                    "contract_details": {
+                        "diagnostics": False,
+                        "control": False,
+                        "webui": False,
+                        "webui_panels": 0,
+                        "runtime": False,
+                        "model_router": False,
+                        "module": None,
+                        "standalone": None,
+                    },
+                    "status": "not_installed",
+                    "update_available": False,
+                    "version_status": "not_checked",
+                    "latest_version": "",
+                    "versions_checked_at": checked_at,
+                }
+            )
         return {
             "source": "trusted_registry",
             "modules": modules,

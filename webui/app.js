@@ -55,7 +55,7 @@ function filtered() { return state.modules.filter(item => (state.filter === "all
 function color(id) { const colors = ["#3b82b9", "#7653a6", "#cb4d48", "#db7d27", "#2c927c", "#3975aa", "#414a55", "#be385c"]; let sum = 0; for (const char of id) sum += char.charCodeAt(0); return colors[sum % colors.length]; }
 function moduleRows() {
   const list = filtered();
-  return list.length ? list.map(item => `<tr><td><button class="module module-button" data-module="${esc(item.plugin_id)}"><span class="mark" style="--color:${color(item.plugin_id)}">${esc(item.display_name.slice(-1))}</span><span><b>${esc(item.display_name)}</b><small>${esc(item.plugin_id)}</small></span></button></td><td><span class="status ${item.status === "normal" ? "" : "off"}">${item.status === "normal" ? "正常" : "已停用/未加载"}</span></td><td><span class="pill">${item.contracts} 条契约</span>${item.contract_details?.module?.role ? `<span class="pill">${esc(item.contract_details.module.role)}</span>` : ""}${item.contract_details?.control ? `<span class="pill managed">控制</span>` : ""}${item.contract_details?.webui_panels ? `<span class="pill native">面板 ${item.contract_details.webui_panels}</span>` : ""}</td><td><code>v${esc(item.version || "未知")}</code></td><td>${item.version_status === "not_checked" ? `<span class="pill">未检查</span>` : item.update_available ? `<span class="pill managed">有更新</span>` : `<span class="pill native">最新</span>`}</td><td><button class="link" data-diagnostic="${esc(item.plugin_id)}">诊断</button></td></tr>`).join("") : `<tr><td colspan="6" style="padding:40px;text-align:center;color:#667085">没有匹配的可信模块。</td></tr>`;
+  return list.length ? list.map(item => `<tr><td><button class="module module-button" data-module="${esc(item.plugin_id)}"><span class="mark" style="--color:${color(item.plugin_id)}">${esc(item.display_name.slice(-1))}</span><span><b>${esc(item.display_name)}</b><small>${esc(item.plugin_id)}</small></span></button></td><td><span class="status ${item.status === "normal" ? "" : "off"}">${item.status === "normal" ? "正常" : item.status === "not_installed" ? "未安装" : "已停用/未加载"}</span></td><td><span class="pill">${item.contracts} 条契约</span>${item.contract_details?.module?.role ? `<span class="pill">${esc(item.contract_details.module.role)}</span>` : ""}${item.contract_details?.control ? `<span class="pill managed">控制</span>` : ""}${item.contract_details?.webui_panels ? `<span class="pill native">面板 ${item.contract_details.webui_panels}</span>` : ""}</td><td><code>v${esc(item.version || "未知")}</code></td><td>${item.version_status === "not_checked" ? `<span class="pill">未检查</span>` : item.update_available ? `<span class="pill managed">有更新</span>` : `<span class="pill native">最新</span>`}</td><td>${item.status === "not_installed" ? `<button class="link" data-install="${esc(item.plugin_id)}">安装</button>` : `<button class="link" data-diagnostic="${esc(item.plugin_id)}">诊断</button>`}</td></tr>`).join("") : `<tr><td colspan="6" style="padding:40px;text-align:center;color:#667085">没有匹配的可信模块。</td></tr>`;
 }
 function selectedDetail() {
   const item = state.modules.find(value => value.plugin_id === state.selectedModule);
@@ -276,6 +276,7 @@ function bindDashboard() {
   document.querySelectorAll("[data-panel-action]").forEach(node => node.addEventListener("click", () => runPanelAction(node.dataset.panelAction)));
   document.querySelectorAll("[data-lifecycle]").forEach(node => node.addEventListener("click", () => runLifecycle(node.dataset.lifecycle)));
   document.querySelectorAll("[data-control-open]").forEach(node => node.addEventListener("click", async () => { state.view = "control"; await loadControl(); await loadControlPlugin(node.dataset.controlOpen); }));
+  document.querySelectorAll("[data-install]").forEach(node => node.addEventListener("click", () => installModule(node.dataset.install)));
 }
 async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { showToast(error.message, true); } }
 function logCursors() { const cursors = {}; const streams = {}; (state.logMembers || []).forEach(item => { cursors[item.plugin_id] = item.reset ? 0 : (item.next_seq || 0); streams[item.plugin_id] = item.stream_id || ""; }); return { cursors, streams }; }
@@ -468,6 +469,15 @@ async function runPanelAction(actionId) {
     const result = await post(`series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}/actions/${encodeURIComponent(actionId)}`, payload, headers);
     showToast(result.message || "操作完成");
     await loadPanelData(panelId);
+  } catch (error) { showToast(error.message, true); }
+}
+async function installModule(pluginId) {
+  if (state.session?.role !== "owner") { showToast("安装仅 owner 可执行", true); return; }
+  if (!confirm(`确定安装「${pluginId}」？`)) return;
+  try {
+    const result = await post(`series/${encodeURIComponent(pluginId)}/lifecycle/install`, {});
+    showToast(result.message || `已请求安装 ${pluginId}`);
+    await loadDashboard();
   } catch (error) { showToast(error.message, true); }
 }
 async function runLifecycle(action) {
