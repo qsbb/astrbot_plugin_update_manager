@@ -217,9 +217,13 @@ function controlPanelsTab() {
   const panels = state.panelsList.panels || [];
   if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未实现 series.webui@1.0 契约）。</p>`;
   const buttons = panels.map(panel => `<button class="btn ${state.selectedPanel === panel.id ? "primary" : ""}" data-panel-select="${esc(panel.id)}">${esc(panel.title)}</button>`).join("");
+  const unsupported = state.panelsList?.unsupported_capabilities || [];
+  const capabilityHint = unsupported.length
+    ? `<p class="form-hint">当前核版本尚不支持：${unsupported.map(esc).join("、")}；相关功能请使用插件独立 Page。</p>`
+    : "";
   let content = "";
   if (state.panelData && state.selectedPanel) content = panelContent(state.panelData);
-  return `<div class="panel-nav">${buttons}</div><div class="panel-body">${content || `<p class="empty-cell">选择一个面板查看。</p>`}</div>`;
+  return `<div class="panel-nav">${buttons}</div>${capabilityHint}<div class="panel-body">${content || `<p class="empty-cell">选择一个面板查看。</p>`}</div>`;
 }
 function panelContent(data) {
   const columns = data.columns || [];

@@ -23,7 +23,17 @@ from .adapters.astrbot import AstrBotAdapter
 from .trusted import DIAGNOSTIC_SERIES_ID, TRUSTED_BY_ID
 
 CONTRACT_NAME = "series.webui@1.0"
-CONTRACT_NAMES = {"series.webui@1.0", "series.webui@1.1"}
+CONTRACT_NAMES = {
+    "series.webui@1.0",
+    "series.webui@1.1",
+    "series.webui@2.0",
+}
+SUPPORTED_CAPABILITIES = {
+    "revision",
+    "idempotency",
+    "generic_table",
+    "generic_actions",
+}
 CONTRACT_CALL_TIMEOUT_SECONDS = 3.0
 
 PANEL_ROLES = {"viewer": 0, "admin": 1, "owner": 2}
@@ -67,7 +77,7 @@ class WebUIPanelsGateway:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         version = contract.get("version")
         # 兼容旧契约缺失 version；显式声明时只接受 1.x。
-        if version not in (None, "", "1", "1.0", "1.1", 1, 1.0, 1.1):
+        if version not in (None, "", "1", "1.0", "1.1", "2.0", 1, 1.0, 1.1, 2.0):
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         if not _declared_panels(contract):
             raise LookupError("CONTRACT_UNAVAILABLE")
@@ -86,7 +96,18 @@ class WebUIPanelsGateway:
             if isinstance(item, Mapping)
             and _ALLOWED_PANEL_ID.match(str(item.get("id") or ""))
         ]
-        return {"plugin_id": canonical, "panels": panels}
+        capabilities = _contract_capabilities(contract)
+        unsupported = sorted(
+            capability
+            for capability in capabilities
+            if capability not in SUPPORTED_CAPABILITIES
+        )
+        return {
+            "plugin_id": canonical,
+            "panels": panels,
+            "capabilities": capabilities,
+            "unsupported_capabilities": unsupported,
+        }
 
     async def data(self, plugin_id: str, panel: str) -> dict[str, Any]:
         panel = _require_panel_id(panel)
@@ -186,6 +207,15 @@ async def _maybe_await_call(
         else:
             result = await asyncio.wait_for(result, timeout=timeout)
     return result
+
+
+def _contract_capabilities(contract: Mapping[str, Any]) -> list[str]:
+    raw = contract.get("capabilities")
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    return sorted(
+        {str(item) for item in raw if isinstance(item, str) and item.strip()}
+    )
 
 
 def _as_sequence(value: Any) -> list[Any]:

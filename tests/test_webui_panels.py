@@ -185,6 +185,24 @@ def test_panels_gateway_enforces_revision_and_idempotency_context():
     assert plugin.contexts[-1]["expected_revision"] == 7
 
 
+def test_panels_gateway_reports_unsupported_2_0_capabilities():
+    class FuturePanelPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@2.0",
+                "version": "2.0",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "capabilities": ["revision", "file_upload", "audio_preview"],
+                "panels": [{"id": "overview", "title": "总览"}],
+            }
+
+    gateway = WebUIPanelsGateway(FakeAdapter(FuturePanelPlugin()))
+    listing = asyncio.run(gateway.panels(PLUGIN_ID))
+    assert listing["capabilities"] == ["audio_preview", "file_upload", "revision"]
+    assert listing["unsupported_capabilities"] == ["audio_preview", "file_upload"]
+
+
 def test_panels_gateway_rejects_empty_panels():
     class EmptyPanelPlugin(FakePanelPlugin):
         def webui_panels_contract(self):
@@ -205,7 +223,7 @@ def test_panels_gateway_rejects_unsupported_contract_version():
     class FuturePanelPlugin(FakePanelPlugin):
         def webui_panels_contract(self):
             contract = super().webui_panels_contract()
-            contract["version"] = "2.0"
+            contract["version"] = "3.0"
             return contract
 
     gateway = WebUIPanelsGateway(FakeAdapter(FuturePanelPlugin()))
