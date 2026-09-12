@@ -431,12 +431,14 @@ async function openStandaloneWebUi() {
       popup.location.replace(data.url);
       return;
     }
+    if (openStandaloneWebUiInFrame()) return;
     revealWebUiUrl(data.url);
     toast(t("openWebUiBlocked"), true);
   } catch (error) {
     if (popup && !popup.closed) popup.close();
     if (data?.url) {
       renderWebUiAddress(data);
+      if (openStandaloneWebUiInFrame()) return;
       revealWebUiUrl(data.url);
       toast(t("openWebUiBlocked"), true);
       return;
@@ -457,10 +459,11 @@ function normalizeStandaloneWebUiUrl(value) {
 
 function openStandaloneWebUiInFrame() {
   const url = normalizeStandaloneWebUiUrl(state.webUi?.url || document.getElementById("webui-manual-url")?.value);
-  if (!url) { toast(t("webuiAddressUnavailable"), true); return; }
+  if (!url) { toast(t("webuiAddressUnavailable"), true); return false; }
   // sandbox 只禁止顶层导航/弹窗，不允许改父页面；导航当前 iframe 是唯一
   // 不依赖宿主源码修改的一键打开路径。浏览器后退即可回到 Plugin Page。
   window.location.assign(url);
+  return true;
 }
 
 async function copyStandaloneWebUiLink() {
