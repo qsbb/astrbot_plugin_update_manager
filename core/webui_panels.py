@@ -64,6 +64,8 @@ class WebUIPanelsGateway:
         # 兼容旧契约缺失 version；显式声明时只接受 1.x。
         if version not in (None, "", "1", "1.0", 1, 1.0):
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
+        if not _declared_panels(contract):
+            raise LookupError("CONTRACT_UNAVAILABLE")
         return canonical, instance, contract
 
     async def panels(self, plugin_id: str) -> dict[str, Any]:
@@ -142,10 +144,22 @@ async def _maybe_await_call(
     function = getattr(instance, method, None)
     if not callable(function):
         raise LookupError("CONTRACT_UNAVAILABLE")
-    awaitable = _maybe_await(function(*args))
+    # 同步方法不能直接在 aiohttp 事件循环里执行；先生成可等待对象，
+    # 再统一施加有界超时，避免卡死整个 WebUI。
+    if inspect.iscoroutinefunction(function):
+        awaitable = function(*args)
+    else:
+        awaitable = asyncio.to_thread(function, *args)
     if timeout is None or timeout <= 0:
-        return await awaitable
-    return await asyncio.wait_for(awaitable, timeout=timeout)
+        result = await awaitable
+    else:
+        result = await asyncio.wait_for(awaitable, timeout=timeout)
+    if inspect.isawaitable(result):
+        if timeout is None or timeout <= 0:
+            result = await result
+        else:
+            result = await asyncio.wait_for(result, timeout=timeout)
+    return result
 
 
 def _as_sequence(value: Any) -> list[Any]:
@@ -168,7 +182,7 @@ def _declared_panels(contract: Mapping[str, Any]) -> dict[str, Mapping[str, Any]
 
 def _require_declared_panel(contract: Mapping[str, Any], panel: str) -> None:
     declared = _declared_panels(contract)
-    if declared and panel not in declared:
+    if not declared or panel not in declared:
         raise ValueError("UNKNOWN_PANEL")
 
 

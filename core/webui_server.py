@@ -209,7 +209,7 @@ class WebUIServer:
             session.token,
             httponly=True,
             samesite="Strict",
-            secure=self.public_url.startswith("https://"),
+            secure=self.public_url.lower().startswith("https://"),
             max_age=8 * 60 * 60,
             path="/",
         )
@@ -379,6 +379,8 @@ class WebUIServer:
             error = str(exc) or "PANEL_FAILED"
             status = 503 if error in {"PLUGIN_NOT_LOADED", "CONTRACT_UNAVAILABLE", "CONTRACT_VERSION_UNSUPPORTED"} else 400
             return self._json({"success": False, "error": error}, status)
+        except asyncio.TimeoutError:
+            return self._json({"success": False, "error": "PANEL_TIMEOUT"}, 504)
         except (ValueError, TypeError) as exc:
             error = str(exc) or "PANEL_FAILED"
             status = 409 if error == "REVISION_CONFLICT" else 400

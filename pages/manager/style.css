@@ -80,3 +80,32 @@ dialog { width:min(460px,calc(100% - 32px));color:var(--text);background:var(--p
 .model-route-row{display:grid;grid-template-columns:150px repeat(3,minmax(0,1fr));gap:8px;align-items:center;margin:8px 0}
 .model-route-row input{min-width:0}
 @media(max-width:760px){.model-route-row{grid-template-columns:1fr}.model-routing-field{padding:12px}}
+
+.webui-manual {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.18);
+}
+.webui-manual label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+.webui-manual input {
+  flex: 1 1 260px;
+  min-width: 200px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.35);
+  color: inherit;
+  user-select: all;
+}
+.webui-manual a {
+  white-space: nowrap;
+}

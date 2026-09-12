@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## 0.16.3 - 2026-09-12
+
+- 修复核 Page 的“复制 WebUI 链接”：Clipboard API 不可用时回退 `execCommand("copy")`，再失败则显示可选中/可右键的只读地址框；移除 sandbox iframe 中会被静默拦截的 `window.prompt`。
+- 修复“打开独立 WebUI”的反馈链路：`window.open` 包进 try/catch；宿主 iframe 缺少 `allow-popups` 时不再静默失败，而是显示可复制/可手动打开的地址和明确提示。真正的一键新窗口仍需要 AstrBot 宿主 sandbox 增加 `allow-popups` / `allow-popups-to-escape-sandbox`。
+- `webui/url` 与 `webui/start` 返回 `public_url_configured` / `url_warning`；Page 在未配置公开地址时给出明确提示。保存 `webui_public_url` 时校验为 http(s) origin（拒绝子路径、query、fragment、畸形端口），连接项变更返回 `restart_required=true`。
+- 模块契约计数纳入 `series.control` 与 `series.webui`；面板列表不再只统计诊断/运行态契约。
+- `series.webui` 网关改为真正 fail-closed：空/非法 panels 不再暴露；未声明 panel/action 拒绝；同步面板方法改线程池执行，超时统一映射 504 `PANEL_TIMEOUT`。
+- Cookie Secure 判断规范化为大小写不敏感。
+
 ## 0.16.2 - 2026-09-12
 
 - 修复 `series.webui@1.0` 网关对面板契约的兼容性：接受 JSON list 与历史 tuple 声明，兼容缺失 `version` 的旧契约并拒绝不支持的 major。

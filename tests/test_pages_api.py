@@ -339,6 +339,8 @@ def test_webui_url_reports_configured_endpoint_while_listener_is_disabled(
         "host": "0.0.0.0",
         "port": 25529,
         "url": "http://192.168.5.88:25529",
+        "public_url_configured": False,
+        "url_warning": "PUBLIC_URL_NOT_CONFIGURED",
     }
 
 
@@ -378,6 +380,8 @@ def test_webui_start_enables_old_disabled_loopback_config(monkeypatch, tmp_path)
         "host": "0.0.0.0",
         "port": 25528,
         "url": "http://192.168.5.88:25528",
+        "public_url_configured": False,
+        "url_warning": "PUBLIC_URL_NOT_CONFIGURED",
     }
 
 

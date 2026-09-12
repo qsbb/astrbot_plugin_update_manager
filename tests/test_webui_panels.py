@@ -112,6 +112,22 @@ def test_panels_gateway_accepts_tuple_panels_and_missing_version():
     assert listing["panels"][0]["id"] == "overview"
 
 
+def test_panels_gateway_rejects_empty_panels():
+    class EmptyPanelPlugin(FakePanelPlugin):
+        def webui_panels_contract(self):
+            contract = super().webui_panels_contract()
+            contract["panels"] = []
+            return contract
+
+    gateway = WebUIPanelsGateway(FakeAdapter(EmptyPanelPlugin()))
+    try:
+        asyncio.run(gateway.panels(PLUGIN_ID))
+    except LookupError as exc:
+        assert "CONTRACT_UNAVAILABLE" in str(exc)
+    else:
+        raise AssertionError("empty panels contract must be rejected")
+
+
 def test_panels_gateway_rejects_unsupported_contract_version():
     class FuturePanelPlugin(FakePanelPlugin):
         def webui_panels_contract(self):

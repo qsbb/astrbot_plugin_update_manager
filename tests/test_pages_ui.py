@@ -410,7 +410,7 @@ def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
     assert 'link.target = "_top"' in js
 
 
-def test_restricted_host_reveals_and_copies_update_page_url_with_prompt_fallback():
+def test_restricted_host_reveals_and_copies_update_page_url_without_prompt_fallback():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     fallback = js[
@@ -420,12 +420,11 @@ def test_restricted_host_reveals_and_copies_update_page_url_with_prompt_fallback
     assert 'link.closest(".self-update-notice")' in fallback
     assert 'fallback.className = "installed-page-url-fallback"' in fallback
     assert 'fallback.textContent = `${t("installedPageUrlLabel")}：${url}`' in fallback
-    assert "await navigator.clipboard.writeText(url)" in fallback
+    assert "function legacyCopyText" in fallback
+    assert 'document.execCommand("copy")' in fallback
+    assert "async function copyText" in fallback
     assert 'toast(t("installedPageUrlCopied"))' in fallback
-    assert 'window.prompt(t("copyInstalledPageUrl"), url)' in fallback
-    assert fallback.index("revealInstalledPageUrl(link, url)") < fallback.index(
-        "await navigator.clipboard.writeText(url)"
-    )
+    assert "window.prompt" not in fallback
     assert ".installed-page-url-fallback" in css
     assert "user-select:all" in css
 
@@ -752,11 +751,18 @@ def test_manager_page_exposes_dashboard_protected_admin_management():
 def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert 'id="copy-webui"' in html
     assert 'id="open-webui-direct"' in html
     assert 'data-i18n="copyWebUiLink"' in html
     assert 'data-i18n-aria-label="webuiActionsLabel"' in html
     assert ".webui-address-row" in css
+    assert 'id="webui-manual"' in html
+    assert 'id="webui-manual-url"' in html
+    assert "function legacyCopyText" in js
+    assert "function revealWebUiUrl" in js
+    assert "openWebUiBlocked" in js
+    assert ".webui-manual" in css
     assert ".hero { flex-wrap:wrap; }" in css
     assert ".hero > div:first-child" in css
 

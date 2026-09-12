@@ -1192,8 +1192,17 @@ class PagesAPIMixin:
         if instance is None:
             return {"contracts": 0, "contract_source": "unavailable"}
         count = 0
+        allowed_contracts = {
+            "series.diagnostics",
+            "series.control",
+            "series.webui",
+            "series.model_router",
+            "update_manager.series_runtime",
+        }
         for method_name in (
             "diagnostic_log_contract",
+            "series_control_contract",
+            "webui_panels_contract",
             "series_runtime_contract",
             "series_model_router_contract",
         ):
@@ -1206,14 +1215,17 @@ class PagesAPIMixin:
                     value = await value
             except Exception:
                 continue
-            if (
-                isinstance(value, dict)
-                and isinstance(value.get("name"), str)
-                and isinstance(value.get("version"), str)
-                and value.get("name")
-                in {"series.diagnostics", "update_manager.series_runtime"}
-                and value.get("version", "").split(".", 1)[0] == "1"
-            ):
+            if not isinstance(value, dict):
+                continue
+            name = value.get("name")
+            version = value.get("version")
+            if not isinstance(name, str) or name not in allowed_contracts:
+                continue
+            # series.webui 的旧契约允许缺失 version；其余要求 1.x。
+            if name == "series.webui" and version in (None, ""):
+                count += 1
+                continue
+            if isinstance(version, str) and version.split(".", 1)[0] == "1":
                 count += 1
         return {
             "contracts": count,
@@ -1247,6 +1259,7 @@ class PagesAPIMixin:
         # Expose the configured endpoint even before the listener starts.
         preview = server or self._new_webui_server()
         request_host = self._webui_request_host(preview)
+        public_url_configured = bool(getattr(preview, "public_url", ""))
         return json_response(
             {
                 "success": True,
@@ -1256,6 +1269,8 @@ class PagesAPIMixin:
                 "host": preview.host,
                 "port": preview.port,
                 "url": preview.url_for_host(request_host),
+                "public_url_configured": public_url_configured,
+                "url_warning": "" if public_url_configured else "PUBLIC_URL_NOT_CONFIGURED",
             }
         )
 
@@ -1306,6 +1321,7 @@ class PagesAPIMixin:
                 {"success": False, "error": "WEBUI_START_FAILED"}, status=503
             )
         request_host = self._webui_request_host(server)
+        public_url_configured = bool(getattr(server, "public_url", ""))
         return json_response(
             {
                 "success": True,
@@ -1315,6 +1331,8 @@ class PagesAPIMixin:
                 "host": server.host,
                 "port": server.port,
                 "url": server.url_for_host(request_host),
+                "public_url_configured": public_url_configured,
+                "url_warning": "" if public_url_configured else "PUBLIC_URL_NOT_CONFIGURED",
             }
         )
 
@@ -1364,6 +1382,29 @@ class PagesAPIMixin:
                 changes[key] = self._coerce_page_value(key, value, schema[key])
                 if PagesAPIMixin._is_model_routing_field(key, schema[key]):
                     changes[key] = normalize_routes(changes[key])
+                if key == "webui_port":
+                    port = int(changes[key])
+                    if port < 1 or port > 65535:
+                        raise ValueError("port out of range")
+                    changes[key] = port
+                if key == "webui_public_url":
+                    raw_url = str(changes[key] or "").strip().rstrip("/")
+                    if raw_url:
+                        parsed = urlsplit(raw_url)
+                        if (
+                            parsed.scheme.lower() not in {"http", "https"}
+                            or not parsed.hostname
+                            or parsed.username
+                            or parsed.password
+                            or parsed.query
+                            or parsed.fragment
+                            or parsed.path not in {"", "/"}
+                        ):
+                            raise ValueError("public url must be an http(s) origin")
+                        parsed.port  # 触发非法端口校验
+                        changes[key] = f"{parsed.scheme.lower()}://{parsed.netloc}"
+                    else:
+                        changes[key] = ""
             except (TypeError, ValueError):
                 errors[key] = "INVALID_VALUE"
         if errors:
@@ -1426,12 +1467,15 @@ class PagesAPIMixin:
                     },
                     500,
                 )
+        restart_required = bool(
+            {"webui_host", "webui_port", "webui_public_url"} & changes.keys()
+        )
         return {
             "success": True,
             "config": self._public_config(),
             "persisted": {"local": True, "native": native_saved},
             "schedule_updated": schedule_updated,
-            "restart_required": False,
+            "restart_required": restart_required,
         }, 200
 
     async def _pages_save_config(self):
