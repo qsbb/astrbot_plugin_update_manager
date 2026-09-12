@@ -5,7 +5,7 @@
 > - 取代 `docs/CONVENTIONS-公共规范快照.md`（核仓库内，2026-07-24 历史快照，仅作追溯，不再指导开发）。
 > - 与《开发协作约定.md》（流程层：需求归属、开发流程、环境事实）互补——约定管"谁在什么流程下做什么"，本规范管"代码必须长什么样"。
 > - 平台层依据：AstrBot `AGENTS.md` 工程规范与 AstrBot 源码事实（`astrbot.core.provider`、`ProviderManager`、dashboard provider API、`pyproject.toml`）。
-> - 事实基线：以 2026-09-02 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
+> - 事实基线：以 2026-09-12 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
 > - **治理范围：9 个插件（知、言、序、情、境、声、临、核、通）。枢（`astrbot_plugin_orchestration_hub`）未接入系列治理，按 2026-09-02 决定忽略——不适用本规范、不纳入契约要求与开发范围。**
 
 ---
@@ -354,7 +354,7 @@ astrbot_plugin_xxx/
   source /data/dsh/home/dsh/venv/bin/activate
   python -m pytest tests/ -x -q
   ```
-- 全系列当前基线 2,156 例；已知环境相关失败 2 例（知 `test_retrieval_sources`、核 `test_transaction_coordinator` 的 symlink 项），非代码 bug，不阻塞合入，但不得新增失败。
+- 全系列当前本地基线 3,099 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
 - UI 结构断言：用 `test_pages_ui.py` 对前端源码做关键控件/接口存在性断言，防止界面回退。
 
 ---
@@ -363,7 +363,7 @@ astrbot_plugin_xxx/
 
 - **Plugin Page**（`pages/manager/`）：运行在 dashboard iframe，经 bridge-sdk 接入，宿主 JWT 鉴权；必须带 zh-CN/en-US 双语 i18n；i18n 页面元数据（title/description）齐全。
 - **核独立 WebUI**（仅核，`webui/`）：自有 aiohttp 服务与会话 Cookie；首屏永远是登录页；不提供匿名注册。owner 可在核 Page 或已认证 WebUI 中维护管理员；admin/viewer 只能使用被授予的能力。
-- **边界规则**：新插件需要管理面时，实现 `series.webui@1.0` 面板交给核统一接管；不新建第二个独立控制台、不复制核的鉴权体系。
+- **边界规则**：新插件需要管理面时，实现 `series.webui@2.0` 面板交给核统一接管；不新建第二个独立控制台、不复制核的鉴权体系。
 - **standalone 优先原则**：Plugin Page 是允许且必须保留的单插件入口；只装一个插件、没有核时，全部配置/上传/预览/管理动作必须仍可通过 Plugin Page 完成。
 - **managed 是增强不是替代**：装核后，核通过 `series.webui` 聚合面板；Page 继续可用，可作为备用入口。核不得删除、停用或假定 Page 不可达，也不得代理原生 Page API。
 - **状态单写者**：Page handler 与 `webui_panel_action` 必须调用同一业务服务/锁/revision；核只做发现、鉴权、转发和审计，不复制插件状态。
@@ -406,18 +406,18 @@ astrbot_plugin_xxx/
 
 ---
 
-## 附录 A. 现行状态快照（2026-09-02）
+## 附录 A. 现行状态快照（2026-09-12）
 
 | 字 | plugin_id | 版本 | astrbot_version |
 |----|-----------|------|-----------------|
-| 知 | astrbot_plugin_active_learner | 1.5.3 | >=4.16,<5 |
-| 言 | astrbot_plugin_conversation_flow | 0.8.13 | >=4.16,<5 |
-| 序 | astrbot_plugin_identity_guardian | 0.5.4 | >=4.17,<5 |
-| 情 | astrbot_plugin_relationship | 0.9.6 | >=4.16,<5 |
-| 境 | astrbot_plugin_environment_awareness | 0.3.1 | >=4.16,<5 |
-| 声 | astrbot_plugin_voice_hub | 0.9.1 | >=4.16,<5 |
-| 临 | astrbot_plugin_embodiment_bridge | 1.1.3 | >=4.26,<5 |
-| 核 | astrbot_plugin_update_manager | 0.16.0 | >=4.16,<5 |
+| 知 | astrbot_plugin_active_learner | 1.6.0 | >=4.16,<5 |
+| 言 | astrbot_plugin_conversation_flow | 0.10.0 | >=4.16,<5 |
+| 序 | astrbot_plugin_identity_guardian | 0.6.0 | >=4.17,<5 |
+| 情 | astrbot_plugin_relationship | 0.10.0 | >=4.16,<5 |
+| 境 | astrbot_plugin_environment_awareness | 0.4.0 | >=4.16,<5 |
+| 声 | astrbot_plugin_voice_hub | 0.10.0 | >=4.16,<5 |
+| 临 | astrbot_plugin_embodiment_bridge | 1.5.0 | >=4.26,<5 |
+| 核 | astrbot_plugin_update_manager | 0.17.0 | >=4.16,<5 |
 | 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
