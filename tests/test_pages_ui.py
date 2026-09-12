@@ -791,6 +791,7 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     assert "function legacyCopyText" in js
     assert "function openStandaloneWebUiInFrame" in js
     assert "window.location.assign(url)" in js
+    assert "if (openStandaloneWebUiInFrame()) return;" in js
     assert "function revealWebUiUrl" in js
     assert "openWebUiBlocked" in js
     assert ".webui-manual" in css
