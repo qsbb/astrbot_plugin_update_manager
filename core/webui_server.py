@@ -14,6 +14,7 @@ from aiohttp import web
 from .transaction import TransactionError
 
 from .webui_auth import WebUIAuth, WebUIAuthError
+from .webui_jobs import JobManager
 
 SESSION_COOKIE = "nx_update_manager_session"
 
@@ -80,6 +81,7 @@ class WebUIServer:
         self._site: web.TCPSite | None = None
         self._started = False
         self._lock = asyncio.Lock()
+        self.jobs = JobManager()
 
     @property
     def started(self) -> bool:
@@ -132,6 +134,8 @@ class WebUIServer:
             app.router.add_get("/api/series/{plugin_id}/panels/{panel}", self._panels_data)
             app.router.add_post("/api/series/{plugin_id}/panels/{panel}/actions/{action}", self._panels_action)
             app.router.add_post("/api/series/{plugin_id}/lifecycle/{action}", self._lifecycle_action)
+            app.router.add_get("/api/jobs/{job_id}", self._job_status)
+            app.router.add_post("/api/jobs/{job_id}/cancel", self._job_cancel)
             app.router.add_post("/api/diagnostics/logs", self._diagnostics_logs)
             app.router.add_post("/api/diagnostics/clear", self._diagnostics_clear)
             app.router.add_post("/api/updates/check", self._updates_check)
@@ -426,6 +430,26 @@ class WebUIServer:
 
     async def _panels_action(self, request: web.Request) -> web.Response:
         return await self._panels_dispatch(request, "action")
+
+    async def _job_status(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        snapshot = self.jobs.snapshot(request.match_info["job_id"])
+        if snapshot is None:
+            return self._json({"success": False, "error": "JOB_NOT_FOUND"}, 404)
+        return self._json({"success": True, **snapshot})
+
+    async def _job_cancel(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if role not in {"admin", "owner"}:
+            return self._json({"success": False, "error": "ROLE_FORBIDDEN"}, 403)
+        snapshot = self.jobs.cancel(request.match_info["job_id"])
+        if snapshot is None:
+            return self._json({"success": False, "error": "JOB_NOT_FOUND"}, 404)
+        return self._json({"success": True, **snapshot})
 
     async def _lifecycle_action(self, request: web.Request) -> web.Response:
         role = self._series_role(request)

@@ -472,6 +472,7 @@ async function runPanelAction(actionId) {
   try {
     const result = await post(`series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}/actions/${encodeURIComponent(actionId)}`, payload, headers);
     showToast(result.message || "操作完成");
+    if (result.job_id) { pollJob(result.job_id, panelId); return; }
     await loadPanelData(panelId);
   } catch (error) { showToast(error.message, true); }
 }
@@ -483,6 +484,20 @@ async function installModule(pluginId) {
     showToast(result.message || `已请求安装 ${pluginId}`);
     await loadDashboard();
   } catch (error) { showToast(error.message, true); }
+}
+async function pollJob(jobId, panelId) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const job = await get(`jobs/${encodeURIComponent(jobId)}`);
+      const progress = Math.round((job.progress || 0) * 100);
+      if (job.message) showToast(`${job.message} ${progress}%`);
+      if (job.status === "done") { await loadPanelData(panelId); return; }
+      if (job.status === "failed") { showToast(job.error || "任务失败", true); return; }
+      if (job.status === "cancelled") return;
+    } catch (error) { showToast(error.message, true); return; }
+  }
+  showToast("任务轮询超时，请稍后刷新面板", true);
 }
 async function runLifecycle(action) {
   const pluginId = state.selectedControlPlugin;
