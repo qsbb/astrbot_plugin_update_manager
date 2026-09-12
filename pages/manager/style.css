@@ -120,3 +120,45 @@ dialog { width:min(460px,calc(100% - 32px));color:var(--text);background:var(--p
   cursor: pointer;
 }
 .webui-manual button:hover { border-color: rgba(59, 130, 246, 0.75); }
+
+/* 系列 UI 1.0 adoption: page-specific overrides only. */
+body[data-series-ui] .webui-manual {
+  border-color: var(--si-line-solid);
+  border-radius: var(--si-radius-sm);
+  background: rgba(255,255,255,.42);
+}
+body[data-series-ui] .webui-manual input,
+body[data-series-ui] .webui-manual button {
+  border-color: rgba(105,115,158,.18);
+  border-radius: var(--si-radius-xs);
+  background: rgba(255,255,255,.66);
+}
+body[data-series-ui] .plugin-option,
+body[data-series-ui] .model-routing-field {
+  border-color: var(--si-line-solid);
+  border-radius: var(--si-radius-sm);
+  background: rgba(255,255,255,.42);
+}
+body[data-series-ui] .page-link {
+  border-color: rgba(102,92,246,.24);
+  border-radius: var(--si-radius-xs);
+  color: var(--si-primary-strong);
+  background: var(--si-primary-soft);
+}
+body[data-series-ui] dialog {
+  border-color: rgba(255,255,255,.84);
+  border-radius: var(--si-radius-lg);
+  background: rgba(255,255,255,.9);
+  box-shadow: var(--si-shadow-lg);
+}
+body[data-series-ui] #toast {
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: var(--si-radius-sm);
+  color: var(--si-ink);
+  background: rgba(255,255,255,.9);
+  box-shadow: var(--si-shadow);
+}
+body[data-series-ui] #toast.error {
+  color: var(--si-danger);
+  background: rgba(255,240,242,.94);
+}

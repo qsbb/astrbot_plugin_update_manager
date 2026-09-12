@@ -39,3 +39,21 @@
 @keyframes log-arrival{0%{background:#fff7e6}100%{background:#fff}}
 @media(max-width:720px){.diagnostic-event-head{grid-template-columns:1fr auto;gap:6px}.diagnostic-event-head time,.event-module{font-size:11px}.diagnostic-event-head b{grid-column:1/-1}.diagnostic-event-head .pill{grid-column:2;grid-row:1}.log-detail-list div{grid-template-columns:1fr;gap:3px}.diagnostic-filters .search{min-width:160px}}
 .pill.warn{background:#fff7e6;color:var(--orange)}
+
+/* 系列 UI 1.0 adoption: keep the app shell, soften generic surfaces. */
+body[data-series-ui] .rail {
+  border-right: 1px solid rgba(255,255,255,.14);
+  background: linear-gradient(180deg, rgba(37,42,78,.96), rgba(24,29,58,.94));
+}
+body[data-series-ui] .topbar,
+body[data-series-ui] .content .workspace,
+body[data-series-ui] .content .table,
+body[data-series-ui] .content .stat {
+  border-color: var(--si-line-solid);
+  background: rgba(255,255,255,.58);
+}
+body[data-series-ui] .content .workspace,
+body[data-series-ui] .content .stat,
+body[data-series-ui] .content .table-wrap {
+  border-radius: var(--si-radius);
+}
