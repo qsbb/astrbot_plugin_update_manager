@@ -54,6 +54,7 @@ contracts:
   method: series_control_contract
   required: true
   exclude:
+  - astrbot_plugin_companion_phone
   - astrbot_plugin_update_manager
 - name: series.webui
   version: '1.0'
