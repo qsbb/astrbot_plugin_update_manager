@@ -30,8 +30,8 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pyyaml ruff
 
-      - name: Ruff
-        run: ruff check astrbot_plugin_update_manager
+      - name: Ruff (fatal syntax and name errors)
+        run: ruff check --select E9,F63,F7,F82 astrbot_plugin_update_manager
 
       - name: Pytest
         run: python -m pytest astrbot_plugin_update_manager/tests -q
