@@ -105,3 +105,43 @@ def test_audit_flags_json_style_python_literals(tmp_path):
     report = audit(tmp_path, registry)
 
     assert any("JSON-style Python literals" in error for error in report["errors"])
+
+
+def test_audit_validates_flow_contract_references(tmp_path):
+    repo = tmp_path / "astrbot_plugin_fake"
+    repo.mkdir()
+    (repo / "metadata.yaml").write_text("version: 1.0.0\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text("# 更新日志\n\n## 1.0.0 - 2026-01-01\n", encoding="utf-8")
+    (repo / "main.py").write_text('__version__ = "1.0.0"\n', encoding="utf-8")
+    registry = _write_registry(
+        tmp_path,
+        [
+            {
+                "name": "environment.opportunity",
+                "version": "1.0",
+                "provider": "astrbot_plugin_fake",
+                "method": "environment_opportunity_contract",
+                "required": True,
+            }
+        ],
+    )
+    import yaml
+
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    data["flows"] = [
+        {
+            "name": "series.test_flow",
+            "version": "1.0",
+            "steps": [
+                {"order": 1, "contract": "environment.opportunity"},
+                {"order": 2, "contract": "missing.contract", "version": "1.0"},
+            ],
+        }
+    ]
+    registry.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+    report = audit(tmp_path, registry)
+
+    assert report["flows"]["series.test_flow"]["steps"][0]["present"] is True
+    assert report["flows"]["series.test_flow"]["missing"] == ["missing.contract@1.0"]
+    assert any("flow references missing contracts" in error for error in report["errors"])

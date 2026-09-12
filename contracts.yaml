@@ -57,7 +57,7 @@ contracts:
   - astrbot_plugin_companion_phone
   - astrbot_plugin_update_manager
 - name: series.webui
-  version: '1.0'
+  version: '2.0'
   provider: '*'
   method: webui_panels_contract
   required: false
@@ -166,3 +166,28 @@ contracts:
   provider: astrbot_plugin_update_manager
   method: series_runtime_contract
   required: true
+flows:
+- name: series.proactive_delivery
+  version: '1.0'
+  description: 环境候选经身份授权、言表达判断后交给声/临的可选投递流水线
+  steps:
+  - order: 1
+    contract: environment.opportunity
+    provider: astrbot_plugin_environment_awareness
+    role: produce_candidate
+  - order: 2
+    contract: identity.proactive_authorization
+    provider: astrbot_plugin_identity_guardian
+    role: authorize_target
+  - order: 3
+    contract: conversation.proactive_delivery
+    provider: astrbot_plugin_conversation_flow
+    role: judge_and_generate
+  - order: 4
+    contract: conversation.proactive_message
+    provider: astrbot_plugin_conversation_flow
+    role: deliver_text
+  - order: 5
+    contract: voice.delivery
+    provider: astrbot_plugin_voice_hub
+    role: optional_voice_delivery

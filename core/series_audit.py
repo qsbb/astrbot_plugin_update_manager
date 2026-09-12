@@ -238,6 +238,55 @@ def audit(
             )
         # optional 契约缺失只记录在报告里，不产生噪音警告。
 
+    flow_report: dict[str, Any] = {}
+    available_contracts = {
+        f"{item.get('name')}@{item.get('version')}"
+        for item in registry.get("contracts", [])
+        if isinstance(item, dict) and item.get("name") and item.get("version")
+    }
+    for flow in registry.get("flows", []):
+        if not isinstance(flow, dict) or not flow.get("name"):
+            continue
+        name = str(flow["name"])
+        steps: list[dict[str, Any]] = []
+        missing_steps: list[str] = []
+        for raw_step in flow.get("steps", []):
+            if not isinstance(raw_step, dict):
+                continue
+            contract = str(raw_step.get("contract") or "")
+            version = str(raw_step.get("version") or "")
+            # 未显式写版本时接受该契约的现行版本，便于流水线引用主版本语义。
+            if not version:
+                version = next(
+                    (
+                        str(item.get("version"))
+                        for item in registry.get("contracts", [])
+                        if isinstance(item, dict) and str(item.get("name")) == contract
+                    ),
+                    "",
+                )
+            reference = f"{contract}@{version}"
+            present = reference in available_contracts
+            step = {
+                "order": int(raw_step.get("order") or len(steps) + 1),
+                "contract": reference,
+                "provider": str(raw_step.get("provider") or ""),
+                "role": str(raw_step.get("role") or ""),
+                "present": present,
+            }
+            steps.append(step)
+            if not present:
+                missing_steps.append(reference)
+        flow_report[name] = {
+            "version": str(flow.get("version") or ""),
+            "steps": steps,
+            "missing": missing_steps,
+        }
+        if missing_steps:
+            errors.append(
+                f"flow references missing contracts: {name} {missing_steps}"
+            )
+
     observed: dict[str, list[str]] = {}
     for plugin_id, methods in methods_by_repo.items():
         unknown = sorted(methods - registered_methods)
@@ -273,6 +322,7 @@ def audit(
         "root": str(root),
         "members": member_report,
         "contracts": contract_report,
+        "flows": flow_report,
         "unregistered_contract_methods": observed,
         "request_context": {
             "files": [str(path.relative_to(root)) for path in rc_files],

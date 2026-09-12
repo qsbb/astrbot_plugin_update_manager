@@ -20,6 +20,13 @@ class TransactionError(RuntimeError):
     pass
 
 
+def ensure_no_symlinks(root: Path) -> None:
+    """拒绝任何符号链接，避免备份解引用到插件目录之外。"""
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise TransactionError("SYMLINK_BACKUP_BLOCKED")
+
+
 def tree_manifest(root: Path) -> tuple[list[dict[str, object]], str]:
     files: list[dict[str, object]] = []
     for path in sorted(root.rglob("*")):
@@ -130,6 +137,7 @@ class PluginTransaction:
 
     def backup(self, item: PlanItem, tx_id: str) -> tuple[Path, str]:
         source = self._source(item)
+        ensure_no_symlinks(source)
         target_parent = self.backup_root / item.plugin_id
         target_parent.mkdir(parents=True, exist_ok=True)
         temporary, ready = target_parent / f".{tx_id}.tmp", target_parent / tx_id
