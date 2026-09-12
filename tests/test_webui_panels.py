@@ -249,11 +249,26 @@ def test_panels_gateway_materializes_and_resolves_artifacts():
             }
 
         async def webui_panel_action(
-            self, panel, action, payload, context=None, *, artifact_reader=None
+            self,
+            panel,
+            action,
+            payload,
+            context=None,
+            *,
+            artifact_reader=None,
+            artifact_writer=None,
         ):
             item = payload["source"]
             self.payload = item
-            return {"success": True, "size": item["size"]}
+            return {
+                "success": True,
+                "size": item["size"],
+                "audio": {
+                    "filename": "preview.wav",
+                    "mime": "audio/wav",
+                    "data": item["data"],
+                },
+            }
 
     plugin = ArtifactPanelPlugin()
     gateway = WebUIPanelsGateway(FakeAdapter(plugin))
@@ -292,9 +307,12 @@ def test_panels_gateway_materializes_and_resolves_artifacts():
             {"source": "a" * 32},
             "admin",
             artifact_reader=read,
+            artifact_writer=write,
         )
     )
-    assert result == {"success": True, "size": 11}
+    assert result["size"] == 11
+    assert result["audio"]["artifact_id"] == "a" * 32
+    assert "data" not in result["audio"]
     assert plugin.payload["filename"] == "export.json"
 
 

@@ -154,6 +154,7 @@ class WebUIPanelsGateway:
         context: Mapping[str, Any] | None = None,
         *,
         artifact_reader: Any | None = None,
+        artifact_writer: Any | None = None,
     ) -> dict[str, Any]:
         panel = _require_panel_id(panel)
         action = _require_action_id(action)
@@ -172,13 +173,18 @@ class WebUIPanelsGateway:
             panel=panel,
             artifact_reader=artifact_reader,
         )
+        try:
+            declared_timeout = float(declaration.get("timeout_seconds"))
+        except (TypeError, ValueError):
+            declared_timeout = CONTRACT_CALL_TIMEOUT_SECONDS
+        timeout = min(60.0, max(1.0, declared_timeout))
         result = await _maybe_await_call_action(
             instance,
             panel,
             action,
             normalized_payload,
             context_dict,
-            timeout=CONTRACT_CALL_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
         if not isinstance(result, Mapping):
             raise ValueError("PANEL_ACTION_INVALID")
@@ -199,7 +205,12 @@ class WebUIPanelsGateway:
             )
         except Exception:
             pass
-        return dict(result)
+        return _materialize_panel_artifacts(
+            dict(result),
+            plugin_id=canonical,
+            panel=panel,
+            artifact_writer=artifact_writer,
+        )
 
     async def stream(
         self,

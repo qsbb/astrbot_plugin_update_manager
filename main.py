@@ -64,10 +64,10 @@ from .core.scheduler import RuleConflictError, ScheduleService
 from .core.series_control import SeriesControlGateway
 from .core.trusted import TRUSTED_BY_ID
 from .core.transaction import PluginTransaction
-from .core.webui_auth import WebUIAuth
+from .core.webui_auth import ADMIN_ROLES, WebUIAuth, WebUIAuthError
 from .core.webui_panels import WebUIPanelsGateway
-from .core.webui_server import WebUIServer
-from .pages_api import PagesAPIMixin
+from .core.webui_server import WebUIConflictError, WebUIServer
+from .pages_api import READ_ONLY_KEYS, SENSITIVE_KEYS, PagesAPIMixin
 from .series_diagnostics import (
     diagnostic_clear as clear_diagnostic_events,
     diagnostic_event,
@@ -84,12 +84,29 @@ _current_instance: "UpdateManagerPlugin | None" = None
 # 密钥、代理、插件根目录等敏感配置仍然只在已鉴权的核 Page 中维护。
 WEBUI_SETTINGS_KEYS = frozenset(
     {
-        "model_routing",
+        "enabled",
         "auto_update_enabled",
-        "log_level",
+        "plan_ttl_seconds",
+        "network_timeout_seconds",
+        "raw_timeout_seconds",
+        "version_check_concurrency",
+        "version_check_timeout_seconds",
+        "cache_ttl_seconds",
+        "proxy",
+        "github_mirror",
+        "github_mirror_candidates",
+        "mirror_benchmark_timeout_seconds",
+        "github_token",
+        "health_stability_seconds",
+        "backup_keep_success",
+        "backup_failed_days",
+        "backup_capacity_mb",
+        "webui_enabled",
         "webui_host",
         "webui_port",
         "webui_public_url",
+        "model_routing",
+        "log_level",
     }
 )
 
@@ -497,6 +514,16 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             settings_get=self._webui_settings_get,
             settings_save=self._webui_settings_save,
             model_options=self._webui_model_options,
+            rules_get=self._webui_rules_get,
+            rules_save=self._webui_rules_save,
+            mirrors_get=self._webui_mirrors_get,
+            mirrors_benchmark=self._webui_mirrors_benchmark,
+            recommendations_get=self._webui_recommendations_get,
+            recommendations_check=self._webui_recommendations_check,
+            recommendations_apply_all=self._webui_recommendations_apply_all,
+            admins_list=self._webui_admins_list,
+            admins_create=self._webui_admins_create,
+            admins_update=self._webui_admins_update,
         )
 
     async def _webui_lifecycle(
@@ -682,10 +709,26 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
 
     async def _webui_settings_get(self) -> dict[str, Any]:
         config = self._public_config()
-        settings = {key: config.get(key) for key in sorted(WEBUI_SETTINGS_KEYS)}
+        schema = self._schema()
+        settings: dict[str, Any] = {}
+        for key, field in schema.items():
+            if key in READ_ONLY_KEYS:
+                settings[key] = config.get(key)
+            elif key in SENSITIVE_KEYS:
+                settings[key] = {"configured": bool(self._get(key, ""))}
+            else:
+                settings[key] = config.get(key, field.get("default"))
+        public_schema: dict[str, dict[str, Any]] = {}
+        for key, field in schema.items():
+            public_schema[key] = {
+                **field,
+                "read_only": key in READ_ONLY_KEYS,
+                "write_only": key in SENSITIVE_KEYS,
+            }
         return {
             "success": True,
             "settings": settings,
+            "schema": public_schema,
             "providers": self._webui_provider_options(),
         }
 
@@ -705,6 +748,101 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             ) if isinstance(fields, dict) else ""
             raise ValueError(f"{error}:{detail}" if detail else error)
         return result
+
+    @staticmethod
+    def _raise_webui_core_result(
+        result: tuple[dict[str, Any], int], fallback: str
+    ) -> dict[str, Any]:
+        payload, status = result
+        if status != 200:
+            error = str(payload.get("error") or fallback)
+            if status == 409:
+                raise WebUIConflictError(error)
+            if status in {400, 409}:
+                raise ValueError(error)
+            if status in {403, 404}:
+                raise LookupError(error)
+            raise RuntimeError(error)
+        return payload
+
+    async def _webui_rules_get(self) -> dict[str, Any]:
+        return await self._rule_payload()
+
+    async def _webui_rules_save(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return self._raise_webui_core_result(
+            await self._save_rule_core(payload), "RULE_SAVE_FAILED"
+        )
+
+    async def _webui_mirrors_get(self) -> dict[str, Any]:
+        return self._mirror_payload()
+
+    async def _webui_mirrors_benchmark(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return self._raise_webui_core_result(
+            await self._benchmark_mirrors_core(payload), "MIRROR_BENCHMARK_FAILED"
+        )
+
+    async def _webui_recommendations_get(self) -> dict[str, Any]:
+        return await self._recommendation_payload(
+            force_refresh=False, check_versions=False
+        )
+
+    async def _webui_recommendations_check(self) -> dict[str, Any]:
+        return await self._recommendation_payload(
+            force_refresh=True, check_versions=True
+        )
+
+    async def _webui_recommendations_apply_all(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return self._raise_webui_core_result(
+            await self._apply_all_recommendations_core(payload),
+            "RECOMMENDATION_APPLY_FAILED",
+        )
+
+    async def _webui_admins_list(self) -> dict[str, Any]:
+        return {
+            "success": True,
+            "admins": self.webui_auth.list_admins(),
+            "roles": sorted(ADMIN_ROLES),
+        }
+
+    async def _webui_admins_create(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        if set(data) != {"username", "password", "role"}:
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        try:
+            admin = self.webui_auth.create_admin(
+                data["username"], data["password"], data["role"]
+            )
+        except WebUIAuthError as exc:
+            raise ValueError(str(exc))
+        return {"success": True, "admin": admin}
+
+    async def _webui_admins_update(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        if "admin_id" not in data:
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        allowed = {"admin_id", "password", "role", "enabled"}
+        if set(data) - allowed or len(set(data) & (allowed - {"admin_id"})) == 0:
+            raise ValueError("INVALID_JSON_PAYLOAD")
+        try:
+            admin = self.webui_auth.change_admin(
+                data["admin_id"],
+                password=data.get("password"),
+                role=data.get("role"),
+                enabled=data.get("enabled"),
+            )
+        except WebUIAuthError as exc:
+            raise ValueError(str(exc))
+        return {"success": True, "admin": admin}
 
     async def _webui_updates_check(self) -> dict[str, Any]:
         """真实版本检查：复用 Page 的 registry 比对，并把结果持久化给模块列表。"""

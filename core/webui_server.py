@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
@@ -12,12 +13,18 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from .transaction import TransactionError
+from .trusted import TRUSTED_BY_ID
 
 from .webui_artifacts import ArtifactStore
 from .webui_auth import WebUIAuth, WebUIAuthError
 from .webui_jobs import JobManager
 
 SESSION_COOKIE = "nx_update_manager_session"
+_PANEL_ID = re.compile(r"^[a-z0-9_]{1,48}$")
+
+
+class WebUIConflictError(RuntimeError):
+    """Expected optimistic-lock/confirmation conflict, mapped to HTTP 409."""
 
 
 class WebUIServer:
@@ -46,6 +53,16 @@ class WebUIServer:
         settings_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         model_options: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        rules_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        rules_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        mirrors_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        mirrors_benchmark: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        recommendations_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        recommendations_check: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        recommendations_apply_all: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        admins_list: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        admins_create: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        admins_update: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.auth = auth
         self.static_root = static_root.resolve()
@@ -78,6 +95,16 @@ class WebUIServer:
         self.settings_get = settings_get
         self.settings_save = settings_save
         self.model_options = model_options
+        self.rules_get = rules_get
+        self.rules_save = rules_save
+        self.mirrors_get = mirrors_get
+        self.mirrors_benchmark = mirrors_benchmark
+        self.recommendations_get = recommendations_get
+        self.recommendations_check = recommendations_check
+        self.recommendations_apply_all = recommendations_apply_all
+        self.admins_list = admins_list
+        self.admins_create = admins_create
+        self.admins_update = admins_update
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._started = False
@@ -149,6 +176,18 @@ class WebUIServer:
             app.router.add_get("/api/settings", self._settings_get)
             app.router.add_post("/api/settings", self._settings_save)
             app.router.add_get("/api/model-options", self._model_options)
+            app.router.add_get("/api/rules", self._rules_get)
+            app.router.add_post("/api/rules", self._rules_save)
+            app.router.add_get("/api/mirrors", self._mirrors_get)
+            app.router.add_post("/api/mirrors/benchmark", self._mirrors_benchmark)
+            app.router.add_get("/api/recommendations", self._recommendations_get)
+            app.router.add_post("/api/recommendations/check", self._recommendations_check)
+            app.router.add_post(
+                "/api/recommendations/apply-all", self._recommendations_apply_all
+            )
+            app.router.add_get("/api/admins", self._admins_list)
+            app.router.add_post("/api/admins/create", self._admins_create)
+            app.router.add_post("/api/admins/update", self._admins_update)
             self._runner = web.AppRunner(app, access_log=None)
             await self._runner.setup()
             self._site = web.TCPSite(self._runner, self.host, self.port)
@@ -436,14 +475,24 @@ class WebUIServer:
                             for parameter in parameters
                         )
                     )
+                    accepts_writer = (
+                        "artifact_writer" in signature.parameters
+                        or any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters
+                        )
+                    )
                 except (TypeError, ValueError):
                     accepts_context = False
                     accepts_artifacts = False
+                    accepts_writer = False
                 kwargs = {}
                 if accepts_context:
                     kwargs["context"] = context
                 if accepts_artifacts:
                     kwargs["artifact_reader"] = self._read_panel_artifact
+                if accepts_writer:
+                    kwargs["artifact_writer"] = self._write_panel_artifact
                 value = await function(
                     request.match_info["plugin_id"],
                     request.match_info["panel"],
@@ -577,6 +626,14 @@ class WebUIServer:
                     plugin_id = value
                 else:
                     panel = value
+        trusted = TRUSTED_BY_ID.get(plugin_id)
+        if trusted is None:
+            return self._json({"success": False, "error": "PLUGIN_NOT_TRUSTED"}, 403)
+        plugin_id = trusted.plugin_id
+        if not _PANEL_ID.match(panel):
+            return self._json({"success": False, "error": "INVALID_PANEL_ID"}, 400)
+        if not self._takeover_enabled():
+            return self._json({"success": False, "error": "TAKEOVER_DISABLED"}, 409)
         try:
             record = self.artifacts.put(
                 plugin_id=plugin_id,
@@ -686,7 +743,7 @@ class WebUIServer:
             return self._json({"success": False, "error": str(exc)}, 403)
         except LookupError as exc:
             return self._json({"success": False, "error": str(exc)}, 400)
-        except TransactionError as exc:
+        except (TransactionError, WebUIConflictError) as exc:
             return self._json({"success": False, "error": str(exc)}, 409)
         except ValueError as exc:
             return self._json({"success": False, "error": str(exc)}, 400)
@@ -732,3 +789,49 @@ class WebUIServer:
 
     async def _model_options(self, request: web.Request) -> web.Response:
         return await self._call_capability(request, "model_options")
+    async def _rules_get(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "rules_get")
+
+    async def _rules_save(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "rules_save", body=True, role_required="admin"
+        )
+
+    async def _mirrors_get(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "mirrors_get")
+
+    async def _mirrors_benchmark(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "mirrors_benchmark", body=True, role_required="admin"
+        )
+
+    async def _recommendations_get(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "recommendations_get")
+
+    async def _recommendations_check(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "recommendations_check", role_required="admin"
+        )
+
+    async def _recommendations_apply_all(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request,
+            "recommendations_apply_all",
+            body=True,
+            role_required="owner",
+        )
+
+    async def _admins_list(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "admins_list", role_required="owner"
+        )
+
+    async def _admins_create(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "admins_create", body=True, role_required="owner"
+        )
+
+    async def _admins_update(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "admins_update", body=True, role_required="owner"
+        )

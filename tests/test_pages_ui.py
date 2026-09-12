@@ -53,13 +53,38 @@ def test_manager_page_has_bridge_tabs_and_i18n():
 def test_standalone_webui_has_clickable_views_and_model_routing():
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
-    for view in ("modules", "diagnostics", "updates", "settings", "security"):
+    for view in (
+        "modules",
+        "control",
+        "recommendations",
+        "rules",
+        "mirrors",
+        "diagnostics",
+        "updates",
+        "settings",
+        "security",
+    ):
         assert f'"{view}"' in js
     assert 'document.querySelectorAll("[data-view]")' in js
     assert 'get("model-routing")' in js
     assert 'post("diagnostics", {})' in js
     assert "module-button" in js and ".module-button" in css
     assert "detail-grid" in js and ".detail-grid" in css
+    for endpoint in (
+        'get("rules")',
+        'post("rules", payload)',
+        'get("mirrors")',
+        'post("mirrors/benchmark", { mirrors: urls })',
+        'get("recommendations")',
+        'post("recommendations/check", {})',
+        'post("recommendations/apply-all", { confirm: true })',
+        'get("admins")',
+        'post("admins/create", { username, password, role })',
+        'post("admins/update", payload)',
+    ):
+        assert endpoint in js
+    assert "完整配置" in js
+    assert "data-setting-key" in js
 
 
 def test_standalone_webui_control_console_takes_over_series_plugins():

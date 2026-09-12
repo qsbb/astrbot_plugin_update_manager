@@ -201,15 +201,21 @@ def series_control_set_mode(self, mode) -> dict: ...   # native | managed
 - capabilities 至少声明 `read_schema / read_snapshot / validate_patch / apply_patch / reset_override`。
 - 校验失败拒绝整批 patch，不部分应用；apply 前必须先 validate。
 
-### 5.3 `series.webui@1.0`（管理面板）
+### 5.3 `series.webui@2.0`（管理面板）
 
 ```python
 def webui_panels_contract(self) -> dict: ...
 def webui_panel_data(self, panel) -> dict: ...
 def webui_panel_action(self, panel, action, payload) -> dict: ...
+async def webui_panel_stream(self, panel, context=None): ...  # 仅在声明 sse 时
 ```
 
-- 声明：`{name: "series.webui@1.0", plugin_id, series_id, panels: [{id, title, description}]}`。
+- 声明：`{name: "series.webui@2.0", version: "2.0", plugin_id, series_id, capabilities, panels}`；能力至少按实际使用声明 `generic_table / generic_actions / revision / idempotency / file_upload / artifacts / audio_preview / jobs / sse`。核只暴露自己支持的能力，未知能力进入 `unsupported_capabilities`。
+- 动作元数据：`id / label / confirm / effect / revision_required / idempotency_required / min_role / payload_fields / timeout_seconds`。非幂等动作必须携带 `X-Request-Id`，revision 动作携带 `X-Expected-Revision`，冲突返回 409。
+- 文件字段：前端先上传到核 `ArtifactStore`，网关在动作调用前把字段替换为 `{artifact_id, filename, mime, size, data}`；插件不得依赖上传临时路径。
+- 导出/音频：插件在面板数据或动作结果中返回 `artifacts: [...]` / `audio: {filename, mime, data}`，核将 `bytes` 或 `content_base64` 写入短时制品区，响应只暴露 `artifact_id`；前端按 MIME 内联下载或 `<audio controls>` 试听。
+- 长任务由插件返回 `job_id` 约定，核 `JobManager` 只保存进度、状态、取消标记与结果摘要；业务状态始终归插件所有。
+- SSE 通过 async iterator 返回 plain JSON 事件；流必须可取消、有界，不得无限生成，也不得在事件中携带凭据或私有标识。
 - 面板与动作 id 规则 `^[a-z0-9_]{1,48}$`；未知 id 返回 `UNKNOWN_PANEL` / `UNKNOWN_ACTION`。
 - 数据走**通用渲染契约**：`{success, title, description, columns: [{key, label}], rows: [...], actions: [...]}`——前端零定制即可统一接管。
 - 动作可带 `confirm` 提示文本与 `payload_fields`（`name/label/type/required`）；执行要求 admin+ 角色（网关侧二次校验）；返回 `{success, message}`。
@@ -256,25 +262,42 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
 - 现行用法：言将文本分段/交付计划写入自己分区（同时挂 event extra `conversation_flow.delivery_plan`）；声与临读取该交付计划决定语音合成前的最终文本（临的实现为 extra 优先、request_context 工件回退的双链读取）。
 - 便捷入口：`note(event, owner, reason, phase)` 一行完成惰性建上下文 + 推进 phase + 记原因码。
 
+### 5.8 主动消息流水线（境 → 序 → 言 → 声/临）
+
+主动消息不是单一插件行为，固定按以下顺序协作：
+
+1. **境生产候选**：`environment.opportunity@1.0` 只提供可验证环境事实、稳定 `event_key`、revision、严重度与有效期；不生产成品话术，不读取关系或身份明细。
+2. **序授权目标**：言/境在投递前调用 `identity.proactive_authorization@1.0`；只有私聊、显式 allowlist 目标且服务未停用时才返回允许。授权失败即静默停止，不降级到其它目标。
+3. **言做最终表达判断**：`conversation.proactive_delivery@1.0` 负责去重、静默时段、每日额度、措辞生成与自然度检查；`conversation.proactive_message@1.0` 作为通用文本投递入口。任何一步不确定时优先不发送。
+4. **声按交付政策合成**：声只消费 `conversation_flow.delivery_plan` / `voice.delivery@1.0`，不自行改变文本或投递目标；通过 `voice.audio_output@1.0` 输出 PCM/WAV 时仍遵守容量和取消语义。
+5. **临作为可选终端**：具身端只读公开契约与交付计划；设备离线、能力不足或超时只影响本地表达，不回滚环境候选，也不阻塞文本对话。
+
+流水线约束：
+
+- 每个跨插件请求都必须带 `series_id=ningxin_suxi`、明确目标与超时；调用链不通过 HTTP 或共享文件。
+- `event_key` 去重、发送额度与“已评估但未发送”状态由言/境在各自 domain 中记录，核只做路由与政策配置，不持有业务正文。
+- 主动投递失败不进入普通对话重试链；同一事件只有严重度升级或有效期更新才允许重新判断。
+- 所有候选、授权、抑制和投递步骤必须写 `series.diagnostics@1.0` 脱敏事件，能回答“为何没发/为何发了”。
+
 ### 5.7 契约实现状态（2026-09-02）
 
 | 字 | diagnostics | control | webui panels | knowledge 桥 | request_ctx |
 |----|-------------|---------|--------------|---------------|-------------|
-| 知 | ✓ | ✓ | — | 提供 | ✓（owner） |
-| 言 | ✓ | ✓ | — | — | ✓（owner） |
-| 序 | ✓ | ✓ | — | 消费 | ✓（owner） |
-| 情 | ✓ | ✓ | ✓ | — | ✓（owner） |
-| 境 | ✓ | ✓ | — | — | — |
-| 声 | ✓ | ✓ | — | — | ✓（owner） |
-| 临 | ✓ | ✓ | — | — | 只读消费 |
-| 核 | ✓（聚合方） | 网关 | 网关 | — | ✓（owner） |
-| 通 | ✓ | — | ✓ | — | — |
+| 知 | ✓ | ✓ | ✓ 2.0 | 提供 | ✓（owner） |
+| 言 | ✓ | ✓ | ✓ 2.0 | — | ✓（owner） |
+| 序 | ✓ | ✓ | ✓ 2.0 | 消费 | ✓（owner） |
+| 情 | ✓ | ✓ | ✓ 2.0 | — | ✓（owner） |
+| 境 | ✓ | ✓ | ✓ 2.0 | — | — |
+| 声 | ✓ | ✓ | ✓ 2.0（音频试听） | — | ✓（owner） |
+| 临 | ✓ | ✓ | ✓ 2.0（SSE） | — | 只读消费 |
+| 核 | ✓（聚合方） | 网关 | 网关 2.0 | — | ✓（owner） |
+| 通 | ✓ | — | ✓ 2.0 | — | — |
 
 ---
 
 ## 6. 配置与持久化
 
-- 运行态可写配置与 schema 分离：对外入口只允许写白名单键（参考 核 `WEBUI_SETTINGS_KEYS`），敏感键只在核 Page 维护。
+- 运行态可写配置与 schema 分离：Plugin Page 与核独立 WebUI 可写白名单键（参考核 `WEBUI_SETTINGS_KEYS`），统一走 schema 校验；密钥允许 admin+ 写入但必须 write-only，任何读取/响应/审计都不回显原值。
 - **保存链路单一内核**：Plugin Page 与独立入口共用同一保存内核（校验 → 原子持久化 → 运行时应用 → 调度重建，参考 核 `_save_config_core`），不允许两套平行实现。
 - 数据文件带 `schema_version` 字段；读旧版本数据时兼容迁移，不静默丢弃。
 - 时区一律 UTC 存储（`datetime.now(UTC)`），展示层再本地化。
@@ -339,7 +362,7 @@ astrbot_plugin_xxx/
 ## 9. 用户界面规范
 
 - **Plugin Page**（`pages/manager/`）：运行在 dashboard iframe，经 bridge-sdk 接入，宿主 JWT 鉴权；必须带 zh-CN/en-US 双语 i18n；i18n 页面元数据（title/description）齐全。
-- **核独立 WebUI**（仅核，`webui/`）：自有 aiohttp 服务与会话 Cookie；首屏永远是登录页；不提供注册入口；管理员账户只在核 Page 创建和维护。
+- **核独立 WebUI**（仅核，`webui/`）：自有 aiohttp 服务与会话 Cookie；首屏永远是登录页；不提供匿名注册。owner 可在核 Page 或已认证 WebUI 中维护管理员；admin/viewer 只能使用被授予的能力。
 - **边界规则**：新插件需要管理面时，实现 `series.webui@1.0` 面板交给核统一接管；不新建第二个独立控制台、不复制核的鉴权体系。
 - **standalone 优先原则**：Plugin Page 是允许且必须保留的单插件入口；只装一个插件、没有核时，全部配置/上传/预览/管理动作必须仍可通过 Plugin Page 完成。
 - **managed 是增强不是替代**：装核后，核通过 `series.webui` 聚合面板；Page 继续可用，可作为备用入口。核不得删除、停用或假定 Page 不可达，也不得代理原生 Page API。

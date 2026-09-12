@@ -1648,9 +1648,10 @@ class PagesAPIMixin:
     async def _pages_mirrors(self):
         return json_response(self._mirror_payload())
 
-    async def _pages_benchmark_mirrors(self):
+    async def _benchmark_mirrors_core(
+        self, data: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], int]:
         """并发测速候选加速站；单站失败只标记该站不可用，绝不抛栈。"""
-        data = await self._request_json()
         requested = data.get("mirrors") if isinstance(data, dict) else None
         if requested is None:
             targets = tuple(
@@ -1659,9 +1660,7 @@ class PagesAPIMixin:
         elif isinstance(requested, list):
             targets = parse_mirror_candidates(requested)
         else:
-            return json_response(
-                {"success": False, "error": "INVALID_FIELD_TYPE:mirrors"}, status=400
-            )
+            return {"success": False, "error": "INVALID_FIELD_TYPE:mirrors"}, 400
         timeout_seconds = self._mirror_benchmark_timeout()
 
         async def measure(mirror: str) -> dict[str, Any]:
@@ -1680,15 +1679,17 @@ class PagesAPIMixin:
             [partial(measure, mirror) for mirror in targets],
             limit=self._version_check_concurrency(),
         )
-        return json_response(
-            {
-                "success": True,
-                "results": results,
-                "probe_url": BENCHMARK_PROBE_URL,
-                "benchmark_timeout_seconds": timeout_seconds,
-                "checked_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        return {
+            "success": True,
+            "results": results,
+            "probe_url": BENCHMARK_PROBE_URL,
+            "benchmark_timeout_seconds": timeout_seconds,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }, 200
+
+    async def _pages_benchmark_mirrors(self):
+        payload, status = await self._benchmark_mirrors_core(await self._request_json())
+        return json_response(payload, status=status)
 
     async def _rule_payload(self, rule: UpdateRule | None = None) -> dict[str, Any]:
         current = rule or self.scheduler.load()
@@ -1766,30 +1767,25 @@ class PagesAPIMixin:
                 changes[key] = tuple(dict.fromkeys(value))
         return changes
 
-    async def _pages_save_rule(self):
-        data = await self._request_json()
+    async def _save_rule_core(
+        self, data: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], int]:
+        """Page 与独立 WebUI 共用的每日规则保存内核。"""
         if not isinstance(data, dict):
-            return json_response(
-                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
-            )
+            return {"success": False, "error": "INVALID_JSON_PAYLOAD"}, 400
         allowed = RULE_WRITABLE_KEYS | {"expected_revision"}
         unknown = sorted(set(data) - allowed)
         if unknown:
-            return json_response(
-                {
-                    "success": False,
-                    "error": "UNKNOWN_RULE_FIELDS",
-                    "fields": unknown,
-                },
-                status=400,
-            )
+            return {
+                "success": False,
+                "error": "UNKNOWN_RULE_FIELDS",
+                "fields": unknown,
+            }, 400
         expected_revision = data.get("expected_revision")
         if isinstance(expected_revision, bool) or not isinstance(
             expected_revision, int
         ):
-            return json_response(
-                {"success": False, "error": "EXPECTED_REVISION_REQUIRED"}, status=400
-            )
+            return {"success": False, "error": "EXPECTED_REVISION_REQUIRED"}, 400
         try:
             current = self.scheduler.load()
             changes = self._coerce_rule_changes(data)
@@ -1818,35 +1814,30 @@ class PagesAPIMixin:
                 schedule_action = "removed"
             payload = await self._rule_payload(saved)
             payload["schedule_action"] = schedule_action
-            return json_response(payload)
+            return payload, 200
         except RuleConflictError as exc:
-            return json_response(
-                {
-                    "success": False,
-                    "error": "RULE_REVISION_CONFLICT",
-                    "detail": str(exc),
-                    "current_revision": self.scheduler.load().revision,
-                },
-                status=409,
-            )
+            return {
+                "success": False,
+                "error": "RULE_REVISION_CONFLICT",
+                "detail": str(exc),
+                "current_revision": self.scheduler.load().revision,
+            }, 409
         except RuleValidationError as exc:
-            return json_response(
-                {
-                    "success": False,
-                    "error": str(exc).split(":", 1)[0],
-                    "detail": str(exc),
-                },
-                status=400,
-            )
+            return {
+                "success": False,
+                "error": str(exc).split(":", 1)[0],
+                "detail": str(exc),
+            }, 400
         except Exception as exc:
-            return json_response(
-                {
-                    "success": False,
-                    "error": "RULE_SAVE_OR_SCHEDULE_FAILED",
-                    "detail": str(exc) or type(exc).__name__,
-                },
-                status=500,
-            )
+            return {
+                "success": False,
+                "error": "RULE_SAVE_OR_SCHEDULE_FAILED",
+                "detail": str(exc) or type(exc).__name__,
+            }, 500
+
+    async def _pages_save_rule(self):
+        payload, status = await self._save_rule_core(await self._request_json())
+        return json_response(payload, status=status)
 
     @staticmethod
     def _coerce_page_value(key: str, value: Any, field: dict[str, Any]) -> Any:
@@ -2609,9 +2600,11 @@ class PagesAPIMixin:
             "lifecycle": self._lifecycle(operation, snapshot),
         }
 
-    async def _pages_apply_all_recommendations(self):
+    async def _apply_all_recommendations_core(
+        self, data: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], int]:
+        """Page 与独立 WebUI 共用的一键安装/更新内核。"""
         try:
-            data = await self._request_json()
             if not isinstance(data, dict) or set(data) != {"confirm"}:
                 raise ValueError("CONFIRMATION_REQUIRED")
             if data.get("confirm") is not True:
@@ -2649,18 +2642,26 @@ class PagesAPIMixin:
                     )
 
             succeeded = sum(1 for result in results if result["success"])
-            return json_response(
-                {
-                    "success": True,
-                    "all_succeeded": all(result["success"] for result in results),
-                    "total": len(results),
-                    "succeeded": succeeded,
-                    "failed": len(results) - succeeded,
-                    "results": results,
-                }
-            )
+            return {
+                "success": True,
+                "all_succeeded": all(result["success"] for result in results),
+                "total": len(results),
+                "succeeded": succeeded,
+                "failed": len(results) - succeeded,
+                "results": results,
+            }, 200
         except Exception as exc:
-            return self._mutation_error(exc)
+            response = self._mutation_error(exc)
+            payload, status = (
+                response if isinstance(response, tuple) else (response, 200)
+            )
+            return dict(payload), int(status)
+
+    async def _pages_apply_all_recommendations(self):
+        payload, status = await self._apply_all_recommendations_core(
+            await self._request_json()
+        )
+        return json_response(payload, status=status)
 
     async def _pages_install(self):
         try:
