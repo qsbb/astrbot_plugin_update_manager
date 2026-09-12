@@ -58,6 +58,22 @@ def verify(root: Path) -> list[str]:
                     errors.append(f"series.ui script not linked: {plugin_id}/{page_dir}/index.html")
                 if "data-series-ui" not in text:
                     errors.append(f"series.ui body marker missing: {plugin_id}/{page_dir}/index.html")
+                positions = {
+                    "style": text.find("style.css"),
+                    "shared_css": text.find("series-ui.css"),
+                    "shared_js": text.find("series-ui.js"),
+                    "app": text.find("app.js"),
+                }
+                ordered = (
+                    positions["style"] >= 0
+                    and positions["style"] < positions["shared_css"]
+                    and positions["shared_css"] < positions["shared_js"]
+                    and positions["shared_js"] < positions["app"]
+                )
+                if not ordered:
+                    errors.append(
+                        f"series.ui asset order invalid: {plugin_id}/{page_dir}/index.html"
+                    )
     return errors
 
 

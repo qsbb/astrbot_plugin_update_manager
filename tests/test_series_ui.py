@@ -15,8 +15,9 @@ def _minimal_root(tmp_path: Path) -> Path:
     target = root / "astrbot_plugin_active_learner" / "pages" / "manager"
     target.mkdir(parents=True)
     (target / "index.html").write_text(
-        '<html><head><link href="./series-ui.css"></head>'
-        '<body data-series-ui="1"><script src="./series-ui.js"></script></body></html>',
+        '<html><head><link href="./style.css"><link href="./series-ui.css"></head>'
+        '<body data-series-ui="1"><script src="./series-ui.js"></script>'
+        '<script src="./app.js"></script></body></html>',
         encoding="utf-8",
     )
     return root
