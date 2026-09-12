@@ -229,6 +229,10 @@ def webui_panel_action(self, panel, action, payload) -> dict: ...
   - `fast`：快速/廉价模型，统一用于静默预判、分段裁判、消息收口、轻量分类等辅助调用；
   - `reasoning`：推理/长任务模型，统一用于工具循环、复杂规划与深度分析；
   - 插件不得为这些通用角色各写一套 provider fallback；本地显式配置 > 核路由 > AstrBot 原生。
+- **调用场景决策表**：
+  - `fast`：会话中注入链、静默预判、分段裁判、steering/防抖、图记忆选路、语音导演、轻量分类/否决等延迟敏感调用；要求低延迟，可接受近似判断。
+  - `reasoning`：学习、交叉验证、知识融合、主题扩展、摘要、记忆沉淀、复杂规划与长工具循环；不在首响关键路径，优先质量。
+  - `conversation`：主对话生成；`embedding` / `vision` / `stt` / `tts` 只用于对应模态。
 - 配套 `GET /api/model-options` 只读已加载 provider 配置与已配置模型清单，不触发远程模型探测。
 
 ### 5.5 `active_learner.knowledge@1.0`（知识桥接，知 → 序）
