@@ -15,6 +15,7 @@ let state = {
   selectedPanel: "",
   selectedControlPlugin: "",
   takeoverDisabled: false,
+  panelStream: null,
   logs: [],
   logMembers: [],
   logLevel: "",
@@ -244,7 +245,10 @@ function panelContent(data) {
   const audioHtml = data.audio?.artifact_id
     ? `<audio controls preload="none" src="/api/artifacts/${encodeURIComponent(data.audio.artifact_id)}"></audio>`
     : "";
-  return `${data.title ? `<div class="section-title"><h3>${esc(data.title)}</h3>${data.description ? `<span>${esc(data.description)}</span>` : ""}</div>` : ""}${table}${actions ? `<div class="panel-actions">${actions}</div>` : ""}${artifactHtml}${audioHtml}${data.footer ? `<p class="form-hint">${esc(data.footer)}</p>` : ""}`;
+  const streamHtml = data.stream
+    ? `<div class="panel-stream-controls"><button class="btn" id="panel-stream-start" type="button">开始实时流</button><pre id="panel-stream" class="panel-stream"></pre></div>`
+    : "";
+  return `${data.title ? `<div class="section-title"><h3>${esc(data.title)}</h3>${data.description ? `<span>${esc(data.description)}</span>` : ""}</div>` : ""}${table}${actions ? `<div class="panel-actions">${actions}</div>` : ""}${artifactHtml}${audioHtml}${streamHtml}${data.footer ? `<p class="form-hint">${esc(data.footer)}</p>` : ""}`;
 }
 function controlLifecycleTab() {
   const pluginId = state.selectedControlPlugin;
@@ -287,6 +291,7 @@ function bindDashboard() {
   document.getElementById("panel-load")?.addEventListener("click", () => loadPanelsList());
   document.querySelectorAll("[data-panel-select]").forEach(node => node.addEventListener("click", () => loadPanelData(node.dataset.panelSelect)));
   document.querySelectorAll("[data-panel-action]").forEach(node => node.addEventListener("click", () => runPanelAction(node.dataset.panelAction)));
+  document.getElementById("panel-stream-start")?.addEventListener("click", () => streamPanel(state.selectedControlPlugin, state.selectedPanel));
   document.querySelectorAll("[data-lifecycle]").forEach(node => node.addEventListener("click", () => runLifecycle(node.dataset.lifecycle)));
   document.querySelectorAll("[data-control-open]").forEach(node => node.addEventListener("click", async () => { state.view = "control"; await loadControl(); await loadControlPlugin(node.dataset.controlOpen); }));
   document.querySelectorAll("[data-install]").forEach(node => node.addEventListener("click", () => installModule(node.dataset.install)));
@@ -520,6 +525,17 @@ async function installModule(pluginId) {
     showToast(result.message || `已请求安装 ${pluginId}`);
     await loadDashboard();
   } catch (error) { showToast(error.message, true); }
+}
+function streamPanel(pluginId, panelId) {
+  const output = document.getElementById("panel-stream");
+  if (!pluginId || !panelId) return;
+  if (state.panelStream) { state.panelStream.close(); state.panelStream = null; }
+  const url = `/api/series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}/stream`;
+  const source = new EventSource(url, { withCredentials: true });
+  state.panelStream = source;
+  source.onmessage = event => { if (output) output.textContent += `${event.data}\n`; };
+  source.addEventListener("done", () => { source.close(); state.panelStream = null; });
+  source.addEventListener("error", () => { source.close(); state.panelStream = null; if (output) output.textContent += "[stream closed]\n"; });
 }
 async function pollJob(jobId, panelId) {
   for (let attempt = 0; attempt < 300; attempt += 1) {

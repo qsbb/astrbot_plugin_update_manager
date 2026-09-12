@@ -174,6 +174,53 @@ class WebUIPanelsGateway:
             pass
         return dict(result)
 
+    async def stream(
+        self,
+        plugin_id: str,
+        panel: str,
+        context: Mapping[str, Any] | None = None,
+    ):
+        """SSE 面板流：插件必须声明 sse 能力并实现 webui_panel_stream。"""
+        panel = _require_panel_id(panel)
+        _canonical, instance, contract = await self._instance(plugin_id)
+        _require_declared_panel(contract, panel)
+        if "sse" not in _contract_capabilities(contract):
+            raise LookupError("CAPABILITY_UNAVAILABLE")
+        function = getattr(instance, "webui_panel_stream", None)
+        if not callable(function):
+            raise LookupError("CONTRACT_UNAVAILABLE")
+        context_dict = dict(context) if isinstance(context, Mapping) else {}
+        try:
+            signature = inspect.signature(function)
+            accepts_context = (
+                "context" in signature.parameters
+                or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+        except (TypeError, ValueError):
+            accepts_context = False
+        result = (
+            function(panel, context=context_dict)
+            if accepts_context
+            else function(panel)
+        )
+        if inspect.isasyncgen(result):
+            async for event in result:
+                yield event
+            return
+        result = await _maybe_await(result)
+        if isinstance(result, (list, tuple)):
+            for event in result:
+                yield event
+            return
+        if hasattr(result, "__aiter__"):
+            async for event in result:
+                yield event
+            return
+        yield result
+
 
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):

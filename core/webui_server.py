@@ -140,6 +140,7 @@ class WebUIServer:
             app.router.add_post("/api/jobs/{job_id}/cancel", self._job_cancel)
             app.router.add_post("/api/artifacts", self._artifact_upload)
             app.router.add_get("/api/artifacts/{artifact_id}", self._artifact_download)
+            app.router.add_get("/api/series/{plugin_id}/panels/{panel}/stream", self._panels_stream)
             app.router.add_post("/api/diagnostics/logs", self._diagnostics_logs)
             app.router.add_post("/api/diagnostics/clear", self._diagnostics_clear)
             app.router.add_post("/api/updates/check", self._updates_check)
@@ -434,6 +435,49 @@ class WebUIServer:
 
     async def _panels_action(self, request: web.Request) -> web.Response:
         return await self._panels_dispatch(request, "action")
+
+    async def _panels_stream(self, request: web.Request) -> web.StreamResponse:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if not self._takeover_enabled():
+            return self._json({"success": False, "error": "TAKEOVER_DISABLED"}, 409)
+        if self.panels is None:
+            return self._json({"success": False, "error": "PANELS_UNAVAILABLE"}, 503)
+        response = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+        context = {
+            "request_id": request.headers.get("X-Request-Id", ""),
+            "expected_revision": request.headers.get("X-Expected-Revision", ""),
+            "actor": {"role": role},
+        }
+        try:
+            async for event in self.panels.stream(
+                request.match_info["plugin_id"],
+                request.match_info["panel"],
+                context=context,
+            ):
+                text = (
+                    event
+                    if isinstance(event, str)
+                    else json.dumps(event, ensure_ascii=False, default=str)
+                )
+                await response.write(f"data: {text}\n\n".encode())
+            await response.write(b"event: done\ndata: {}\n\n")
+        except asyncio.TimeoutError:
+            await response.write(b"event: error\ndata: {\"error\": \"PANEL_TIMEOUT\"}\n\n")
+        except Exception as exc:  # noqa: BLE001
+            payload = json.dumps({"error": type(exc).__name__})
+            await response.write(f"event: error\ndata: {payload}\n\n".encode())
+        return response
 
     async def _artifact_upload(self, request: web.Request) -> web.Response:
         role = self._series_role(request)

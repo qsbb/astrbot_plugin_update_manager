@@ -203,6 +203,31 @@ def test_panels_gateway_reports_unsupported_2_0_capabilities():
     assert listing["unsupported_capabilities"] == ["audio_preview", "file_upload"]
 
 
+def test_panels_gateway_streams_sse_events():
+    class StreamPanelPlugin(FakePanelPlugin):
+        async def webui_panel_stream(self, panel, context=None):
+            assert panel == "overview"
+            yield {"line": 1}
+            yield {"line": 2}
+
+        def webui_panels_contract(self):
+            return {
+                "name": "series.webui@2.0",
+                "version": "2.0",
+                "plugin_id": PLUGIN_ID,
+                "series_id": DIAGNOSTIC_SERIES_ID,
+                "capabilities": ["sse"],
+                "panels": [{"id": "overview", "title": "实时"}],
+            }
+
+    gateway = WebUIPanelsGateway(FakeAdapter(StreamPanelPlugin()))
+
+    async def collect():
+        return [event async for event in gateway.stream(PLUGIN_ID, "overview")]
+
+    assert asyncio.run(collect()) == [{"line": 1}, {"line": 2}]
+
+
 def test_panels_gateway_rejects_empty_panels():
     class EmptyPanelPlugin(FakePanelPlugin):
         def webui_panels_contract(self):
