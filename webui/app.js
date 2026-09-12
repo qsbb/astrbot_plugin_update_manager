@@ -230,9 +230,9 @@ function controlFieldsTab(schema, snapshot) {
 function controlPanelsTab() {
   const pluginId = state.selectedControlPlugin;
   if (state.takeoverDisabled) return `<p class="empty-cell">统一接管未启用：managed 面板已关闭，请使用该插件的独立 Page。</p><p class="form-hint">开启“统一接管”后，核会重新加载该模块面板。</p>`;
-  if (!state.panelsList) return `<p class="empty-cell">尚未加载面板。${`<button class="btn primary" id="panel-load">加载该插件面板</button>`}</p><p class="form-hint">面板来自插件的 series.webui@1.0 契约，未实现契约的插件此区为空。</p>`;
+  if (!state.panelsList) return `<p class="empty-cell">尚未加载面板。${`<button class="btn primary" id="panel-load">加载该插件面板</button>`}</p><p class="form-hint">面板来自插件的 series.webui@2.0 契约，未实现契约的插件此区为空。</p>`;
   const panels = state.panelsList.panels || [];
-  if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未实现 series.webui@1.0 契约）。</p>`;
+  if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未实现 series.webui@2.0 契约）。</p>`;
   const buttons = panels.map(panel => `<button class="btn ${state.selectedPanel === panel.id ? "primary" : ""}" data-panel-select="${esc(panel.id)}">${esc(panel.title)}</button>`).join("");
   const unsupported = state.panelsList?.unsupported_capabilities || [];
   const capabilityHint = unsupported.length
