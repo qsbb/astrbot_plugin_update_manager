@@ -30,17 +30,16 @@
 
 ## 组件清单
 
-基础：页面背景、页面容器、Hero、页头、工具栏、卡片、指标、面板、分区。
+稳定类名（新增页面优先使用）：
 
-导航：Tabs、分段控制、导航按钮、图标按钮。
+- 容器：`.si-surface`、`.si-card`、`.si-empty`
+- 导航：`.si-tabs`、`.si-tab`
+- 操作：`.si-button`（可与 `.primary` / `.danger` 组合）
+- 表单：`.si-input`、`.si-select`、`.si-textarea`
+- 数据：`.si-table`、`.si-badge`
+- 交互：必须通过 `window.SeriesUI.toast/confirm/prompt/modal/setBusy/copy`
 
-操作：主按钮、普通按钮、危险按钮、幽灵链接、加载状态、禁用状态。
-
-表单：文本、数字、搜索、选择、文本域、复选框、单选框、范围、开关、字段提示。
-
-数据：表格、列表、状态胶囊、进度条、空状态、骨架、代码块、分页。
-
-反馈：Toast、Modal、Popover、错误横幅、警告提示。
+兼容类名（旧页面迁移期）：`.card`、`.panel`、`.metric`、`.tabs`、`.tab-btn`、`.pill`、`.toast`、`.modal-card`。新页面不要继续扩散这些旧类名，优先使用 `.si-*`。
 
 ## 禁止事项
 
