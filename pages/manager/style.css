@@ -109,3 +109,14 @@ dialog { width:min(460px,calc(100% - 32px));color:var(--text);background:var(--p
 .webui-manual a {
   white-space: nowrap;
 }
+
+.webui-manual button {
+  white-space: nowrap;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.35);
+  color: inherit;
+  cursor: pointer;
+}
+.webui-manual button:hover { border-color: rgba(59, 130, 246, 0.75); }
