@@ -5,7 +5,7 @@
 > - 取代 `docs/CONVENTIONS-公共规范快照.md`（核仓库内，2026-07-24 历史快照，仅作追溯，不再指导开发）。
 > - 与《开发协作约定.md》（流程层：需求归属、开发流程、环境事实）互补——约定管"谁在什么流程下做什么"，本规范管"代码必须长什么样"。
 > - 平台层依据：AstrBot `AGENTS.md` 工程规范与 AstrBot 源码事实（`astrbot.core.provider`、`ProviderManager`、dashboard provider API、`pyproject.toml`）。
-> - 事实基线：以 2026-09-12 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
+> - 事实基线：以 2026-09-13 的实现为准；附录 A 记录现行状态快照，后续随实现演进更新。
 > - **治理范围：9 个插件（知、言、序、情、境、声、临、核、通）。枢（`astrbot_plugin_orchestration_hub`）未接入系列治理，按 2026-09-02 决定忽略——不适用本规范、不纳入契约要求与开发范围。**
 
 ---
@@ -355,7 +355,7 @@ astrbot_plugin_xxx/
   source /data/dsh/home/dsh/venv/bin/activate
   python -m pytest tests/ -x -q
   ```
-- 全系列当前本地基线 3,140 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
+- 全系列当前本地基线 3,142 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
 - UI 结构断言：用 `test_pages_ui.py` 对前端源码做关键控件/接口存在性断言，防止界面回退。
 
 ---
@@ -413,14 +413,14 @@ astrbot_plugin_xxx/
 
 | 字 | plugin_id | 版本 | astrbot_version |
 |----|-----------|------|-----------------|
-| 知 | astrbot_plugin_active_learner | 1.7.0 | >=4.16,<5 |
-| 言 | astrbot_plugin_conversation_flow | 0.11.0 | >=4.16,<5 |
-| 序 | astrbot_plugin_identity_guardian | 0.7.0 | >=4.17,<5 |
-| 情 | astrbot_plugin_relationship | 0.11.0 | >=4.16,<5 |
-| 境 | astrbot_plugin_environment_awareness | 0.5.0 | >=4.16,<5 |
-| 声 | astrbot_plugin_voice_hub | 0.11.0 | >=4.16,<5 |
-| 临 | astrbot_plugin_embodiment_bridge | 1.6.0 | >=4.26,<5 |
-| 核 | astrbot_plugin_update_manager | 0.18.0 | >=4.16,<5 |
+| 知 | astrbot_plugin_active_learner | 1.8.0 | >=4.16,<5 |
+| 言 | astrbot_plugin_conversation_flow | 0.12.0 | >=4.16,<5 |
+| 序 | astrbot_plugin_identity_guardian | 0.8.0 | >=4.17,<5 |
+| 情 | astrbot_plugin_relationship | 0.12.0 | >=4.16,<5 |
+| 境 | astrbot_plugin_environment_awareness | 0.6.0 | >=4.16,<5 |
+| 声 | astrbot_plugin_voice_hub | 0.12.0 | >=4.16,<5 |
+| 临 | astrbot_plugin_embodiment_bridge | 1.7.0 | >=4.26,<5 |
+| 核 | astrbot_plugin_update_manager | 0.19.0 | >=4.16,<5 |
 | 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。
