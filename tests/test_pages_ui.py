@@ -845,3 +845,23 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     # 模块列表不再伪造检查结果
     assert 'id="check"' in js
     assert "version_status === \"not_checked\"" in js
+
+
+def test_series_control_is_grouped_by_function_domain():
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    assert "const FEATURE_DOMAINS = [" in js
+    for title in (
+        "对话与消息",
+        "身份与权限",
+        "关系与情绪",
+        "知识与记忆",
+        "环境与时间",
+        "语音与表达",
+        "具身与设备",
+        "更新与治理",
+    ):
+        assert title in js
+    assert 'data-feature-domain=' in js
+    assert 'data-domain-view=' in js
+    assert 'memberReady}/${memberTotal} 正常' in js
+    assert '成员管理台' not in js

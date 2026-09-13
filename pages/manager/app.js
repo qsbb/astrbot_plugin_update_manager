@@ -320,7 +320,12 @@ async function openSelfUpdateTarget(link, route) {
 }
 
 function toast(message, error = false) {
+  if (window.SeriesUI?.toast) {
+    window.SeriesUI.toast(message, error ? "error" : "info");
+    return;
+  }
   const node = document.getElementById("toast");
+  if (!node) return;
   node.textContent = message;
   node.classList.toggle("error", error);
   node.classList.add("visible");
@@ -1057,7 +1062,16 @@ function clearVersionCheckBusy() {
 }
 
 function showConfirmation(message) {
+  if (window.SeriesUI?.confirm) {
+    return window.SeriesUI.confirm({
+      title: t("confirmTitle"),
+      message,
+      confirmText: t("confirmAction"),
+      cancelText: t("cancel"),
+    });
+  }
   const dialog = document.getElementById("confirmation-dialog");
+  if (!dialog) return Promise.resolve(window.confirm(message));
   document.getElementById("confirmation-message").textContent = message;
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });

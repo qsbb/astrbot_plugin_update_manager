@@ -116,7 +116,13 @@ function diagnosticProblems() {
 }
 function diagnosticsView() {
   const problems = diagnosticProblems();
-  const members = (state.logMembers || []).map(item => `<span class="pill ${item.gap ? "warn" : ""}">${esc(item.display_name || item.plugin_id)} · ${esc(item.status)} · seq ${esc(item.next_seq ?? 0)}${item.gap ? " · 有断层" : ""}</span>`).join(" ");
+  const memberTotal = (state.logMembers || []).length;
+  const memberReady = (state.logMembers || []).filter(item => item.status === "ready").length;
+  const memberGap = (state.logMembers || []).filter(item => item.gap).length;
+  const memberUnavailable = memberTotal - memberReady;
+  const members = memberTotal
+    ? `<span class="pill native">${memberReady}/${memberTotal} 正常</span>${memberUnavailable ? `<span class="pill warn">${memberUnavailable} 个未就绪</span>` : ""}${memberGap ? `<span class="pill warn">${memberGap} 个有断层</span>` : ""}`
+    : `<span class="pill">未加载</span>`;
   const modules = [...new Map((state.logs || []).map(item => [item.plugin_id, item.plugin_name || item.plugin_id])).entries()];
   const events = diagnosticEvents();
   const problemRows = problems.length ? problems.slice(0, 8).map(item => `<button class="problem-item" data-log-problem="${esc(item.plugin_id)}" data-log-code="${esc(item.code)}"><span class="pill ${item.level === "ERROR" ? "managed" : "warn"}">${esc(item.level)}</span><b>${esc(item.plugin_name)}</b><code>${esc(item.code)}</code><small>${item.count} 次 · ${esc(relativeTime(item.last))}</small></button>`).join("") : `<p class="empty-cell">当前缓冲区没有警告或错误。</p>`;
@@ -127,7 +133,7 @@ function diagnosticsView() {
     return `<article class="diagnostic-event ${expanded ? "expanded" : ""} ${state.logNewKeys.has(key) ? "new-event" : ""}" data-log-event="${esc(key)}"><button class="diagnostic-event-head" data-log-toggle="${esc(key)}"><time title="${esc(item.timestamp || "")}">${esc(relativeTime(item.timestamp))}</time><span class="event-module">${esc(item.plugin_name || item.plugin_id)}</span><span class="pill ${item.level === "ERROR" ? "managed" : item.level === "WARNING" ? "warn" : ""}">${esc(item.level)}</span><b>${esc(item.summary || "未命名事件")}</b><span class="event-chevron">${expanded ? "收起" : "详情"}</span></button>${expanded ? `<div class="diagnostic-event-detail"><div class="event-meta"><span>代码 <code>${esc(item.code || "-")}</code></span><span>序号 <code>${esc(item.seq)}</code></span></div>${logDetailRows(item.details)}${context ? `<div class="log-context"><strong>同模块上下文</strong>${context}</div>` : ""}</div>` : ""}</article>`;
   }).join("") : `<div class="empty-cell">暂无匹配日志，请调整过滤条件或点击「加载日志」。</div>`;
   const selectedModules = modules.map(([id, name]) => `<button class="filter-chip ${state.logModules.includes(id) ? "active" : ""}" data-log-module="${esc(id)}">${esc(name)}</button>`).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行诊断</h1><p>先看问题聚合，再展开事件详情和上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>清空日志</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>当前问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span>${events.length} 条匹配 · ${members || "未加载"}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list">${eventCards}</div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行诊断</h1><p>先看问题聚合，再展开事件详情和上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>清空日志</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>当前问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span>${events.length} 条匹配 · ${members}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list">${eventCards}</div></section>`;
 }
 function updatesView() {
   const checkedAt = state.modules.find(item => item.versions_checked_at)?.versions_checked_at || "";
@@ -182,10 +188,112 @@ function settingsView() {
   }).join("");
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生 Provider</span></div></div><div class="route-note">Provider 和模型来自 AstrBot 当前已加载配置；没有可枚举模型的 provider 保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label><code>auto_update_enabled</code><small>bool · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label><code>log_level</code><small>str · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_host</code><small>str · WebUI 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_port</code><small>int · WebUI 端口（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_public_url</code><small>str · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>series.model_router@1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生 Provider。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
 }
+const FEATURE_DOMAINS = [
+  {
+    id: "message",
+    title: "对话与消息",
+    icon: "言",
+    description: "沉默、分段、防抖、插话、上下文承接与回复交付。",
+    features: ["沉默判断", "智能分段", "运行中插话", "话题承接", "上下文预算", "群聊语境"],
+    actions: [{ kind: "plugin", label: "管理对话策略", plugin_id: "astrbot_plugin_conversation_flow" }],
+  },
+  {
+    id: "identity",
+    title: "身份与权限",
+    icon: "序",
+    description: "身份识别、私聊授权、群管理边界与入群审核。",
+    features: ["身份识别", "行动授权", "群管理", "入群审核", "权限否决"],
+    actions: [{ kind: "plugin", label: "管理身份权限", plugin_id: "astrbot_plugin_identity_guardian" }],
+  },
+  {
+    id: "relationship",
+    title: "关系与情绪",
+    icon: "情",
+    description: "好感、信任、熟悉度、关系性质与表达建议。",
+    features: ["好感度", "四维信任", "熟悉度", "关系性质", "情绪建议", "账号归属"],
+    actions: [{ kind: "plugin", label: "管理关系状态", plugin_id: "astrbot_plugin_relationship" }],
+  },
+  {
+    id: "knowledge",
+    title: "知识与记忆",
+    icon: "知",
+    description: "知识检索、交叉验证、知识图谱、记忆生命周期与导入导出。",
+    features: ["知识检索", "交叉验证", "知识图谱", "记忆管理", "导入导出"],
+    actions: [{ kind: "plugin", label: "管理知识记忆", plugin_id: "astrbot_plugin_active_learner" }],
+  },
+  {
+    id: "environment",
+    title: "环境与时间",
+    icon: "境",
+    description: "时间、天气、空气质量、日历、预警和主动环境关心。",
+    features: ["时间", "天气", "空气质量", "日历", "预警", "主动关心"],
+    actions: [{ kind: "plugin", label: "管理环境感知", plugin_id: "astrbot_plugin_environment_awareness" }],
+  },
+  {
+    id: "voice",
+    title: "语音与表达",
+    icon: "声",
+    description: "语音合成、音色、情绪映射、语音导演与音频交付。",
+    features: ["语音合成", "音色管理", "情绪映射", "语音导演", "音频试听"],
+    actions: [{ kind: "plugin", label: "管理语音表达", plugin_id: "astrbot_plugin_voice_hub" }],
+  },
+  {
+    id: "embodiment",
+    title: "具身与设备",
+    icon: "临",
+    description: "设备配对、会话桥接、角色动作与具身诊断。",
+    features: ["设备配对", "会话桥接", "角色动作", "人格模式", "实时诊断"],
+    actions: [{ kind: "plugin", label: "管理具身设备", plugin_id: "astrbot_plugin_embodiment_bridge" }],
+  },
+  {
+    id: "governance",
+    title: "更新与治理",
+    icon: "核",
+    description: "更新规则、镜像、推荐、回滚、模型角色与全局设置。",
+    features: ["每日规则", "镜像加速", "系列推荐", "更新回滚", "模型角色", "全局设置"],
+    actions: [
+      { kind: "view", label: "每日规则", view: "rules" },
+      { kind: "view", label: "镜像加速", view: "mirrors" },
+      { kind: "view", label: "全局设置", view: "settings" },
+    ],
+  },
+];
+
+function controlStatusLabel(member, domainId = "") {
+  if (domainId === "governance") return "核内置";
+  if (!member) return "未接入";
+  if (member.status === "managed") return "统一接管";
+  if (member.status === "native") return "独立配置";
+  return member.status === "not_loaded" ? "未加载" : "待检查";
+}
+
+function controlReasonLabel(reason) {
+  return ({
+    OK: "运行正常",
+    CONTRACT_UNAVAILABLE: "未提供统一控制",
+    PLUGIN_NOT_LOADED: "模块未加载",
+    CONTRACT_VERSION_UNSUPPORTED: "契约版本不兼容",
+    TAKEOVER_DISABLED: "当前为独立配置",
+  })[String(reason || "")] || String(reason || "运行正常");
+}
+
 function controlView() {
   const control = state.control || { mode: "native", members: [], revision: 0 };
-  const rows = (control.members || []).map(item => `<tr><td><b>${esc(item.display_name)}</b><small>${esc(item.plugin_id)}</small></td><td><span class="status ${item.status === "managed" ? "" : "off"}">${esc(item.status)}</span></td><td>${esc(item.reason || "-")}</td><td><button class="link" data-control-plugin="${esc(item.plugin_id)}">打开管理台</button></td></tr>`).join("") || `<tr><td colspan="4" class="empty-cell">暂无可信插件控制契约</td></tr>`;
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>核只保存覆盖层；关闭接管后插件自身配置立即恢复生效。字段接管、插件面板与生命周期操作全部在本控制台完成。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前模式：${esc(control.mode)}</h2><span>revision ${esc(control.revision)}</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>运行来源</th><th>状态原因</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></section>${controlDetail()}`;
+  const members = new Map((control.members || []).map(item => [item.plugin_id, item]));
+  const cards = FEATURE_DOMAINS.map(domain => {
+    const pluginAction = domain.actions.find(action => action.kind === "plugin");
+    const member = pluginAction ? members.get(pluginAction.plugin_id) : null;
+    const status = controlStatusLabel(member, domain.id);
+    const statusClass = status === "统一接管" ? "" : status === "独立配置" ? "native" : "warn";
+    const available = Boolean(member && member.status !== "not_loaded");
+    const buttons = domain.actions.map(action => action.kind === "view"
+      ? `<button class="btn" data-domain-view="${esc(action.view)}">${esc(action.label)}</button>`
+      : `<button class="btn primary" data-control-plugin="${esc(action.plugin_id)}" ${available ? "" : "disabled"}>${esc(action.label)}</button>`
+    ).join("");
+    const features = domain.features.map(feature => `<span class="pill">${esc(feature)}</span>`).join("");
+    return `<article class="workspace feature-domain" data-feature-domain="${esc(domain.id)}"><div class="feature-domain-head"><span class="feature-domain-icon">${esc(domain.icon)}</span><div><h2>${esc(domain.title)}</h2><p>${esc(domain.description)}</p></div><span class="pill ${statusClass}">${esc(status)}</span></div><div class="feature-domain-tags">${features}</div><div class="feature-domain-foot"><small>${member?.reason ? `状态：${esc(controlReasonLabel(member.reason))}` : "功能按领域统一归口，不展示模块身份细节。"}</small><div class="actions">${buttons}</div></div></article>`;
+  }).join("");
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>功能按使用场景分类统一管理；关闭接管后各模块恢复独立配置。高级更新与生命周期操作仍在对应功能域内。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前接管模式</h2><span>revision ${esc(control.revision)}</span></div></div><div class="control-mode-summary"><div><span>运行模式</span><strong>${control.mode === "managed" ? "统一接管" : "独立配置"}</strong></div><div><span>功能域</span><strong>${FEATURE_DOMAINS.length}</strong></div><div><span>已接管</span><strong>${[...members.values()].filter(item => item.status === "managed").length}</strong></div><div><span>待检查</span><strong>${[...members.values()].filter(item => !["managed", "native"].includes(item.status)).length}</strong></div></div></section><section class="feature-domain-grid">${cards}</section>${controlDetail()}`;
 }
 function controlDetail() {
   if (!state.selectedControlPlugin) return "";
@@ -200,7 +308,9 @@ function controlDetail() {
   if (state.controlTab === "panels") body = controlPanelsTab();
   else if (state.controlTab === "lifecycle") body = controlLifecycleTab();
   else body = controlFieldsTab(schema, snapshot);
-  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(displayName)} 管理台</h2><span>${esc(pluginId)} · revision ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回列表</button></div>${strip}<div class="control-body">${body}</div></section>`;
+  const domain = FEATURE_DOMAINS.find(item => item.actions.some(action => action.kind === "plugin" && action.plugin_id === pluginId));
+  const title = domain?.title || "功能控制";
+  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(title)}</h2><span>revision ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回功能域</button></div>${strip}<div class="control-body">${body}</div></section>`;
 }
 function controlFieldsTab(schema, snapshot) {
   const fields = schema?.schema?.fields || {};
@@ -351,6 +461,7 @@ function bindDashboard() {
   document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", async () => { state.logModules = [node.dataset.diagnostic]; await loadDiagnostics(); })); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
   document.querySelectorAll("[data-filter]").forEach(node => node.addEventListener("click", () => { state.filter = node.dataset.filter; dashboard(); })); const query = document.getElementById("query"); query?.addEventListener("input", () => { state.query = query.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("query"); next?.focus(); next?.setSelectionRange(state.query.length, state.query.length); }); });
   document.querySelectorAll("[data-control-plugin]").forEach(node => node.addEventListener("click", () => loadControlPlugin(node.dataset.controlPlugin)));
+  document.querySelectorAll("[data-domain-view]").forEach(node => node.addEventListener("click", async () => { state.view = node.dataset.domainView || "modules"; if (state.view === "rules") await loadRules(); else if (state.view === "mirrors") await loadMirrors(); else if (state.view === "settings") await loadSettings(); else dashboard(); }));
   document.getElementById("close-control-detail")?.addEventListener("click", () => { state.selectedControlPlugin = ""; state.controlSchema = null; state.controlSnapshot = null; state.panelsList = null; state.panelData = null; state.selectedPanel = ""; dashboard(); });
   document.querySelectorAll("[data-control-tab]").forEach(node => node.addEventListener("click", () => { state.controlTab = node.dataset.controlTab || "fields"; dashboard(); }));
   document.getElementById("control-apply")?.addEventListener("click", () => applyControlPatch());

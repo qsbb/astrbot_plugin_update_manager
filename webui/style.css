@@ -57,3 +57,20 @@ body[data-series-ui] .content .stat,
 body[data-series-ui] .content .table-wrap {
   border-radius: var(--si-radius);
 }
+
+/* 系列接管：按功能域组织，不显式铺开模块身份。 */
+.feature-domain-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:16px; }
+.feature-domain { margin:0; }
+.feature-domain-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; align-items:start; }
+.feature-domain-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:12px; color:#fff; background:linear-gradient(135deg,#766cff,#5f55ed); font-weight:800; box-shadow:0 8px 20px rgba(89,79,231,.2); }
+.feature-domain-head h2 { margin:2px 0 3px; }
+.feature-domain-head p { margin:0; color:var(--muted); font-size:12px; }
+.feature-domain-tags { display:flex; gap:7px; flex-wrap:wrap; margin:14px 0; }
+.feature-domain-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:12px; border-top:1px solid var(--line); }
+.feature-domain-foot small { color:var(--muted); }
+.control-mode-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.control-mode-summary > div { padding:12px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.42); }
+.control-mode-summary span { display:block; color:var(--muted); font-size:11px; }
+.control-mode-summary strong { display:block; margin-top:5px; font-size:18px; }
+@media (max-width:900px){ .feature-domain-grid { grid-template-columns:1fr; } .control-mode-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:560px){ .feature-domain-head { grid-template-columns:auto minmax(0,1fr); } .feature-domain-head>.pill { grid-column:2; } .feature-domain-foot { align-items:flex-start; flex-direction:column; } .feature-domain-foot .actions { width:100%; } .feature-domain-foot .actions button { flex:1; } }
