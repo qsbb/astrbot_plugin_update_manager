@@ -450,3 +450,14 @@
 - 临「对话与模型」两张卡片桌面并排等高、按钮不再整行拉伸；运行区页签独占整行；服务卡补齐内边距。
 - 声试听栏修复（输入框 31px → 整行）；知移动卡片内边距与行高统一；言骨架顺序与移动端两列；序批量栏 sticky 重叠修复；情账号归属顺序与 sticky 头压缩；境 sticky 头压缩与 AQI/UV 中文等级。
 - 校验：8 仓全量测试 707/455(+384 sub)/473/300(+26 sub)/134/196(+6 sub)/604/324 全绿；浏览器回归 9/9 通过；9 页渲染扫描大间隙 0、空洞 0、横向溢出 0、裸方法名 0。
+
+## 第九批：统一滑块开关与能力卡直出主开关（2026-09-14，未升版本）
+
+- 正本新增统一滑块开关：`input[type="checkbox"].si-toggle` / `.switch` 容器 / `.si-switch` 容器三选一即渲染 40×22 滑块；`series-ui.js` 自动补 `role="switch"` 与 `aria-checked`（动态渲染同样生效）。radio 与列表勾选不匹配该选择器，保持原生语义。
+- 能力目录 `core/capability_catalog.py` 新增 `providers[].switch_field`（17 项能力声明主开关），`validate_catalog()` 校验其必须属于 `fields`。
+- 核 WebUI 系列接管：卡片拆为「标题行（`cap-card-head`：`cap-card-open` + 右侧主开关）／描述行／`cap-card-meta` 设置行」，主开关按方案 A 贴在标题行右侧（文字在左、轨道在右）；切换走 `control/validate → control/apply`（带 `expected_revision`），失败回滚；提示带「撤销」（共享 `SeriesUI.toast(..., action)`），5.2 秒内可用最新 revision 恢复原值；详情页布尔字段改用 `label.si-switch`。
+- 卡片链接式按钮显式 `min-height:0` 并归零 hover 位移/阴影，避免继承共享按钮的 38px 高度（卡片 110px → 80px）。
+- 8 仓页面布尔开关统一：知（13）、言（1）、序（2）、情（4）、境（1）、声（11）、临（11）改用共享开关；核沿用 `label.switch` 容器契约。知/序页面自绘滑块样式物理删除，情/境/言/声/临/核页面不再写死勾选框尺寸。
+- 有意保留原生：知导入/文档勾选、序全选与行选择、核目标模块多选与镜像单选、声 TTS 后端与触发模式单选。
+- 验证：8 仓全量测试全绿（知 716/言 479+384sub/序 484/情 315+26sub/境 148/声 208+6sub/临 614+8skip/核 377）；`series_ui check` ok；浏览器回归 1440/390 各 10 卡 8 开关、0 pageerror，开关点击实发 validate/apply。
+- 仍未提交、未推送、未部署；`orchestration_hub` 未访问、未修改。

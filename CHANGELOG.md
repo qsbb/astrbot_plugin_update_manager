@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## 0.19.5 - 2026-09-14
+
+### 变更
+
+- 系列接管页能力卡片直出「主开关」：能力目录新增 `providers[].switch_field`（17 项能力声明主开关），开关放在卡片标题行右侧（文字在左、轨道在右），点击即校验 + 应用（带 revision 并发保护），失败回滚。
+- 统一滑块开关：共享库新增 `input.si-toggle` / `.switch` / `.si-switch` 三种写法（40×22 轨道 + 圆点、focus 环、禁用态、降动效），`series-ui.js` 自动补 `role="switch"` 与 `aria-checked`；radio 与列表勾选保持原生。
+- 误触兜底：`SeriesUI.toast` 支持行内操作按钮，开关切换成功后提示附带「撤销」，5.2 秒内可用最新 revision 一键恢复原值。
+- 卡片布局收紧：链接式按钮不再继承共享按钮的 38px 最小高度与 hover 位移（卡片约 110px → 80px）；`series_audit` 的 UI 库版本改为读取正本常量。
+
 ## 0.19.4 - 2026-09-14
 
 ### 变更

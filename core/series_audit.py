@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from .series_ui import verify as verify_series_ui
+from .series_ui import UI_VERSION as SERIES_UI_VERSION, verify as verify_series_ui
 
 IGNORED_REPOS = {"astrbot_plugin_orchestration_hub"}
 KERNEL_PLUGIN_ID = "astrbot_plugin_update_manager"
@@ -336,7 +336,7 @@ def audit(
             "hash_groups": groups,
         },
         "conventions_copies_outside_kernel": conventions,
-        "ui_library": {"name": "series.ui", "version": "1.0.0", "clean": not verify_series_ui(root)},
+        "ui_library": {"name": "series.ui", "version": SERIES_UI_VERSION, "clean": not verify_series_ui(root)},
         "warnings": warnings,
         "errors": errors,
     }

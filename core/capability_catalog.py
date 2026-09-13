@@ -5,6 +5,8 @@
 - 一个能力可以由多个插件共同提供（多对多），状态按提供者聚合并。
 - providers.fields 只引用各插件 series.control 真实暴露的字段；更多设置在
   providers.hint 指向插件页设置中心。
+- providers.switch_field 指定该能力的“主开关”字段（必须是 fields 里的布尔项），
+  核 WebUI 会把它直接渲染成能力卡片上的滑块开关，点开详情再调其余字段。
 - 治理域（核自身）用 views 指向核 WebUI 既有视图。
 - 目录是 P0-1 的策展映射；P2 会改为插件在契约里声明 capabilities[]，
   本目录降级为兼容兜底。
@@ -92,6 +94,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _CF,
                 "fields": ["silence_enabled", "silence_strategy"],
+                "switch_field": "silence_enabled",
                 "hint": "沉默标记、预判模型等细节在「言 → 设置中心 → 沉默判断」。",
             }
         ],
@@ -105,6 +108,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _CF,
                 "fields": ["chunking_enabled", "chunking_min_length", "chunking_max_segments"],
+                "switch_field": "chunking_enabled",
                 "hint": "段落策略与「分段延迟」（打字节奏）在「言 → 设置中心 → 智能分段 / 分段延迟」。",
             }
         ],
@@ -118,6 +122,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _CF,
                 "fields": ["interrupt_enabled", "interrupt_mode", "interrupt_scope", "interrupt_merge_strategy"],
+                "switch_field": "interrupt_enabled",
                 "hint": "steering 窗口等高级项在「言 → 设置中心 → 插话中断」。",
             }
         ],
@@ -140,6 +145,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "recent_activity_context_enabled",
                     "recent_activity_retention_minutes",
                 ],
+                "switch_field": "private_context_bridge_enabled",
             }
         ],
     },
@@ -160,6 +166,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "group_air_guard_max_bot_replies",
                     "group_air_guard_polite_loop_limit",
                 ],
+                "switch_field": "group_context_enabled",
             }
         ],
     },
@@ -178,6 +185,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "followup_window_seconds",
                     "scene_awareness_enabled",
                 ],
+                "switch_field": "followup_guard_enabled",
             }
         ],
     },
@@ -201,6 +209,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "context_budget_soft_limit",
                     "context_budget_hard_limit",
                 ],
+                "switch_field": "context_budget_enforce",
             }
         ],
     },
@@ -225,6 +234,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "mood_silence_chance_percent",
                     "mood_max_consecutive_silences",
                 ],
+                "switch_field": "mood_enabled",
             },
             {"plugin_id": _RL, "fields": ["mood_enabled"], "hint": "关系侧情绪联动。"},
         ],
@@ -272,6 +282,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _AL,
                 "fields": ["embedding_enabled"],
+                "switch_field": "embedding_enabled",
                 "hint": "嵌入模型与检索权重在「知 → 设置中心 → 搜索」。",
             }
         ],
@@ -305,6 +316,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "cross_platform_memory_top_k",
                     "cross_platform_memory_max_chars",
                 ],
+                "switch_field": "cross_platform_memory_enabled",
             }
         ],
     },
@@ -317,6 +329,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _EA,
                 "fields": ["opportunity_cache_enabled", "opportunity_refresh_seconds"],
+                "switch_field": "opportunity_cache_enabled",
             }
         ],
     },
@@ -355,7 +368,8 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "title": "身份识别与授权",
         "description": "owner/管理员识别、私聊授权与行动许可。",
         "providers": [
-            {"plugin_id": _ID, "fields": ["enabled"], "hint": "owner/管理员名单在「序 → 设置中心」。"}
+            {"plugin_id": _ID, "fields": ["enabled"],
+            "switch_field": "enabled", "hint": "owner/管理员名单在「序 → 设置中心」。"}
         ],
     },
     {
@@ -367,6 +381,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _ID,
                 "fields": ["auto_moderate", "join_audit_mode"],
+                "switch_field": "auto_moderate",
                 "hint": "入群问题、通过阈值与推送模型在「序 → 设置中心 → 入群」。",
             }
         ],
@@ -389,6 +404,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _ID,
                 "fields": ["enable_api_guard"],
+                "switch_field": "enable_api_guard",
                 "hint": "保护名单与跨群规则在「序 → 设置中心 → 安全」。",
             }
         ],
@@ -417,7 +433,8 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "domain": "environment",
         "title": "主动环境关心",
         "description": "达到阈值时主动提一句天气/风险。",
-        "providers": [{"plugin_id": _EA, "fields": ["proactive_enabled"]}],
+        "providers": [{"plugin_id": _EA, "fields": ["proactive_enabled"],
+        "switch_field": "proactive_enabled",}],
     },
     {
         "id": "location",
@@ -451,6 +468,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             {
                 "plugin_id": _VH,
                 "fields": ["segment_enabled", "segment_threshold_chars", "segment_max_segments"],
+                "switch_field": "segment_enabled",
             },
             {
                 "plugin_id": _CF,
@@ -499,6 +517,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "server_timing_enabled",
                     "sse_heartbeat_seconds",
                 ],
+                "switch_field": "diagnostic_log_enabled",
             }
         ],
     },
@@ -569,6 +588,7 @@ def _public_provider(provider: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "plugin_id": str(provider.get("plugin_id") or ""),
         "fields": [str(field) for field in (provider.get("fields") or [])],
+        "switch_field": str(provider.get("switch_field") or ""),
         "panels": [str(panel) for panel in (provider.get("panels") or [])],
         "hint": str(provider.get("hint") or ""),
     }
@@ -621,9 +641,13 @@ def validate_catalog() -> list[str]:
             plugin_id = str(provider.get("plugin_id") or "")
             if not plugin_id:
                 problems.append(f"{cid}: provider missing plugin_id")
-            for field in provider.get("fields") or []:
-                if not str(field).strip():
+            fields = [str(field) for field in provider.get("fields") or []]
+            for field in fields:
+                if not field.strip():
                     problems.append(f"{cid}: empty field name")
+            switch_field = str(provider.get("switch_field") or "")
+            if switch_field and switch_field not in fields:
+                problems.append(f"{cid}: switch_field {switch_field!r} not in fields")
     if len(capability_ids) != len(set(capability_ids)):
         problems.append("duplicate capability id")
     return problems

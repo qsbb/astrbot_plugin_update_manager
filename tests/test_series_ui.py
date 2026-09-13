@@ -58,6 +58,31 @@ def test_series_ui_verify_reports_missing_links(tmp_path):
     finally:
         module.TARGETS = original
 
+def test_series_ui_ships_canonical_toggle_switch():
+    root = Path(__file__).resolve().parents[1]
+    css = (root / "ui" / "series-ui.css").read_text(encoding="utf-8")
+    js = (root / "ui" / "series-ui.js").read_text(encoding="utf-8")
+
+    # 共享库提供统一滑块开关：checkbox.si-toggle 或 label.switch / label.si-switch 包裹
+    assert 'input[type="checkbox"].si-toggle' in css
+    assert '.si-switch input[type="checkbox"]' in css
+    assert "border-radius: 999px" in css
+    assert "translateX(18px)" in css
+    # 单选与列表勾选不受影响
+    assert 'input[type="radio"].si-toggle' not in css
+    assert 'input[type="radio"]' not in css.split("/* 统一开关控件")[1].split(":where(/* Forms")[0]
+    # 无障碍：自动补 role=switch 与 aria-checked
+    assert "enhanceSwitches" in js
+    # toast 支持可选操作按钮（核 WebUI 的「撤销」用它实现），旧调用保持兼容
+    assert "function toast(message, type = \"info\", duration = 2600, action = null)" in js
+    assert 'button.className = "toast-action"' in js
+    assert "action.onClick()" in js
+    assert "toast-action" in css
+    assert "setAttribute('role', 'switch')" in js
+    assert "setAttribute('aria-checked'" in js
+    assert 'input[type="checkbox"].si-toggle, .switch input[type="checkbox"]' in js
+
+
 def test_series_ui_modal_layers_keep_card_interactive():
     root = Path(__file__).resolve().parents[1]
     css = (root / "ui" / "series-ui.css").read_text(encoding="utf-8")

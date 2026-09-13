@@ -965,6 +965,49 @@ def test_series_control_is_capability_first_not_plugin_cards():
     assert "@media (max-width:620px)" in css
 
 
+def test_capability_cards_expose_inline_master_switch():
+    """能力卡片把「主开关」直接放出来，不必点进详情；卡片本体不再是 button。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+
+    assert "function capabilitySwitchSpec(" in js
+    assert "provider.switch_field" in js
+    assert "function capabilitySwitchState(" in js
+    assert "function capabilitySwitchHtml(" in js
+    assert "data-cap-switch-field=" in js
+    assert "data-cap-switch-plugin=" in js
+    assert "async function ensureCapabilitySwitchData(" in js
+    assert "async function applyCapabilitySwitch(" in js
+    assert "function refreshCapabilitySwitchData(" in js
+    # 卡片开关复用同一套校验 + 覆盖写入接口（带 revision 并发保护）
+    assert "/control/validate" in js and "/control/apply" in js
+    # 开关不能嵌在 button 里：卡片拆成「标题按钮 + 标题行右侧开关 + 设置行」
+    assert '<button class="capability-card"' not in js
+    assert 'class="cap-card-open"' in js
+    assert 'class="cap-card-head"' in js
+    assert "cap-card-open" in css and ".cap-card-head" in css and ".cap-switch" in css
+    # 方案 A：开关贴在标题行右侧，文字在左、轨道在右
+    assert '<span class="cap-switch-text">' in js
+    assert '<span class="cap-switch-text">${esc(label)}</span><input type="checkbox" role="switch"' in js
+    # 误触兜底：应用成功后的提示带「撤销」
+    assert "async function revertCapabilitySwitch(" in js
+    assert 'label: "撤销"' in js
+    assert "onClick: () => revertCapabilitySwitch(" in js
+    assert "toast-action" in (PLUGIN_ROOT / "ui" / "series-ui.css").read_text(encoding="utf-8")
+
+
+def test_series_boolean_switches_use_shared_toggle_not_local_checkbox():
+    """全系列布尔开关统一走共享滑块开关，页面不再自绘尺寸或自造滑块。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    page_css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    webui_css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+
+    assert 'def.type === "bool") input = `<label class="si-switch">' in js
+    assert ".switch input { width:18px;height:18px; }" not in page_css
+    assert ".form-input .switch input{width:17px;height:17px}" not in webui_css
+    assert ".form-actions .switch input{width:16px;height:16px}" not in webui_css
+
+
 def test_control_center_mobile_nav_can_reach_every_view():
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
@@ -1078,7 +1121,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.4-1" in html
+    assert "?v=0.19.5-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1113,4 +1156,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.4-1" in webui_html
+    assert "?v=0.19.5-1" in webui_html

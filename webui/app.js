@@ -9,6 +9,7 @@ let state = {
   control: null,
   controlSchema: null,
   controlSnapshot: null,
+  controlSwitches: {},
   controlTab: "fields",
   settingsTab: "route",
   panelsList: null,
@@ -95,9 +96,9 @@ function suiteTabStrip(suiteId) {
   return `<div class="tab-strip suite-tabs" role="tablist">${buttons}</div>`;
 }
 
-const notify = (message, error = false) => {
+const notify = (message, error = false, action = null) => {
   if (window.SeriesUI?.toast) {
-    window.SeriesUI.toast(message, error ? "error" : "info");
+    window.SeriesUI.toast(message, error ? "error" : "info", undefined, action);
     return;
   }
   const fallback = document.querySelector("[data-toast-fallback], #bridge-error, #startup-error, #page-error");
@@ -543,12 +544,46 @@ function domainItem(domain, active) {
   const stateText = attention ? `${attention} 项待处理` : status.label;
   return `<button class="domain-item ${active ? "active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" data-catalog-domain-open="${esc(domain.id)}"><span class="domain-top"><span class="status-dot ${status.cls}" title="${esc(status.label)}"></span><b>${esc(domain.title)}</b><i>${capabilities.length}</i></span><small><em class="domain-state ${status.cls}">${esc(stateText)}</em> · ${esc(preview)}${capabilities.length > 2 ? " …" : ""}</small></button>`;
 }
+function capabilitySwitchSpec(capability) {
+  return (capability.providers || []).find(provider => provider.switch_field) || null;
+}
+function capabilitySwitchState(provider, field) {
+  const data = (state.controlSwitches || {})[provider.plugin_id];
+  if (!data) return { pending: true };
+  if (data.error) return { error: data.error };
+  const def = data.schema?.schema?.fields?.[field];
+  if (!def || def.type !== "bool") return { unsupported: true };
+  const value = data.snapshot?.snapshot?.fields?.[field] || {};
+  return {
+    def,
+    checked: value.effective_value === true,
+    managed: !!value.managed_configured,
+    canWrite: (state.session?.role === "owner" || state.session?.role === "admin") && data.schema?.mode === "managed",
+  };
+}
+function capabilitySwitchHtml(capability) {
+  const provider = capabilitySwitchSpec(capability);
+  if (!provider) return "";
+  const field = provider.switch_field;
+  const info = capabilitySwitchState(provider, field);
+  const label = info.def ? fieldLabel(field, info.def) : field;
+  const title = info.error
+    ? `开关读取失败：${info.error}`
+    : info.pending
+      ? `${label}：正在读取当前状态`
+      : `${label} · ${info.managed ? "核覆盖" : "插件原生"}`;
+  const disabled = Boolean(info.pending || info.error || info.unsupported || !info.canWrite);
+  return `<label class="si-switch cap-switch${info.pending ? " busy" : ""}" title="${esc(title)}"><span class="cap-switch-text">${esc(label)}</span><input type="checkbox" role="switch" data-cap-switch-plugin="${esc(provider.plugin_id)}" data-cap-switch-field="${esc(field)}" aria-label="${esc(label)}" ${info.checked ? "checked" : ""} ${disabled ? "disabled" : ""} /></label>`;
+}
 function capabilityCard(capability) {
   const status = capabilityStatus(capability);
   const providers = capability.providers || [];
   const views = capability.views || [];
   const disabled = !providers.length && !views.length;
-  return `<button class="capability-card" role="listitem" data-capability-open="${esc(capability.id)}" ${disabled ? "disabled" : ""}><span class="cap-card-top"><span class="cap-badge ${status.cls}">${esc(capabilityBadge(status))}</span><b>${esc(capability.title)}</b><em>${esc(capabilityAction(capability))}</em></span><small class="cap-card-desc">${esc(capability.description)}</small><small class="cap-card-meta">${esc(capabilityMetaText(capability))}</small></button>`;
+  const toggle = capabilitySwitchHtml(capability);
+  const openAttr = `data-capability-open="${esc(capability.id)}" ${disabled ? "disabled" : ""}`;
+  const head = `<div class="cap-card-head"><button class="cap-card-open" ${openAttr}><span class="cap-badge ${status.cls}">${esc(capabilityBadge(status))}</span><b>${esc(capability.title)}</b></button>${toggle}</div>`;
+  return `<div class="capability-card${toggle ? " has-switch" : ""}" role="listitem">${head}<small class="cap-card-desc">${esc(capability.description)}</small><button class="cap-card-meta cap-card-meta-link" ${openAttr}>${esc(capabilityMetaText(capability))} <em>${esc(capabilityAction(capability))}</em></button></div>`;
 }
 
 function capabilityDetail() {
@@ -621,7 +656,7 @@ function controlFieldsTab(schema, snapshot, opts) {
     const source = isManaged ? `<span class="pill managed">核覆盖</span>` : `<span class="pill native">插件</span>`;
     let input = "";
     if (def.secret) input = `<input type="password" data-control-field="${esc(name)}" placeholder="${current ? "已配置（不回显）" : "未配置"}" ${canWrite ? "" : "disabled"}>`;
-    else if (def.type === "bool") input = `<label class="switch"><input type="checkbox" data-control-field="${esc(name)}" ${current === true ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用</span></label>`;
+    else if (def.type === "bool") input = `<label class="si-switch"><input type="checkbox" data-control-field="${esc(name)}" ${current === true ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>${current === true ? "启用" : "停用"}</span></label>`;
     else if (def.type === "int" || def.type === "float") input = `<input type="number" step="${def.type === "float" ? "any" : "1"}" min="${esc(def.minimum ?? "")}" max="${esc(def.maximum ?? "")}" value="${esc(current === null ? "" : current)}" data-control-field="${esc(name)}" ${canWrite ? "" : "disabled"}>`;
     else input = `<input type="text" value="${esc(current === null ? "" : current)}" data-control-field="${esc(name)}" ${canWrite ? "" : "disabled"}>`;
     const note = def.control === "read_only" ? `<span class="pill">只读</span>` : "";
@@ -821,7 +856,7 @@ function bindDashboard() {
   bindSettingsTabs();
   document.getElementById("logout")?.addEventListener("click", logout); document.getElementById("rail-logout")?.addEventListener("click", logout); document.getElementById("mobile-logout")?.addEventListener("click", logout);
   document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("reload")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
-  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl()); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
+  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl({ force: true })); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
   document.getElementById("rules-reload")?.addEventListener("click", () => loadRules()); document.getElementById("save-rule")?.addEventListener("click", () => saveRule()); document.getElementById("mirrors-reload")?.addEventListener("click", () => loadMirrors()); document.getElementById("save-mirror")?.addEventListener("click", () => saveMirror()); document.getElementById("benchmark-mirrors")?.addEventListener("click", () => benchmarkMirrors()); document.getElementById("check-recommendations")?.addEventListener("click", () => checkRecommendations()); document.getElementById("apply-recommendations")?.addEventListener("click", () => applyAllRecommendations()); document.getElementById("admins-reload")?.addEventListener("click", () => loadAdmins()); document.getElementById("admin-create")?.addEventListener("click", () => createAdmin()); document.querySelectorAll("[data-admin-update]").forEach(node => node.addEventListener("click", () => updateAdmin(node.dataset.adminUpdate)));
   document.querySelectorAll("[data-log-module]").forEach(node => node.addEventListener("click", () => { const id = node.dataset.logModule; state.logModules = state.logModules.includes(id) ? state.logModules.filter(item => item !== id) : [...state.logModules, id]; dashboard(); })); document.querySelectorAll("[data-log-toggle]").forEach(node => node.addEventListener("click", () => { const key = node.dataset.logToggle; if (state.logExpanded.has(key)) state.logExpanded.delete(key); else state.logExpanded.add(key); dashboard(); })); document.querySelectorAll("[data-log-problem]").forEach(node => node.addEventListener("click", () => { state.logModules = [node.dataset.logProblem]; state.logThreshold = node.querySelector(".managed") ? "ERROR" : "WARNING"; state.logQuery = node.dataset.logCode || ""; dashboard(); })); const logSearch = document.getElementById("log-search"); logSearch?.addEventListener("input", () => { state.logQuery = logSearch.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("log-search"); next?.focus(); next?.setSelectionRange(state.logQuery.length, state.logQuery.length); }); });
   const bindRouteModels = () => document.querySelectorAll("[data-route-model]").forEach(node => node.addEventListener("change", () => { if (node.value !== "__custom__") return; const input = document.createElement("input"); input.className = "route-model"; input.dataset.routeModel = node.dataset.routeModel; input.type = "text"; input.placeholder = "模型名（可自定义）"; input.disabled = node.disabled; node.replaceWith(input); input.focus(); }));
@@ -840,7 +875,8 @@ function bindDashboard() {
   document.querySelectorAll("[data-control-apply]").forEach(node => node.addEventListener("click", () => applyControlPatch(node.dataset.controlApply, node.closest("[data-capability-provider]") || document)));
   document.querySelectorAll("[data-control-reset]").forEach(node => node.addEventListener("click", () => resetControlFields(node.dataset.controlReset)));
   document.querySelectorAll("[data-control-refresh]").forEach(node => node.addEventListener("click", () => refreshControlFields(node.dataset.controlRefresh)));
-  document.querySelectorAll("[data-catalog-domain-open]").forEach(node => node.addEventListener("click", () => { state.selectedDomain = node.dataset.catalogDomainOpen; state.selectedCapability = ""; state.selectedControlPlugin = ""; dashboard(); }));
+  document.querySelectorAll("[data-catalog-domain-open]").forEach(node => node.addEventListener("click", async () => { state.selectedDomain = node.dataset.catalogDomainOpen; state.selectedCapability = ""; state.selectedControlPlugin = ""; dashboard(); await ensureCapabilitySwitchData(); }));
+  document.querySelectorAll("[data-cap-switch-field]").forEach(node => node.addEventListener("change", () => applyCapabilitySwitch(node)));
   document.querySelectorAll("[data-catalog-back]").forEach(node => node.addEventListener("click", () => { state.selectedDomain = ""; dashboard(); }));
   document.querySelectorAll("[data-capability-open]").forEach(node => node.addEventListener("click", () => loadCapability(node.dataset.capabilityOpen)));
   document.querySelectorAll("[data-capability-back]").forEach(node => node.addEventListener("click", () => { state.selectedCapability = ""; state.capabilityData = {}; dashboard(); }));
@@ -1100,7 +1136,93 @@ async function saveSettings() {
   });
   try { const result = await post("settings", payload); notify("设置已保存并生效（连接项重启后生效）"); await Promise.all([loadSettings(), loadDashboard()]); } catch (error) { notify(error.message, true); }
 }
-async function loadControl() { try { state.control = await get("series/control"); state.view = "control"; dashboard(); } catch (error) { notify(error.message, true); } }
+async function loadControl(options = {}) {
+  try {
+    state.control = await get("series/control");
+    state.view = "control";
+    dashboard();
+    await ensureCapabilitySwitchData({ force: Boolean(options.force) });
+  } catch (error) { notify(error.message, true); }
+}
+async function ensureCapabilitySwitchData(options = {}) {
+  const force = Boolean(options.force);
+  const domains = controlCatalog().domains || [];
+  if (!domains.length) return;
+  const active = domains.find(item => item.id === state.selectedDomain) || domains[0];
+  const ids = [...new Set(capabilitiesOfDomain(active.id).flatMap(capability => (capability.providers || []).filter(provider => provider.switch_field).map(provider => provider.plugin_id)))].filter(Boolean);
+  state.controlSwitches = state.controlSwitches || {};
+  const pending = ids.filter(id => force || !state.controlSwitches[id]);
+  if (!pending.length) return;
+  await Promise.all(pending.map(async id => {
+    try {
+      const [schema, snapshot] = await Promise.all([
+        get(`series/${encodeURIComponent(id)}/control/schema`),
+        get(`series/${encodeURIComponent(id)}/control/snapshot`)
+      ]);
+      state.controlSwitches[id] = { schema, snapshot };
+    } catch (error) {
+      state.controlSwitches[id] = { error: error.message };
+    }
+  }));
+  if (state.view === "control") dashboard();
+}
+async function revertCapabilitySwitch(pluginId, field, value) {
+  const data = (state.controlSwitches || {})[pluginId];
+  if (!data?.schema) { notify("撤销失败：配置已刷新，请重新操作", true); return; }
+  try {
+    const patch = { [field]: Boolean(value) };
+    await post(`series/${encodeURIComponent(pluginId)}/control/validate`, { patch, expected_revision: data.schema.revision });
+    await post(`series/${encodeURIComponent(pluginId)}/control/apply`, { patch, expected_revision: data.schema.revision });
+    notify(Boolean(value) ? "已恢复开启" : "已恢复关闭");
+    await refreshCapabilitySwitchData(pluginId);
+    await loadControl();
+  } catch (error) {
+    notify(`撤销失败：${error.message}`, true);
+    await refreshCapabilitySwitchData(pluginId);
+  }
+}
+async function refreshCapabilitySwitchData(pluginId) {
+  if (!pluginId) return;
+  try {
+    const [schema, snapshot] = await Promise.all([
+      get(`series/${encodeURIComponent(pluginId)}/control/schema`),
+      get(`series/${encodeURIComponent(pluginId)}/control/snapshot`)
+    ]);
+    state.controlSwitches = state.controlSwitches || {};
+    state.controlSwitches[pluginId] = { schema, snapshot };
+  } catch (error) {
+    state.controlSwitches = state.controlSwitches || {};
+    state.controlSwitches[pluginId] = { error: error.message };
+  }
+  if (state.view === "control") dashboard();
+}
+async function applyCapabilitySwitch(input) {
+  const pluginId = input.dataset.capSwitchPlugin || "";
+  const field = input.dataset.capSwitchField || "";
+  const data = (state.controlSwitches || {})[pluginId];
+  if (!pluginId || !field || !data?.schema) { if (state.view === "control") dashboard(); return; }
+  const next = input.checked;
+  const row = input.closest(".cap-switch");
+  input.disabled = true;
+  row?.classList.add("busy");
+  try {
+    const patch = { [field]: next };
+    await post(`series/${encodeURIComponent(pluginId)}/control/validate`, { patch, expected_revision: data.schema.revision });
+    await post(`series/${encodeURIComponent(pluginId)}/control/apply`, { patch, expected_revision: data.schema.revision });
+    notify(next ? "开关已开启" : "开关已关闭", false, {
+      label: "撤销",
+      onClick: () => revertCapabilitySwitch(pluginId, field, !next),
+    });
+    await refreshCapabilitySwitchData(pluginId);
+    await loadControl();
+  } catch (error) {
+    input.checked = !next;
+    notify(error.message, true);
+    await refreshCapabilitySwitchData(pluginId);
+  } finally {
+    row?.classList.remove("busy");
+  }
+}
 async function loadControlPlugin(pluginId) {
   state.selectedControlPlugin = pluginId;
   state.controlTab = "fields";
