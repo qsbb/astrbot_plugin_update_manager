@@ -913,33 +913,89 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     assert "version_status === \"not_checked\"" in js
 
 
-def test_series_control_is_grouped_by_function_domain():
+def test_series_control_is_capability_first_not_plugin_cards():
+    """能力优先：接管页按功能域与能力组织，不铺开插件身份。"""
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
-    assert "const FEATURE_DOMAINS = [" in js
-    for title in (
-        "对话与消息",
-        "身份与权限",
-        "关系与情绪",
-        "知识与记忆",
-        "环境与时间",
-        "语音与表达",
-        "具身与设备",
-        "更新与治理",
-    ):
-        assert title in js
-    assert 'data-feature-domain=' in js
-    assert 'data-domain-view=' in js
-    assert 'memberReady}/${memberTotal} 正常' in js
-    assert '成员管理台' not in js
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+
+    # 不再有写死的"一插件一张卡"目录
+    assert "const FEATURE_DOMAINS = [" not in js
+    # 目录来自核侧能力目录（state.control.capabilities）
+    assert "state.control?.capabilities" in js
+    assert "function controlCatalog()" in js
+    assert "function capabilitiesOfDomain(" in js
+    assert "function capabilityStatus(" in js
+    assert "function domainStatus(" in js
+    assert "function capabilityDetail(" in js
+    assert "async function loadCapability(" in js
+    # D3.1 主从结构：左域列表 + 右能力网格
+    assert "function masterDetail(" in js
+    assert "function domainItem(" in js
+    assert "function capabilityCard(" in js
+    # D3.1 三行卡：状态徽标 / 能力名 / 动作 / 描述 / 元信息
+    assert "function capabilityBadge(" in js
+    assert "function capabilityMetaText(" in js
+    assert "function sortCapabilities(" in js
+    assert "function capabilityNeedsAttention(" in js
+    assert '"正常"' in js and '"核自带"' in js
+    assert "设置 ›" in js and "打开 ›" in js
+    assert "项可调" in js
+    # 盲测批评的旧文案必须消失
+    assert "来源 ${providerNames.length} 个模块" not in js
+    # 交互入口：域 → 能力 → 设置
+    assert "data-catalog-domain-open=" in js
+    assert "data-capability-open=" in js
+    assert "status-legend" in js
+    # 复评修正：域行状态文字 + 能力区头部（异常优先标识）
+    assert 'class="domain-state' in js
+    assert "function capabilityCard(" in js
+    assert 'class="capability-head"' in js
+    assert "异常优先 ▾" in js
+    # 能力级状态与 D3.1 布局样式
+    assert ".status-dot" in css
+    assert ".capability-row" not in css
+    assert ".control-mode-line" in css
+    assert ".capability-provider" in css
+    assert ".master-detail" in css
+    assert ".domain-item" in css
+    assert ".capability-card" in css
+    assert ".cap-badge" in css
+    assert ".cap-card-meta" in css
+    assert "@media (max-width:1120px)" in css
+    assert "@media (max-width:620px)" in css
 
 
 def test_control_center_mobile_nav_can_reach_every_view():
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
 
-    nav_start = js.index("const NAV_ITEMS = [")
-    assert nav_start < js.index("function rail()")
-    assert "const links = [" not in js
+    # 视图注册表是唯一事实源：导航 / 标题 / 渲染 / 进入逻辑都由它驱动
+    assert "const VIEWS = {" in js
+    assert "const NAV_GROUPS = [" in js
+    assert "const NAV_ITEMS = Object.entries(VIEWS).map(" in js
+    assert "function railItemsForGroup(" in js
+    assert "function suiteTabStrip(" in js
+    assert "const VIEW_RENDERERS = {" in js
+    assert "const VIEW_ENTERS = {" in js
+    assert "async function enterView(" in js
+    # 四个导航分组
+    for group in ("workbench", "operations"):
+        assert f'"{group}"' in js
+    # 更新与安装套件：更新与回滚内含推荐 / 规则 / 镜像子页签
+    assert 'suite: ["updates", "recommendations", "rules", "mirrors"]' in js
+    assert 'inSuite: "updates"' in js
+    assert 'tabLabel: "更新与回滚"' in js
+    # 账户与安全收进「设置与安全」内部页签，不再占一级入口
+    assert 'hidden: true' in js
+    assert '!VIEWS[view]?.hidden' in js
+    assert 'data-si-tab="security"' in js
+    assert "function securityPanel()" in js
+    assert "function securityView()" in js
+    # 单一分发：点击与刷新都走 enterView，不再各自维护 if 链
+    assert 'enterView(node.dataset.view || "modules")' in js
+    assert "await enterView(state.view);" in js
+    assert 'if (state.view === "control") await loadControl();' not in js
+
     nav_block = js[js.index('class="mobile-nav"') : js.index("</nav>", js.index('class="mobile-nav"'))]
     assert '["modules", "control", "diagnostics"]' in nav_block
     assert 'id="mobile-more"' in nav_block
@@ -950,7 +1006,7 @@ def test_control_center_mobile_nav_can_reach_every_view():
     assert ".mobile-nav{" in mobile_css
     assert "overflow-x:auto" in mobile_css
     assert "flex:0 0 auto" in mobile_css
-
+    assert ".suite-tabs" in css
 
 def test_manager_page_does_not_duplicate_dark_legacy_theme():
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
@@ -1022,7 +1078,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.3-1" in html
+    assert "?v=0.19.4-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1057,4 +1113,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.3-1" in webui_html
+    assert "?v=0.19.4-1" in webui_html

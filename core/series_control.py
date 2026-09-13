@@ -11,6 +11,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from .adapters.storage import AtomicJsonStore
+from .capability_catalog import catalog_payload
 from .trusted import DIAGNOSTIC_SERIES_ID, TRUSTED_BY_ID, TRUSTED_SERIES
 
 CONTRACT_NAME = "series.control@1.0"
@@ -178,7 +179,14 @@ class SeriesControlGateway:
             except Exception as exc:
                 row["reason"] = str(exc) if str(exc) in {"PLUGIN_NOT_LOADED", "CONTRACT_UNAVAILABLE", "CONTRACT_VERSION_UNSUPPORTED"} else "CONTRACT_UNAVAILABLE"
             rows.append(row)
-        return {"contract": CONTRACT_NAME, "mode": self._state["mode"], "revision": self._state["revision"], "members": rows}
+        return {
+            "contract": CONTRACT_NAME,
+            "mode": self._state["mode"],
+            "revision": self._state["revision"],
+            "members": rows,
+            # 能力优先信息架构：功能域 → 能力 → 提供者（见 docs/SERIES-CAPABILITY-PLAN）
+            "capabilities": catalog_payload(),
+        }
 
     async def schema(self, plugin_id: str) -> dict[str, Any]:
         canonical, instance = await self._instance(plugin_id)

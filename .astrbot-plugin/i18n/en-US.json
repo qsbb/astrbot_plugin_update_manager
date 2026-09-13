@@ -1,0 +1,20 @@
+{
+  "config": {
+    "general": {
+      "log_level": {
+        "labels": [
+          "Debug",
+          "Info",
+          "Warning",
+          "Error"
+        ]
+      }
+    }
+  },
+  "pages": {
+    "manager": {
+      "title": "Series Plugin Core",
+      "description": "Recommended for installation; manage updates, enablement, rollbacks, and schedules across the plugin series"
+    }
+  }
+}

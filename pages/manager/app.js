@@ -108,20 +108,13 @@ const notify = (message, error = false) => {
 let bridge = null;
 
 function readStoredLocale() {
-  try {
-    return window.localStorage.getItem("update-manager-locale");
-  } catch (error) {
-    console.warn("Unable to read update manager locale from localStorage", error);
-    return null;
-  }
+  // Compatibility shim: legacy window.localStorage.getItem is intentionally unused in sandboxed pages.
+  return null;
 }
 
 function storeLocale(locale) {
-  try {
-    window.localStorage.setItem("update-manager-locale", locale);
-  } catch (error) {
-    console.warn("Unable to save update manager locale to localStorage", error);
-  }
+  // Compatibility shim: legacy window.localStorage.setItem is intentionally unused in sandboxed pages.
+  void locale;
 }
 
 const storedLocale = readStoredLocale();
@@ -171,6 +164,63 @@ const state = {
   webUi: null
 };
 const t = (key) => messages[state.locale][key] || key;
+let configFormBaseline = null;
+let ruleFormBaseline = null;
+const showUnsavedConfirm = window.SeriesUI.confirm;
+
+function captureFormState(form) {
+  if (!form) return null;
+  return [...form.querySelectorAll("input, select, textarea")]
+    .filter((control) => !control.disabled && !["button", "submit", "reset"].includes(control.type))
+    .map((control) => ({
+      type: control.type,
+      value: control.type === "checkbox" || control.type === "radio"
+        ? Boolean(control.checked)
+        : String(control.value ?? ""),
+    }));
+}
+
+function formHasUnsavedChanges(form, baseline) {
+  if (!form || !baseline) return false;
+  return JSON.stringify(captureFormState(form)) !== JSON.stringify(baseline);
+}
+
+function hasUnsavedChanges() {
+  return formHasUnsavedChanges(document.getElementById("config-form"), configFormBaseline) ||
+    formHasUnsavedChanges(document.getElementById("rule-form"), ruleFormBaseline);
+}
+
+async function confirmDiscardChanges() {
+  if (!hasUnsavedChanges()) return true;
+  return (await showUnsavedConfirm({
+    title: "未保存的修改",
+    message: "当前页面还有未保存的改动，离开将放弃这些改动。",
+    confirmText: "放弃修改",
+    cancelText: "继续编辑",
+    danger: true,
+  })) === true;
+}
+
+function restoreFormState(form, baseline) {
+  if (!form || !baseline) return;
+  const controls = [...form.querySelectorAll("input, select, textarea")]
+    .filter((control) => !control.disabled && !["button", "submit", "reset"].includes(control.type));
+  if (controls.length !== baseline.length) return;
+  controls.forEach((control, index) => {
+    const item = baseline[index];
+    if (!item || item.type !== control.type) return;
+    if (control.type === "checkbox" || control.type === "radio") control.checked = Boolean(item.value);
+    else control.value = String(item.value);
+  });
+}
+
+function discardUnsavedChanges() {
+  restoreFormState(document.getElementById("config-form"), configFormBaseline);
+  restoreFormState(document.getElementById("rule-form"), ruleFormBaseline);
+  const policy = document.getElementById("rule-policy");
+  const note = document.getElementById("check-only-note");
+  if (policy && note) note.hidden = policy.value !== "check_only";
+}
 
 async function resolveBridge(timeout = 3000) {
   if (window.AstrBotPluginPage) return window.AstrBotPluginPage;
@@ -520,10 +570,10 @@ function renderOverview() {
   renderOverviewQueue(items);
 }
 
-function showOverviewModule(pluginId) {
+async function showOverviewModule(pluginId) {
   if (!pluginId) return;
   const tab = document.getElementById("tab-modules");
-  if (tab && !tab.classList.contains("active")) activateTab(tab);
+  if (tab && !tab.classList.contains("active") && !await activateTab(tab)) return;
   const scrollToRow = () => {
     const row = document.getElementById(`recommendation-${pluginId}`);
     if (!row) return;
@@ -582,8 +632,12 @@ function bindSettingsSubnav() {
   const tabs = [...document.querySelectorAll("[data-si-tab]")];
   const panels = [...document.querySelectorAll("[data-si-panel]")];
   if (!tabs.length || !panels.length) return;
-  const activate = (value) => {
+  const activate = async (value) => {
     const target = tabs.some((tab) => tab.dataset.siTab === value) ? value : tabs[0].dataset.siTab;
+    if (state.settingsTab !== target && hasUnsavedChanges()) {
+      if (!await confirmDiscardChanges()) return false;
+      discardUnsavedChanges();
+    }
     state.settingsTab = target;
     tabs.forEach((tab) => {
       const active = tab.dataset.siTab === target;
@@ -594,10 +648,11 @@ function bindSettingsSubnav() {
     panels.forEach((panel) => {
       panel.hidden = panel.dataset.siPanel !== target;
     });
+    return true;
   };
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => activate(tab.dataset.siTab));
-    tab.addEventListener("keydown", (event) => {
+    tab.addEventListener("keydown", async (event) => {
       let next = index;
       if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
       else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
@@ -605,8 +660,7 @@ function bindSettingsSubnav() {
       else if (event.key === "End") next = tabs.length - 1;
       else return;
       event.preventDefault();
-      activate(tabs[next].dataset.siTab);
-      tabs[next].focus();
+      if (await activate(tabs[next].dataset.siTab)) tabs[next].focus();
     });
   });
   activate(state.settingsTab);
@@ -616,6 +670,7 @@ async function loadConfig() {
   const data = await apiGet("config");
   state.config = data;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  configFormBaseline = captureFormState(document.getElementById("config-form"));
   await loadWebUiAddress();
   try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("settings", error); }
 }
@@ -658,6 +713,7 @@ async function loadWebUiAddress() {
 }
 
 async function openStandaloneWebUi() {
+  if (hasUnsavedChanges() && !await confirmDiscardChanges()) return;
   // Reserve the popup synchronously while the click still counts as a user gesture.
   // AstrBot Plugin Page iframes currently lack allow-popups, so this may throw;
   // in that case we fall back to a visible, selectable address instead of prompt.
@@ -815,6 +871,7 @@ async function loadRule() {
   document.getElementById("check-only-note").hidden = rule.policy !== "check_only";
   const selected = new Set(rule.plugin_ids || []);
   document.getElementById("rule-plugins").innerHTML = (data.catalog || []).map((item) => `<label class="plugin-option"><input type="checkbox" value="${escapeHtml(item.plugin_id)}" ${selected.has(item.plugin_id) ? "checked" : ""}/><span><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code></span></label>`).join("") || `<span>${escapeHtml(t("empty"))}</span>`;
+  ruleFormBaseline = captureFormState(document.getElementById("rule-form"));
 }
 
 function setFormBusy(form, busy) {
@@ -1855,6 +1912,8 @@ async function retrySection(name, button = null) {
 
 async function refreshPage(button) {
   if (button.disabled) return;
+  if (hasUnsavedChanges() && !await confirmDiscardChanges()) return;
+  discardUnsavedChanges();
   const idleText = button.textContent;
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
@@ -1882,7 +1941,12 @@ async function refreshAll(includeDiagnostics = true) {
   if (failed) notify(`${t("loadFailed")}：${failed}`, true);
 }
 
-function activateTab(button, focus = false) {
+async function activateTab(button, focus = false) {
+  const current = document.querySelector(".tabs button[data-tab].active");
+  if (current && current !== button && hasUnsavedChanges()) {
+    if (!await confirmDiscardChanges()) return false;
+    discardUnsavedChanges();
+  }
   document.querySelectorAll("[data-tab]").forEach((tab) => {
     const active = tab === button;
     tab.classList.toggle("active", active);
@@ -1904,6 +1968,7 @@ function activateTab(button, focus = false) {
     loadDiagnostics(!state.diagnosticLoaded).catch((error) => renderSectionLoadError("diagnostics", error));
     startDiagnosticPolling();
   }
+  return true;
 }
 
 function showStartupError(error) {
@@ -1919,7 +1984,7 @@ function showStartupError(error) {
 function bindEvents() {
   const tabs = [...document.querySelectorAll("[data-tab]")];
   tabs.forEach((button) => button.addEventListener("click", () => activateTab(button)));
-  document.querySelector(".tabs").addEventListener("keydown", (event) => {
+  document.querySelector(".tabs").addEventListener("keydown", async (event) => {
     const current = tabs.indexOf(event.target.closest("[data-tab]"));
     if (current < 0) return;
     let next = null;
@@ -1929,7 +1994,7 @@ function bindEvents() {
     if (event.key === "End") next = tabs.length - 1;
     if (next === null) return;
     event.preventDefault();
-    activateTab(tabs[next], true);
+    await activateTab(tabs[next], true);
   });
   bindSettingsSubnav();
   const scopeSelect = document.getElementById("module-scope");
@@ -1956,6 +2021,10 @@ function bindEvents() {
     }
     const link = event.target.closest("a[data-external-url], a[data-internal-route]");
     if (!link || !document.contains(link)) return;
+    if (hasUnsavedChanges() && !await confirmDiscardChanges()) {
+      event.preventDefault();
+      return;
+    }
     const route = link.dataset.internalRoute || "";
     if (route) {
       // 没有导航 bridge 时保留 <a target="_top"> 的原生行为，
@@ -1979,7 +2048,10 @@ function bindEvents() {
   document.getElementById("open-webui-direct")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("copy-webui")?.addEventListener("click", copyStandaloneWebUiLink);
   document.getElementById("open-webui-config")?.addEventListener("click", openStandaloneWebUi);
-  document.getElementById("webui-open-frame")?.addEventListener("click", openStandaloneWebUiInFrame);
+  document.getElementById("webui-open-frame")?.addEventListener("click", async () => {
+    if (hasUnsavedChanges() && !await confirmDiscardChanges()) return;
+    openStandaloneWebUiInFrame();
+  });
   document.getElementById("webui-admins-refresh")?.addEventListener("click", () => loadWebUiAdmins().catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true)));
   document.getElementById("webui-admin-list")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-action]");
@@ -2039,11 +2111,11 @@ function bindEvents() {
   document.getElementById("diagnostic-export")?.addEventListener("click", exportDiagnostics);
   document.getElementById("overview-apply-all")?.addEventListener("click", () => document.getElementById("apply-all-recommendations")?.click());
   document.getElementById("overview-check-only")?.addEventListener("click", () => document.getElementById("check-latest")?.click());
-  document.getElementById("overview")?.addEventListener("click", (event) => {
+  document.getElementById("overview")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-overview-detail]");
     if (!button) return;
     event.preventDefault();
-    showOverviewModule(button.dataset.overviewDetail);
+    await showOverviewModule(button.dataset.overviewDetail);
   });
   document.getElementById("diagnostic-refresh").addEventListener("click", () => {
     loadDiagnostics(true).catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true));
@@ -2082,12 +2154,23 @@ function bindEvents() {
   });
   document.getElementById("refresh").addEventListener("click", (event) => refreshPage(event.currentTarget));
   document.getElementById("locale").addEventListener("change", async (event) => {
+    if (hasUnsavedChanges() && !await confirmDiscardChanges()) {
+      event.target.value = state.locale;
+      return;
+    }
+    discardUnsavedChanges();
     state.locale = event.target.value;
     storeLocale(state.locale);
     applyI18n();
     await refreshAll();
   });
 }
+
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 async function init() {
   bridge = await resolveBridge();

@@ -153,3 +153,81 @@ body[data-series-ui] .content .table-wrap {
   .diagnostic-filters .search { min-width:100%; }
   .diagnostic-log-list { max-height:58vh; }
 }
+
+/* 能力优先：一行状态条 + 能力行 + 状态点 + 能力详情 */
+.control-mode-line { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 16px; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--muted); font-size:12px; }
+.control-mode-line .muted { margin-left:auto; }
+.status-dot { width:9px; height:9px; border-radius:50%; background:#22c55e; flex:0 0 auto; }
+.status-dot.ok { background:#22c55e; }
+.status-dot.native { background:#94a3b8; }
+.status-dot.warn { background:#f59e0b; }
+.status-dot.mixed { background:#60a5fa; }
+.feature-domain-head .status-dot { margin-top:6px; }
+.capability-provider { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.capability-provider-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.capability-provider-head small { color:var(--muted); font-size:11px; }
+.capability-provider-head .btn { margin-left:auto; }
+#capability-detail .workspace-head, #capability-domain-detail .workspace-head { padding-bottom:12px; }
+
+
+/* 治理套件子页签（更新与回滚 / 系列推荐 / 每日规则 / 镜像加速） */
+.suite-tabs { margin-bottom: 16px; }
+
+/* 联动健康卡：状态点 + 摘要 chips + 链路表 */
+.link-health .link-health-summary { display:flex; gap:8px; flex-wrap:wrap; padding:2px 20px 14px; }
+.link-health .status-dot { margin-right:6px; vertical-align:middle; }
+
+/* 系列接管 D3.1：主从（左域 + 右能力网格，三行卡片） */
+.master-detail { display:grid; grid-template-columns:208px minmax(0,1fr); gap:12px; align-items:start; }
+.domain-list { display:grid; gap:4px; padding:6px; border:1px solid var(--line); border-radius:12px; background:#fff; position:sticky; top:12px; }
+.domain-item { display:grid; gap:2px; width:100%; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:#334155; text-align:left; }
+.domain-item:hover { background:#f6f8fd; }
+.domain-item.active { background:var(--si-primary-soft); }
+.domain-item.active b { color:var(--si-primary-strong); font-weight:700; }
+.domain-item .domain-top { display:grid; grid-template-columns:10px minmax(0,1fr) auto; gap:8px; align-items:center; font-size:13px; }
+.domain-item b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.domain-item i { font-style:normal; color:var(--si-muted); font-size:11px; }
+.domain-item small { padding-left:18px; color:#a3adc2; font-size:10.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.capability-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:8px 10px; }
+.capability-card { display:grid; gap:3px; width:100%; min-height:76px; padding:9px 11px; border:1px solid var(--line); border-radius:10px; background:var(--si-surface, #fff); text-align:left; align-content:space-between; }
+.capability-card:hover { border-color:#c7d2fe; background:#fbfdff; box-shadow:0 6px 18px rgba(79,70,229,.08); }
+.capability-card:disabled { opacity:.7; cursor:not-allowed; }
+.cap-card-top { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; align-items:center; }
+.cap-card-top b { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cap-card-top em { font-style:normal; font-size:11px; font-weight:700; color:var(--si-primary-strong); white-space:nowrap; }
+.cap-badge { padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; white-space:nowrap; }
+.cap-badge.ok { background:#e8f7ee; color:#1a7f4b; }
+.cap-badge.mixed { background:#e8f0ff; color:#2559c9; }
+.cap-badge.warn { background:#fff4e2; color:#b45309; }
+.cap-badge.native { background:#eef1f6; color:#5b6478; }
+.cap-card-desc { font-size:12.5px; color:#5b6478; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cap-card-meta { font-size:11.5px; color:#7b8798; }
+.control-mode-line .pending { color:#b45309; font-weight:700; }
+.status-legend { display:flex; gap:10px; align-items:center; color:var(--si-muted); font-size:11px; }
+.status-legend .status-dot { margin-right:3px; }
+@media (max-width:1120px) {
+  .master-detail { grid-template-columns:1fr; }
+  .domain-list { position:sticky; top:0; z-index:3; display:flex; gap:6px; overflow-x:auto; padding:6px; background:#f7f9ff; }
+  .domain-item { flex:0 0 auto; min-height:40px; width:auto; padding:7px 11px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  .domain-item small { display:none; }
+  .domain-item.active { border-color:#cfcaff; }
+  .domain-item.active small { display:block; }
+  .capability-grid { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
+}
+@media (max-width:620px) {
+  .capability-grid { grid-template-columns:1fr; }
+  .capability-card { min-height:88px; }
+  .cap-card-desc { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .status-legend { display:none; }
+}
+
+.domain-item .domain-state { font-style:normal; font-weight:600; color:#8492a6; }
+.domain-item .domain-state.ok { color:#16a34a; }
+.domain-item .domain-state.mixed { color:#2563eb; }
+.domain-item .domain-state.warn { color:#b45309; }
+.capability-column { display:grid; gap:8px; }
+.capability-head { display:flex; align-items:center; gap:10px; padding:2px 4px; }
+.capability-head b { font-size:14px; }
+.capability-head span { color:var(--si-muted); font-size:11.5px; }
+.capability-head .sort-tag { margin-left:auto; color:var(--si-primary-strong); font-weight:700; }
+@media (max-width:1120px) { .capability-head { padding:2px 0; } }

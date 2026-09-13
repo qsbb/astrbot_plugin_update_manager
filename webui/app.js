@@ -18,6 +18,7 @@ let state = {
   takeoverDisabled: false,
   panelStream: null,
   logs: [],
+  linkHealth: null,
   logMembers: [],
   logLevel: "",
   logAuto: false,
@@ -49,18 +50,50 @@ let state = {
   selectedModule: "",
 };
 const app = document.getElementById("app");
-const NAV_ITEMS = [
-  ["modules", "▦", "模块总览"],
-  ["control", "◈", "系列接管"],
-  ["recommendations", "＋", "系列推荐"],
-  ["rules", "▤", "每日规则"],
-  ["mirrors", "⇄", "镜像加速"],
-  ["diagnostics", "⌁", "运行诊断"],
-  ["updates", "↻", "更新与回滚"],
-  ["settings", "⚙", "全局设置"],
-  ["security", "◇", "安全与账户"],
+// 视图注册表：单一事实源（导航/标题/渲染/进入逻辑都由它驱动）。
+// 一级分类 = 控制中心真正要做的五件事：
+//   总览（看状态） · 系列接管（管功能） · 更新与安装（管版本） · 诊断与日志（排障） · 设置与安全（管系统）
+// 更新与安装、设置与安全是"套件"：一级只出现一次，内部用子页签切换。
+const NAV_GROUPS = [
+  ["workbench", "工作台"],
+  ["operations", "运维"],
 ];
+const VIEWS = {
+  modules: { icon: "▦", label: "总览", group: "workbench" },
+  control: { icon: "◈", label: "系列接管", group: "workbench" },
+  updates: { icon: "↻", label: "更新与安装", tabLabel: "更新与回滚", group: "operations", suite: ["updates", "recommendations", "rules", "mirrors"] },
+  recommendations: { icon: "＋", label: "系列推荐", group: "operations", inSuite: "updates" },
+  rules: { icon: "▤", label: "每日规则", group: "operations", inSuite: "updates" },
+  mirrors: { icon: "⇄", label: "镜像加速", group: "operations", inSuite: "updates" },
+  diagnostics: { icon: "⌁", label: "诊断与日志", group: "operations" },
+  settings: { icon: "⚙", label: "设置与安全", group: "operations" },
+  security: { icon: "◇", label: "账户与安全", group: "operations", hidden: true },
+};
+// 兼容既有代码/测试的元组形态：[view, icon, label, group, inSuite, suite]
+const NAV_ITEMS = Object.entries(VIEWS).map(([view, meta]) => [
+  view,
+  meta.icon,
+  meta.label,
+  meta.group || "",
+  meta.inSuite || "",
+  Array.isArray(meta.suite) ? meta.suite : null,
+]);
 const VIEW_TITLES = Object.fromEntries(NAV_ITEMS.map(([view, , label]) => [view, label]));
+function railItemsForGroup(groupId) {
+  return NAV_ITEMS.filter(([view, , , group, inSuite]) => group === groupId && !inSuite && !VIEWS[view]?.hidden);
+}
+function suiteTabStrip(suiteId) {
+  const head = NAV_ITEMS.find(([view]) => view === suiteId);
+  if (!head || !Array.isArray(head[5])) return "";
+  const buttons = head[5].map(id => {
+    const item = NAV_ITEMS.find(([view]) => view === id);
+    if (!item) return "";
+    const active = state.view === id;
+    const label = id === suiteId && VIEWS[id]?.tabLabel ? VIEWS[id].tabLabel : item[2];
+    return `<button class="${active ? "active" : ""}" role="tab" aria-selected="${active}" data-view="${id}">${esc(label)}</button>`;
+  }).join("");
+  return `<div class="tab-strip suite-tabs" role="tablist">${buttons}</div>`;
+}
 
 const notify = (message, error = false) => {
   if (window.SeriesUI?.toast) {
@@ -296,6 +329,26 @@ function problemSuggestion(item) {
   return "展开事件详情查看同模块上下文后，再决定是否重试。";
 }
 
+function linkStateLabel(state) {
+  return ({ ready: "正常", degraded: "降级", unavailable: "不可用", disabled: "已关闭", stale: "数据陈旧", unknown: "未知" })[String(state || "")] || "未知";
+}
+function linkStateClass(state) {
+  return ({ ready: "ok", degraded: "warn", unavailable: "warn", disabled: "native", stale: "mixed", unknown: "native" })[String(state || "")] || "native";
+}
+function linkHealthCard() {
+  const health = state.linkHealth;
+  if (!health || !Array.isArray(health.links)) return "";
+  const summary = health.summary || {};
+  const links = health.links;
+  const chips = [["ready", "正常", "native"], ["degraded", "降级", "warn"], ["unavailable", "不可用", "managed"], ["stale", "陈旧", "warn"], ["unknown", "未知", ""]]
+    .filter(([key]) => summary[key])
+    .map(([key, label, cls]) => `<span class="pill ${cls}">${label} ${summary[key]}</span>`)
+    .join("");
+  const rows = links.length
+    ? links.map(link => `<tr><td>${esc(link.plugin_name || link.plugin_id)}</td><td><code>${esc(link.link_id)}</code></td><td><span class="status-dot ${linkStateClass(link.state)}"></span>${esc(linkStateLabel(link.state))}</td><td>${esc(link.reason_code || "—")}</td><td>${esc(link.peer_plugin_id || "—")}</td><td>${esc(link.contract ? `${link.contract}@${link.contract_version || "?"}` : "—")}</td><td>${esc(link.fallback || "—")}</td><td>${link.last_success_at ? esc(relativeTime(link.last_success_at)) : "—"}</td></tr>`).join("")
+    : `<tr><td colspan="8">暂无联动链路状态：成员需声明 series.diagnostics@1.1 的 read_state 能力并记录链路。</td></tr>`;
+  return `<section class="workspace link-health"><div class="workspace-head"><div class="section-title"><h2>联动健康</h2><span>${links.length} 条链路${health.observed_at ? ` · ${esc(relativeTime(health.observed_at))}` : ""}</span></div></div><div class="link-health-summary">${chips || `<span class="pill">暂无数据</span>`}</div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>链路</th><th>状态</th><th>原因</th><th>对端</th><th>契约</th><th>回退</th><th>最近成功</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
 function diagnosticsView() {
   const problems = diagnosticProblems();
   const memberTotal = (state.logMembers || []).length;
@@ -318,7 +371,7 @@ function diagnosticsView() {
   const selectedModules = modules.map(([id, name]) => `<button class="filter-chip ${state.logModules.includes(id) ? "active" : ""}" data-log-module="${esc(id)}">${esc(name)}</button>`).join("");
   const cursorLabel = state.logPaused ? "已暂停" : state.logCatchUp ? "追平中" : "增量游标";
   const canClear = state.session?.role === "owner" || state.session?.role === "admin";
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行日志</h1><p>先看问题聚合，再展开事件流与上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><span class="pill" id="log-cursor">${cursorLabel}</span><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="log-pause">${state.logPaused ? "继续" : "暂停"}</button><button class="btn" id="log-autoscroll" aria-pressed="${state.logAutoScroll}">自动滚动${state.logAutoScroll ? " ✓" : ""}</button><button class="btn" id="log-export">导出</button><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${canClear ? "" : "disabled"}>清空</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>待处理问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span id="log-summary">显示最近 ${events.length} 条 · 缓存 ${state.logs.length}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list" id="diagnostic-log-list">${eventCards}</div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行日志</h1><p>先看问题聚合，再展开事件流与上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><span class="pill" id="log-cursor">${cursorLabel}</span><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="log-pause">${state.logPaused ? "继续" : "暂停"}</button><button class="btn" id="log-autoscroll" aria-pressed="${state.logAutoScroll}">自动滚动${state.logAutoScroll ? " ✓" : ""}</button><button class="btn" id="log-export">导出</button><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${canClear ? "" : "disabled"}>清空</button></div></div>${linkHealthCard()}<section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>待处理问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span id="log-summary">显示最近 ${events.length} 条 · 缓存 ${state.logs.length}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list" id="diagnostic-log-list">${eventCards}</div></section>`;
 }
 
 function updatesView() {
@@ -376,78 +429,70 @@ function settingsView() {
     const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生模型服务</span></div></div><div class="route-note">模型服务商与模型来自 AstrBot 当前已加载配置；无法枚举模型的服务商保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生模型服务</span></div></div><div class="route-note">模型服务商与模型来自 AstrBot 当前已加载配置；无法枚举模型的服务商保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
 }
-const FEATURE_DOMAINS = [
-  {
-    id: "message",
-    title: "对话与消息",
-    icon: "言",
-    description: "沉默、分段、防抖、插话、上下文承接与回复交付。",
-    features: ["沉默判断", "智能分段", "运行中插话", "话题承接", "上下文预算", "群聊语境"],
-    actions: [{ kind: "plugin", label: "管理对话策略", plugin_id: "astrbot_plugin_conversation_flow" }],
-  },
-  {
-    id: "identity",
-    title: "身份与权限",
-    icon: "序",
-    description: "身份识别、私聊授权、群管理边界与入群审核。",
-    features: ["身份识别", "行动授权", "群管理", "入群审核", "权限否决"],
-    actions: [{ kind: "plugin", label: "管理身份权限", plugin_id: "astrbot_plugin_identity_guardian" }],
-  },
-  {
-    id: "relationship",
-    title: "关系与情绪",
-    icon: "情",
-    description: "好感、信任、熟悉度、关系性质与表达建议。",
-    features: ["好感度", "四维信任", "熟悉度", "关系性质", "情绪建议", "账号归属"],
-    actions: [{ kind: "plugin", label: "管理关系状态", plugin_id: "astrbot_plugin_relationship" }],
-  },
-  {
-    id: "knowledge",
-    title: "知识与记忆",
-    icon: "知",
-    description: "知识检索、交叉验证、知识图谱、记忆生命周期与导入导出。",
-    features: ["知识检索", "交叉验证", "知识图谱", "记忆管理", "导入导出"],
-    actions: [{ kind: "plugin", label: "管理知识记忆", plugin_id: "astrbot_plugin_active_learner" }],
-  },
-  {
-    id: "environment",
-    title: "环境与时间",
-    icon: "境",
-    description: "时间、天气、空气质量、日历、预警和主动环境关心。",
-    features: ["时间", "天气", "空气质量", "日历", "预警", "主动关心"],
-    actions: [{ kind: "plugin", label: "管理环境感知", plugin_id: "astrbot_plugin_environment_awareness" }],
-  },
-  {
-    id: "voice",
-    title: "语音与表达",
-    icon: "声",
-    description: "语音合成、音色、情绪映射、语音导演与音频交付。",
-    features: ["语音合成", "音色管理", "情绪映射", "语音导演", "音频试听"],
-    actions: [{ kind: "plugin", label: "管理语音表达", plugin_id: "astrbot_plugin_voice_hub" }],
-  },
-  {
-    id: "embodiment",
-    title: "具身与设备",
-    icon: "临",
-    description: "设备配对、会话桥接、角色动作与具身诊断。",
-    features: ["设备配对", "会话桥接", "角色动作", "人格模式", "实时诊断"],
-    actions: [{ kind: "plugin", label: "管理具身设备", plugin_id: "astrbot_plugin_embodiment_bridge" }],
-  },
-  {
-    id: "governance",
-    title: "更新与治理",
-    icon: "核",
-    description: "更新规则、镜像、推荐、回滚、模型角色与全局设置。",
-    features: ["每日规则", "镜像加速", "系列推荐", "更新回滚", "模型角色", "全局设置"],
-    actions: [
-      { kind: "view", label: "每日规则", view: "rules" },
-      { kind: "view", label: "镜像加速", view: "mirrors" },
-      { kind: "view", label: "全局设置", view: "settings" },
-    ],
-  },
-];
+function controlCatalog() {
+  const catalog = state.control?.capabilities;
+  if (!catalog || !Array.isArray(catalog.domains) || !Array.isArray(catalog.capabilities)) return { domains: [], capabilities: [] };
+  return catalog;
+}
+function catalogCapabilities() { return controlCatalog().capabilities || []; }
+function capabilitiesOfDomain(domainId) { return catalogCapabilities().filter(cap => cap.domain === domainId); }
+function capabilityById(id) { return catalogCapabilities().find(cap => cap.id === id) || null; }
+function controlMember(pluginId) { return (state.control?.members || []).find(item => item.plugin_id === pluginId) || null; }
+function memberDisplayName(pluginId) { return controlMember(pluginId)?.display_name || pluginId; }
+function capabilityBadge(status) {
+  return ({
+    "统一接管": "正常",
+    "核内置": "核自带",
+    "独立配置": "独立配置",
+    "部分独立配置": "部分独立",
+    "部分不可用": "不可用",
+    "部分接管": "部分接管",
+  })[status?.label] || (status?.label || "未知");
+}
+function capabilityMetaText(capability) {
+  const providers = capability.providers || [];
+  const views = capability.views || [];
+  const fieldCount = providers.reduce((sum, provider) => sum + (provider.fields || []).length, 0);
+  if (!providers.length) return views.length ? "核自带" : "暂无可用入口";
+  if (providers.length === 1) return fieldCount ? `${fieldCount} 项可调` : "在模块里设置";
+  return `${providers.length} 个模块共同提供` + (fieldCount ? ` · ${fieldCount} 项可调` : " · 在模块里设置");
+}
+function capabilityAction(capability) {
+  if ((capability.providers || []).length) return "设置 ›";
+  if ((capability.views || []).length) return "打开 ›";
+  return "暂无入口";
+}
+function capabilityNeedsAttention(capability) {
+  return capabilityStatus(capability).cls !== "ok";
+}
+function sortCapabilities(capabilities) {
+  const rank = { warn: 0, mixed: 1, native: 2, ok: 3 };
+  return [...capabilities].sort((left, right) => {
+    const delta = (rank[capabilityStatus(left).cls] ?? 9) - (rank[capabilityStatus(right).cls] ?? 9);
+    if (delta) return delta;
+    return String(left.title || "").localeCompare(String(right.title || ""), "zh-Hans-CN");
+  });
+}
+function capabilityStatus(capability) {
+  const ids = (capability.providers || []).map(provider => provider.plugin_id);
+  if (!ids.length) return { label: "核内置", cls: "ok" };
+  const statuses = ids.map(id => controlMember(id)?.status || "not_loaded");
+  if (statuses.every(status => status === "managed")) return { label: "统一接管", cls: "ok" };
+  if (statuses.every(status => status === "native")) return { label: "独立配置", cls: "native" };
+  if (statuses.some(status => status === "not_loaded")) return { label: "部分不可用", cls: "warn" };
+  if (statuses.some(status => status === "native")) return { label: "部分独立配置", cls: "mixed" };
+  return { label: "部分接管", cls: "mixed" };
+}
+function domainStatus(capabilities) {
+  const labels = capabilities.map(cap => capabilityStatus(cap).label);
+  if (!labels.length) return { label: "无能力", cls: "native" };
+  if (labels.every(label => label === "统一接管" || label === "核内置")) return { label: "统一接管", cls: "ok" };
+  if (labels.every(label => label === "独立配置")) return { label: "独立配置", cls: "native" };
+  if (labels.some(label => label === "部分不可用")) return { label: "部分不可用", cls: "warn" };
+  return { label: "部分独立配置", cls: "mixed" };
+}
 
 function controlStatusLabel(member, domainId = "") {
   if (domainId === "governance") return "核内置";
@@ -469,28 +514,83 @@ function controlReasonLabel(reason) {
 
 function controlView() {
   const control = state.control || { mode: "native", members: [], revision: 0 };
-  const members = new Map((control.members || []).map(item => [item.plugin_id, item]));
-  const cards = FEATURE_DOMAINS.map(domain => {
-    const pluginAction = domain.actions.find(action => action.kind === "plugin");
-    const member = pluginAction ? members.get(pluginAction.plugin_id) : null;
-    const status = controlStatusLabel(member, domain.id);
-    const statusClass = status === "统一接管" ? "" : status === "独立配置" ? "native" : "warn";
-    const available = Boolean(member && member.status !== "not_loaded");
-    const buttons = domain.actions.map(action => action.kind === "view"
-      ? `<button class="btn" data-domain-view="${esc(action.view)}">${esc(action.label)}</button>`
-      : `<button class="btn primary" data-control-plugin="${esc(action.plugin_id)}" ${available ? "" : "disabled"}>${esc(action.label)}</button>`
-    ).join("");
-    const features = domain.features.map(feature => `<span class="pill">${esc(feature)}</span>`).join("");
-    return `<article class="workspace feature-domain" data-feature-domain="${esc(domain.id)}"><div class="feature-domain-head"><span class="feature-domain-icon">${esc(domain.icon)}</span><div><h2>${esc(domain.title)}</h2><p>${esc(domain.description)}</p></div><span class="pill ${statusClass}">${esc(status)}</span></div><div class="feature-domain-tags">${features}</div><div class="feature-domain-foot"><small>${member?.reason ? `状态：${esc(controlReasonLabel(member.reason))}` : "功能按领域统一归口，不展示模块身份细节。"}</small><div class="actions">${buttons}</div></div></article>`;
-  }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>功能按使用场景分类统一管理；关闭接管后各模块恢复独立配置。高级更新与生命周期操作仍在对应功能域内。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前接管模式</h2><span>版本号 ${esc(control.revision)}</span></div></div><div class="control-mode-summary"><div><span>运行模式</span><strong>${control.mode === "managed" ? "统一接管" : "独立配置"}</strong></div><div><span>功能域</span><strong>${FEATURE_DOMAINS.length}</strong></div><div><span>已接管</span><strong>${[...members.values()].filter(item => item.status === "managed").length}</strong></div><div><span>待检查</span><strong>${[...members.values()].filter(item => !["managed", "native"].includes(item.status)).length}</strong></div></div></section><section class="feature-domain-grid">${cards}</section>${controlDetail()}`;
+  const catalog = controlCatalog();
+  const capabilities = catalog.capabilities || [];
+  const attention = capabilities.filter(capabilityNeedsAttention).length;
+  const modeLabel = control.mode === "managed" ? "统一接管" : "独立配置";
+  const legend = `<span class="status-legend"><span><i class="status-dot ok"></i>正常</span><span><i class="status-dot mixed"></i>部分独立</span><span><i class="status-dot warn"></i>不可用</span><span><i class="status-dot native"></i>独立配置</span></span>`;
+  const modeLine = `<div class="control-mode-line"><span class="pill ${control.mode === "managed" ? "" : "native"}">${modeLabel}</span><span>${catalog.domains.length} 个功能域</span><span>${capabilities.length} 项能力</span>${attention ? `<span class="pending">待处理 ${attention}</span>` : ""}${legend}<span class="muted">版本号 ${esc(control.revision)}</span></div>`;
+  const detail = state.selectedControlPlugin ? controlDetail() : (state.selectedCapability ? capabilityDetail() : "");
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>按功能分类管理：左边选功能域，右边点能力卡片直接调整；模块身份只在模块详情与排障中出现。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div>${modeLine}${detail || masterDetail()}`;
 }
+function masterDetail() {
+  const catalog = controlCatalog();
+  const domains = catalog.domains || [];
+  if (!domains.length) return `<p class="empty-cell">能力目录未加载：请刷新或检查核版本。</p>`;
+  const active = domains.find(item => item.id === state.selectedDomain) || domains[0];
+  const domainCapabilities = sortCapabilities(capabilitiesOfDomain(active.id));
+  const items = domains.map(domain => domainItem(domain, domain.id === active.id)).join("");
+  const cards = domainCapabilities.map(capabilityCard).join("") || `<p class="empty-cell">该功能域暂无能力。</p>`;
+  const attention = domainCapabilities.filter(capabilityNeedsAttention).length;
+  const head = `<div class="capability-head"><b>${esc(active.title)}</b><span>${domainCapabilities.length} 项能力${attention ? ` · ${attention} 项待处理` : ""}</span><span class="sort-tag" title="异常项排在前面">异常优先 ▾</span></div>`;
+  return `<div class="master-detail"><div class="domain-list" role="tablist" aria-label="功能域">${items}</div><div class="capability-column">${head}<div class="capability-grid" role="list" aria-label="${esc(active.title)}能力">${cards}</div></div></div>`;
+}
+function domainItem(domain, active) {
+  const capabilities = capabilitiesOfDomain(domain.id);
+  const status = domainStatus(capabilities);
+  const attention = capabilities.filter(capabilityNeedsAttention).length;
+  const preview = capabilities.slice(0, 2).map(item => item.title).join(" · ");
+  const stateText = attention ? `${attention} 项待处理` : status.label;
+  return `<button class="domain-item ${active ? "active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" data-catalog-domain-open="${esc(domain.id)}"><span class="domain-top"><span class="status-dot ${status.cls}" title="${esc(status.label)}"></span><b>${esc(domain.title)}</b><i>${capabilities.length}</i></span><small><em class="domain-state ${status.cls}">${esc(stateText)}</em> · ${esc(preview)}${capabilities.length > 2 ? " …" : ""}</small></button>`;
+}
+function capabilityCard(capability) {
+  const status = capabilityStatus(capability);
+  const providers = capability.providers || [];
+  const views = capability.views || [];
+  const disabled = !providers.length && !views.length;
+  return `<button class="capability-card" role="listitem" data-capability-open="${esc(capability.id)}" ${disabled ? "disabled" : ""}><span class="cap-card-top"><span class="cap-badge ${status.cls}">${esc(capabilityBadge(status))}</span><b>${esc(capability.title)}</b><em>${esc(capabilityAction(capability))}</em></span><small class="cap-card-desc">${esc(capability.description)}</small><small class="cap-card-meta">${esc(capabilityMetaText(capability))}</small></button>`;
+}
+
+function capabilityDetail() {
+  const capability = capabilityById(state.selectedCapability);
+  if (!capability) return "";
+  const providers = capability.providers || [];
+  const sections = providers.map(provider => {
+    const data = (state.capabilityData || {})[provider.plugin_id] || {};
+    const head = `<div class="capability-provider-head"><strong>${esc(memberDisplayName(provider.plugin_id))}</strong>${provider.hint ? `<small>${esc(provider.hint)}</small>` : ""}<button class="btn" data-control-open="${esc(provider.plugin_id)}">模块详情</button></div>`;
+    if (data.error) return `<div class="capability-provider" data-capability-provider="${esc(provider.plugin_id)}">${head}<p class="empty-cell">读取失败：${esc(data.error)}</p></div>`;
+    if (!data.schema) return `<div class="capability-provider" data-capability-provider="${esc(provider.plugin_id)}">${head}<p class="empty-cell">该模块未提供统一接管，请使用模块详情或插件页。</p></div>`;
+    const body = controlFieldsTab(data.schema, data.snapshot, { fields: provider.fields || [], capabilityTitle: capability.title });
+    return `<div class="capability-provider" data-capability-provider="${esc(provider.plugin_id)}">${head}${body}</div>`;
+  }).join("");
+  return `<section class="workspace" id="capability-detail"><div class="workspace-head"><div class="section-title"><h2>${esc(capability.title)}</h2><span>${esc(capability.description)}</span></div><button class="btn" data-capability-back>返回能力列表</button></div>${sections || `<p class="empty-cell">该能力由核内置提供，请使用对应治理视图。</p>`}</section>`;
+}
+async function loadCapability(capabilityId) {
+  const capability = capabilityById(capabilityId);
+  if (!capability) return;
+  state.selectedCapability = capabilityId;
+  state.selectedControlPlugin = "";
+  state.capabilityData = {};
+  await Promise.all((capability.providers || []).map(async provider => {
+    try {
+      const [schema, snapshot] = await Promise.all([
+        get(`series/${encodeURIComponent(provider.plugin_id)}/control/schema`),
+        get(`series/${encodeURIComponent(provider.plugin_id)}/control/snapshot`)
+      ]);
+      state.capabilityData[provider.plugin_id] = { schema, snapshot };
+    } catch (error) {
+      state.capabilityData[provider.plugin_id] = { error: error.message };
+    }
+  }));
+  state.view = "control";
+  dashboard();
+}
+
 function controlDetail() {
   if (!state.selectedControlPlugin) return "";
   const schema = state.controlSchema;
   const pluginId = schema?.plugin_id || state.selectedControlPlugin;
-  const member = (state.control?.members || []).find(item => item.plugin_id === pluginId);
-  const displayName = member?.display_name || pluginId;
+  const displayName = memberDisplayName(pluginId);
   const snapshot = state.controlSnapshot || { snapshot: { fields: {} } };
   const tabs = [["fields", "字段接管"], ["panels", "插件面板"], ["lifecycle", "生命周期"]];
   const strip = `<div class="tab-strip">${tabs.map(([id, label]) => `<button class="${state.controlTab === id ? "active" : ""}" data-control-tab="${id}">${label}</button>`).join("")}</div>`;
@@ -498,20 +598,27 @@ function controlDetail() {
   if (state.controlTab === "panels") body = controlPanelsTab();
   else if (state.controlTab === "lifecycle") body = controlLifecycleTab();
   else body = controlFieldsTab(schema, snapshot);
-  const domain = FEATURE_DOMAINS.find(item => item.actions.some(action => action.kind === "plugin" && action.plugin_id === pluginId));
-  const title = domain?.title || "功能控制";
-  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(title)}</h2><span>版本号 ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回功能域</button></div>${strip}<div class="control-body">${body}</div></section>`;
+  const backLabel = state.selectedCapability ? "返回能力" : "返回";
+  return `<section class="workspace" id="module-control-detail"><div class="workspace-head"><div class="section-title"><h2>${esc(displayName)}</h2><span>模块详情 · 版本号 ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">${backLabel}</button></div>${strip}<div class="control-body">${body}</div></section>`;
 }
-function controlFieldsTab(schema, snapshot) {
-  const fields = schema?.schema?.fields || {};
+function controlFieldsTab(schema, snapshot, opts) {
+  const options = opts || {};
+  const allFields = schema?.schema?.fields || {};
   const values = snapshot?.snapshot?.fields || {};
   const managed = schema?.mode === "managed";
   const canWrite = (state.session?.role === "owner" || state.session?.role === "admin") && managed;
-  const rowsHtml = Object.entries(fields).map(([name, def]) => {
+  const pluginId = schema?.plugin_id || "";
+  const filter = Array.isArray(options.fields) ? new Set(options.fields.map(String)) : null;
+  const filtered = filter ? Object.entries(allFields).filter(([name]) => filter.has(name)) : Object.entries(allFields);
+  const missing = filter ? [...filter].filter(name => !(name in allFields)) : [];
+  const emptyText = filter
+    ? `该能力在当前模块没有可接管字段${options.capabilityTitle ? `（${esc(options.capabilityTitle)}）` : ""}，请到插件页设置中心调整。`
+    : "该插件未声明可管理字段。";
+  const rowsHtml = filtered.map(([name, def]) => {
     const value = values[name] || {};
     const current = value.effective_value ?? def.default ?? "";
-    const managed = !!value.managed_configured;
-    const source = managed ? `<span class="pill managed">核覆盖</span>` : `<span class="pill native">插件</span>`;
+    const isManaged = !!value.managed_configured;
+    const source = isManaged ? `<span class="pill managed">核覆盖</span>` : `<span class="pill native">插件</span>`;
     let input = "";
     if (def.secret) input = `<input type="password" data-control-field="${esc(name)}" placeholder="${current ? "已配置（不回显）" : "未配置"}" ${canWrite ? "" : "disabled"}>`;
     else if (def.type === "bool") input = `<label class="switch"><input type="checkbox" data-control-field="${esc(name)}" ${current === true ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用</span></label>`;
@@ -522,14 +629,21 @@ function controlFieldsTab(schema, snapshot) {
     const ctrlHint = fieldHint(name, def);
     const ctrlHintHtml = `<small class="field-hint row-hint">${ctrlHint && ctrlHint !== ctrlLabel ? esc(ctrlHint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(name)}"><label><strong>${esc(ctrlLabel)}</strong><small>${esc(typeLabel(def.type))}</small></label><div class="form-input">${input}</div><div class="form-meta">${source}${note}</div>${ctrlHintHtml}</div>`;
-  }).join("") || `<p class="empty-cell">该插件未声明可管理字段。</p>`;
+  }).join("") || `<p class="empty-cell">${emptyText}</p>`;
+  const missingHint = missing.length
+    ? `<p class="form-hint">以下字段在当前版本不存在：${missing.map(esc).join("、")}</p>`
+    : "";
+  const scopeHint = options.capabilityTitle
+    ? `<div class="form-hint">正在编辑能力「${esc(options.capabilityTitle)}」，仅显示该能力的字段。</div>`
+    : "";
   const hint = !managed
     ? "统一接管未启用：字段以插件 native 配置为准，开启统一接管后才能在此修改。"
     : canWrite
       ? "修改后点击「应用修改」：先校验再写入覆盖层，带并发保护。"
       : "当前角色为 viewer，仅可查看字段。";
-  return `<div class="form-hint">${hint}</div><div class="form-grid">${rowsHtml}</div><div class="form-actions"><button class="btn primary" id="control-apply" ${canWrite ? "" : "disabled"}>应用修改</button><button class="btn" id="control-reset" ${canWrite ? "" : "disabled"}>重置全部覆盖</button><button class="btn" id="control-refresh-fields">刷新字段</button></div>`;
+  return `<div class="form-hint">${hint}</div>${scopeHint}${missingHint}<div class="form-grid">${rowsHtml}</div><div class="form-actions"><button class="btn primary" data-control-apply="${esc(pluginId)}" ${canWrite ? "" : "disabled"}>应用修改</button><button class="btn" data-control-reset="${esc(pluginId)}" ${canWrite ? "" : "disabled"}>重置全部覆盖</button><button class="btn" data-control-refresh="${esc(pluginId)}">刷新字段</button></div>`;
 }
+
 function controlPanelsTab() {
   const pluginId = state.selectedControlPlugin;
   if (state.takeoverDisabled) return `<p class="empty-cell">统一接管未启用：managed 面板已关闭，请使用该插件的独立 Page。</p><p class="form-hint">开启“统一接管”后，核会重新加载该模块面板。</p>`;
@@ -623,19 +737,49 @@ function recommendationsView() {
   }).join("");
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 全系列</div><h1>系列推荐</h1><p>固定可信清单的安装与版本状态；批量操作串行执行，核自身不会自更新。</p></div><div class="actions"><button class="btn primary" id="check-recommendations" ${canCheck ? "" : "disabled"}>检查最新版本</button><button class="btn danger" id="apply-recommendations" ${canApply ? "" : "disabled"}>一键安装/更新</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>可信模块</h2><span>${data.items?.length || 0} 个模块</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>状态与目标版本</th><th>当前版本</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="empty-cell">暂无模块。</td></tr>`}</tbody></table></div><div class="footer"><span>普通更新只在远端版本更高时执行。</span><span>${data.rate_limit ? `GitHub 剩余 ${esc(data.rate_limit.remaining ?? "?")}` : "未读取限流状态"}</span></div></section>`;
 }
-function securityView() {
+function securityPanel() {
   const data = state.adminsData;
   const canManage = state.session?.role === "owner";
   const admins = data?.admins || [];
   const rows = admins.map(item => `<article class="account-card" data-admin-card="${esc(item.id)}"><header class="account-card-head"><div><b>${esc(item.username)}</b><small>${esc(item.id)}</small></div><span class="pill ${item.enabled ? "native" : "warn"}">${item.enabled ? "启用" : "禁用"}</span></header><div class="account-card-grid"><label class="account-card-field"><span>角色</span><select data-admin-role="${esc(item.id)}" ${canManage ? "" : "disabled"}>${[["owner", "所有者"], ["admin", "管理员"], ["viewer", "只读"]].map(([role, label]) => `<option value="${role}" ${item.role === role ? "selected" : ""}>${label}</option>`).join("")}</select></label><label class="account-card-field"><span>状态</span><span class="switch"><input type="checkbox" data-admin-enabled="${esc(item.id)}" ${item.enabled ? "checked" : ""} ${canManage ? "" : "disabled"} /><span>${item.enabled ? "启用" : "禁用"}</span></span></label><label class="account-card-field"><span>重置密码</span><input type="password" data-admin-password="${esc(item.id)}" placeholder="留空不改密码" ${canManage ? "" : "disabled"} /></label></div><div class="account-card-actions"><button class="btn primary" data-admin-update="${esc(item.id)}" ${canManage ? "" : "disabled"}>保存这个账户</button></div></article>`).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；密码只保存 PBKDF2 派生值，浏览器不持久化令牌。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前会话</h2><span>服务端 Cookie · 8 小时空闲 / 24 小时绝对过期</span></div></div><div class="detail-grid account-grid"><div><span>用户名</span><strong>${esc(state.session?.username || "管理员")}</strong></div><div><span>角色</span><strong>${esc(state.session?.role || "admin")}</strong></div><div><span>会话状态</span><strong>已认证</strong></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>管理员账户</h2><span>${canManage ? `${admins.length} 个账户` : "仅 owner 可管理账户"}</span></div></div><div class="account-card-list">${rows || `<p class="empty-cell">加载中或暂无账户。</p>`}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>新建管理员</h2><span>至少 8 位密码；用户名不可包含空格</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：username"><strong>用户名</strong><small>登录名</small></label><div class="form-input"><input id="admin-new-username" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：password"><strong>初始密码</strong><small>至少 8 位</small></label><div class="form-input"><input id="admin-new-password" type="password" minlength="8" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：role"><strong>角色</strong><small>最小权限优先</small></label><div class="form-input"><select id="admin-new-role" ${canManage ? "" : "disabled"}><option value="viewer">只读</option><option value="admin">管理员</option><option value="owner">所有者</option></select></div><div class="form-meta"><button class="btn primary" id="admin-create" ${canManage ? "" : "disabled"}>创建</button></div></div></div></section>`;
+  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前会话</h2><span>服务端 Cookie · 8 小时空闲 / 24 小时绝对过期</span></div></div><div class="detail-grid account-grid"><div><span>用户名</span><strong>${esc(state.session?.username || "管理员")}</strong></div><div><span>角色</span><strong>${esc(state.session?.role || "admin")}</strong></div><div><span>会话状态</span><strong>已认证</strong></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>管理员账户</h2><span>${canManage ? `${admins.length} 个账户` : "仅 owner 可管理账户"}</span></div></div><div class="account-card-list">${rows || `<p class="empty-cell">加载中或暂无账户。</p>`}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>新建管理员</h2><span>至少 8 位密码；用户名不可包含空格</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：username"><strong>用户名</strong><small>登录名</small></label><div class="form-input"><input id="admin-new-username" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：password"><strong>初始密码</strong><small>至少 8 位</small></label><div class="form-input"><input id="admin-new-password" type="password" minlength="8" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：role"><strong>角色</strong><small>最小权限优先</small></label><div class="form-input"><select id="admin-new-role" ${canManage ? "" : "disabled"}><option value="viewer">只读</option><option value="admin">管理员</option><option value="owner">所有者</option></select></div><div class="form-meta"><button class="btn primary" id="admin-create" ${canManage ? "" : "disabled"}>创建</button></div></div></div></section>`;
 }
-function viewContent() { if (state.view === "diagnostics") return diagnosticsView(); if (state.view === "updates") return updatesView(); if (state.view === "settings") return settingsView(); if (state.view === "control") return controlView(); if (state.view === "security") return securityView(); if (state.view === "rules") return rulesView(); if (state.view === "mirrors") return mirrorsView(); if (state.view === "recommendations") return recommendationsView(); return modulesView(); }
+
+function securityView() {
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；密码只保存 PBKDF2 派生值，浏览器不持久化令牌。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div>${securityPanel()}`;
+}
+const VIEW_RENDERERS = { modules: modulesView, control: controlView, updates: updatesView, recommendations: recommendationsView, rules: rulesView, mirrors: mirrorsView, diagnostics: diagnosticsView, settings: settingsView, security: securityView };
+const VIEW_ENTERS = { control: loadControl, updates: async () => { dashboard(); await loadTransactions(); }, recommendations: loadRecommendations, rules: loadRules, mirrors: loadMirrors, diagnostics: loadDiagnostics, settings: loadSettings, security: loadAdmins };
+async function enterView(view) {
+  const id = VIEWS[view] ? view : "modules";
+  state.view = id;
+  const enter = VIEW_ENTERS[id];
+  if (enter) await enter();
+  else dashboard();
+}
+function viewContent() {
+  const entry = VIEWS[state.view] || VIEWS.modules;
+  const renderer = VIEW_RENDERERS[state.view] || modulesView;
+  const suiteId = Array.isArray(entry.suite) ? state.view : (entry.inSuite || "");
+  const tabs = suiteId ? suiteTabStrip(suiteId) : "";
+  return tabs + renderer();
+}
 function rail() {
-  return `<aside class="rail"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="nav-label">工作区</div><nav class="nav">${NAV_ITEMS.map(([view, icon, label]) => `<button class="${state.view === view ? "active" : ""}" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}">${icon}　${label}</button>`).join("")}</nav><div class="spacer"></div><div class="health"><b>系列健康度</b><p>${state.modules.length} 个可信模块已纳管。模块发现不执行任意第三方代码。</p><div class="bar"><i></i></div></div><div class="user"><span class="avatar">管</span><span>${esc(state.session?.username || "管理员")}</span><button class="logout" id="rail-logout">↪</button></div></aside>`;
+  const groups = NAV_GROUPS.map(([groupId, label]) => {
+    const items = railItemsForGroup(groupId);
+    if (!items.length) return "";
+    const buttons = items.map(([view, icon, itemLabel, , , suite]) => {
+      const isSuiteHead = Array.isArray(suite);
+      const active = state.view === view || (isSuiteHead && suite.includes(state.view));
+      return `<button class="${active ? "active" : ""}" data-view="${view}" aria-current="${active ? "page" : "false"}">${icon}　${itemLabel}</button>`;
+    }).join("");
+    return `<div class="nav-label">${label}</div><nav class="nav">${buttons}</nav>`;
+  }).join("");
+  return `<aside class="rail"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div>${groups}<div class="spacer"></div><div class="health"><b>系列健康度</b><p>${state.modules.length} 个可信模块已纳管。模块发现不执行任意第三方代码。</p><div class="bar"><i></i></div></div><div class="user"><span class="avatar">管</span><span>${esc(state.session?.username || "管理员")}</span><button class="logout" id="rail-logout">↪</button></div></aside>`;
 }
+
 function dashboard() {
-  app.innerHTML = `<div class="shell">${rail()}<main class="main"><header class="topbar"><div class="crumb">凝心溯溪 / <b>核 · ${VIEW_TITLES[state.view] || "模块运营中心"}</b></div><div class="top-actions"><button class="btn" id="refresh">刷新</button><button class="btn" id="logout">退出登录</button></div></header><div class="content">${viewContent()}</div></main></div><nav class="mobile-nav" aria-label="移动端工作区导航">${["modules", "control", "diagnostics"].map((view) => { const item = NAV_ITEMS.find(([id]) => id === view); return `<button class="${state.view === view ? "active" : ""}" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${item[1]}</span>${item[2]}</button>`; }).join("")}<button id="mobile-more" aria-expanded="false"><span>⋯</span>更多</button></nav><div id="mobile-more-sheet" class="si-mobile-more-sheet" hidden>${NAV_ITEMS.filter(([view]) => !["modules", "control", "diagnostics"].includes(view)).map(([view, icon, label]) => `<button class="btn" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${icon}</span>${label}</button>`).join("")}<button class="btn" id="mobile-logout"><span>⇥</span>退出</button></div>`;
+  app.innerHTML = `<div class="shell">${rail()}<main class="main"><header class="topbar"><div class="crumb">凝心溯溪 / <b>核 · ${VIEW_TITLES[state.view] || "模块运营中心"}</b></div><div class="top-actions"><button class="btn" id="refresh">刷新</button><button class="btn" id="logout">退出登录</button></div></header><div class="content">${viewContent()}</div></main></div><nav class="mobile-nav" aria-label="移动端工作区导航">${["modules", "control", "diagnostics"].map((view) => { const item = NAV_ITEMS.find(([id]) => id === view); return `<button class="${state.view === view ? "active" : ""}" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${item[1]}</span>${item[2]}</button>`; }).join("")}<button id="mobile-more" aria-expanded="false"><span>⋯</span>更多</button></nav><div id="mobile-more-sheet" class="si-mobile-more-sheet" hidden>${NAV_ITEMS.filter(([view]) => !["modules", "control", "diagnostics"].includes(view) && !VIEWS[view]?.hidden).map(([view, icon, label]) => `<button class="btn" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${icon}</span>${label}</button>`).join("")}<button class="btn" id="mobile-logout"><span>⇥</span>退出</button></div>`;
   bindDashboard();
 }
 function bindSettingsTabs() {
@@ -645,6 +789,7 @@ function bindSettingsTabs() {
   const activate = (value) => {
     const target = tabs.some((tab) => tab.dataset.siTab === value) ? value : tabs[0].dataset.siTab;
     state.settingsTab = target;
+    if (target === "security" && !state.adminsData) loadAdmins();
     tabs.forEach((tab) => {
       const active = tab.dataset.siTab === target;
       tab.classList.toggle("active", active);
@@ -685,16 +830,20 @@ function bindDashboard() {
   document.getElementById("check-updates")?.addEventListener("click", () => checkUpdates()); document.getElementById("reload-transactions")?.addEventListener("click", () => loadTransactions()); document.querySelectorAll("[data-rollback]").forEach(node => node.addEventListener("click", () => rollbackUpdate(node.dataset.rollback)));
   document.getElementById("mobile-more")?.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); sheet.hidden = !sheet.hidden; document.getElementById("mobile-more")?.setAttribute("aria-expanded", String(!sheet.hidden)); });
   document.querySelectorAll("#mobile-more-sheet [data-view], #mobile-more-sheet #mobile-logout").forEach(node => node.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); if (sheet) sheet.hidden = true; document.getElementById("mobile-more")?.setAttribute("aria-expanded", "false"); }));
-  document.querySelectorAll("[data-view]").forEach(node => node.addEventListener("click", () => { state.view = node.dataset.view || "modules"; state.selectedModule = node.dataset.module || ""; if (state.view === "diagnostics") loadDiagnostics(); else if (state.view === "settings") loadSettings(); else if (state.view === "updates") { dashboard(); loadTransactions(); } else if (state.view === "control") loadControl(); else if (state.view === "rules") loadRules(); else if (state.view === "mirrors") loadMirrors(); else if (state.view === "recommendations") loadRecommendations(); else if (state.view === "security") loadAdmins(); else dashboard(); }));
+  document.querySelectorAll("[data-view]").forEach(node => node.addEventListener("click", () => { state.selectedModule = node.dataset.module || ""; enterView(node.dataset.view || "modules"); }));
   document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", async () => { state.logModules = [node.dataset.diagnostic]; await loadDiagnostics(); })); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
   document.querySelectorAll("[data-filter]").forEach(node => node.addEventListener("click", () => { state.filter = node.dataset.filter; dashboard(); })); const query = document.getElementById("query"); query?.addEventListener("input", () => { state.query = query.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("query"); next?.focus(); next?.setSelectionRange(state.query.length, state.query.length); }); });
   document.querySelectorAll("[data-control-plugin]").forEach(node => node.addEventListener("click", () => loadControlPlugin(node.dataset.controlPlugin)));
-  document.querySelectorAll("[data-domain-view]").forEach(node => node.addEventListener("click", async () => { state.view = node.dataset.domainView || "modules"; if (state.view === "rules") await loadRules(); else if (state.view === "mirrors") await loadMirrors(); else if (state.view === "settings") await loadSettings(); else dashboard(); }));
+  document.querySelectorAll("[data-domain-view]").forEach(node => node.addEventListener("click", async () => { await enterView(node.dataset.domainView || "modules"); }));
   document.getElementById("close-control-detail")?.addEventListener("click", () => { state.selectedControlPlugin = ""; state.controlSchema = null; state.controlSnapshot = null; state.panelsList = null; state.panelData = null; state.selectedPanel = ""; dashboard(); });
   document.querySelectorAll("[data-control-tab]").forEach(node => node.addEventListener("click", () => { state.controlTab = node.dataset.controlTab || "fields"; dashboard(); }));
-  document.getElementById("control-apply")?.addEventListener("click", () => applyControlPatch());
-  document.getElementById("control-reset")?.addEventListener("click", () => resetControlFields());
-  document.getElementById("control-refresh-fields")?.addEventListener("click", () => refreshControlFields());
+  document.querySelectorAll("[data-control-apply]").forEach(node => node.addEventListener("click", () => applyControlPatch(node.dataset.controlApply, node.closest("[data-capability-provider]") || document)));
+  document.querySelectorAll("[data-control-reset]").forEach(node => node.addEventListener("click", () => resetControlFields(node.dataset.controlReset)));
+  document.querySelectorAll("[data-control-refresh]").forEach(node => node.addEventListener("click", () => refreshControlFields(node.dataset.controlRefresh)));
+  document.querySelectorAll("[data-catalog-domain-open]").forEach(node => node.addEventListener("click", () => { state.selectedDomain = node.dataset.catalogDomainOpen; state.selectedCapability = ""; state.selectedControlPlugin = ""; dashboard(); }));
+  document.querySelectorAll("[data-catalog-back]").forEach(node => node.addEventListener("click", () => { state.selectedDomain = ""; dashboard(); }));
+  document.querySelectorAll("[data-capability-open]").forEach(node => node.addEventListener("click", () => loadCapability(node.dataset.capabilityOpen)));
+  document.querySelectorAll("[data-capability-back]").forEach(node => node.addEventListener("click", () => { state.selectedCapability = ""; state.capabilityData = {}; dashboard(); }));
   document.getElementById("panel-load")?.addEventListener("click", () => loadPanelsList());
   document.querySelectorAll("[data-panel-select]").forEach(node => node.addEventListener("click", () => loadPanelData(node.dataset.panelSelect)));
   document.querySelectorAll("[data-panel-action]").forEach(node => node.addEventListener("click", () => runPanelAction(node.dataset.panelAction)));
@@ -720,6 +869,7 @@ function logMemberHasMore(member) {
 function applyDiagnosticPage(result, wasReset) {
   const members = result.members || [];
   state.logMembers = members;
+  if (result.link_health) state.linkHealth = result.link_health;
   const activeIds = new Set(members.map(item => item.plugin_id));
   const resetIds = new Set(members.filter(item => item.reset).map(item => item.plugin_id));
   if (state.logs.some(item => !activeIds.has(item.plugin_id)) || resetIds.size) {
@@ -888,7 +1038,7 @@ async function applyAllRecommendations() {
 }
 async function loadAdmins() {
   try { state.adminsData = await get("admins"); } catch (error) { notify(error.message, true); }
-  if (state.view === "security") dashboard();
+  if (state.view === "security" || (state.view === "settings" && state.settingsTab === "security")) dashboard();
 }
 async function createAdmin() {
   const username = document.getElementById("admin-new-username")?.value.trim() || "";
@@ -975,12 +1125,12 @@ async function loadControlPlugin(pluginId) {
   state.view = "control"; dashboard();
   if (panelCount > 0) loadPanelData(state.panelsList.panels[0].id);
 }
-function controlFieldInputs() { return [...document.querySelectorAll("[data-control-field]")]; }
-function collectControlPatch(schema, snapshot) {
+function controlFieldInputs(root) { return [...(root || document).querySelectorAll("[data-control-field]")]; }
+function collectControlPatch(schema, snapshot, root) {
   const fields = schema?.schema?.fields || {};
   const values = snapshot?.snapshot?.fields || {};
   const patch = {};
-  controlFieldInputs().forEach(node => {
+  controlFieldInputs(root).forEach(node => {
     const name = node.dataset.controlField;
     const def = fields[name];
     if (!def || def.control === "read_only" || node.disabled) return;
@@ -997,39 +1147,55 @@ function collectControlPatch(schema, snapshot) {
   });
   return patch;
 }
-async function applyControlPatch() {
-  const pluginId = state.selectedControlPlugin;
-  const schema = state.controlSchema;
-  const snapshot = state.controlSnapshot;
-  if (!pluginId || !schema) return;
-  const patch = collectControlPatch(schema, snapshot);
+async function applyControlPatch(pluginId, root) {
+  const id = pluginId || state.selectedControlPlugin;
+  if (!id) return;
+  const fromCapability = (state.capabilityData || {})[id];
+  const schema = fromCapability?.schema || state.controlSchema;
+  const snapshot = fromCapability?.snapshot || state.controlSnapshot;
+  if (!schema) return;
+  const patch = collectControlPatch(schema, snapshot, root);
   if (!Object.keys(patch).length) { notify("没有修改需要应用"); return; }
   try {
     const revision = schema.revision;
-    await post(`series/${encodeURIComponent(pluginId)}/control/validate`, { patch, expected_revision: revision });
-    await post(`series/${encodeURIComponent(pluginId)}/control/apply`, { patch, expected_revision: revision });
+    await post(`series/${encodeURIComponent(id)}/control/validate`, { patch, expected_revision: revision });
+    await post(`series/${encodeURIComponent(id)}/control/apply`, { patch, expected_revision: revision });
     notify("覆盖已应用");
-    await loadControlPlugin(pluginId);
+    await refreshControlFields(id);
     await loadControl();
   } catch (error) {
     notify(error.message, true);
-    if (String(error.message).includes("REVISION")) await loadControlPlugin(pluginId);
+    if (String(error.message).includes("REVISION")) await refreshControlFields(id);
   }
 }
-async function resetControlFields() {
-  const pluginId = state.selectedControlPlugin;
-  if (!pluginId) return;
-  if (!(await confirmDialog("重置该插件的全部核覆盖字段？插件自身配置将立即恢复生效。"))) return;
+async function resetControlFields(pluginId) {
+  const id = pluginId || state.selectedControlPlugin;
+  if (!id) return;
+  if (!(await confirmDialog("重置该模块的全部核覆盖字段？插件自身配置将立即恢复生效。"))) return;
   try {
-    await post(`series/${encodeURIComponent(pluginId)}/control/reset`, { fields: null });
+    await post(`series/${encodeURIComponent(id)}/control/reset`, { fields: null });
     notify("已恢复插件自身配置");
-    await loadControlPlugin(pluginId);
+    await refreshControlFields(id);
     await loadControl();
   } catch (error) { notify(error.message, true); }
 }
-async function refreshControlFields() {
-  if (state.selectedControlPlugin) await loadControlPlugin(state.selectedControlPlugin);
+async function refreshControlFields(pluginId) {
+  const id = pluginId || state.selectedControlPlugin;
+  if (!id) return;
+  if ((state.capabilityData || {})[id]) {
+    try {
+      const [schema, snapshot] = await Promise.all([
+        get(`series/${encodeURIComponent(id)}/control/schema`),
+        get(`series/${encodeURIComponent(id)}/control/snapshot`)
+      ]);
+      state.capabilityData[id] = { schema, snapshot };
+      dashboard();
+    } catch (error) { notify(error.message, true); }
+    return;
+  }
+  await loadControlPlugin(id);
 }
+
 async function loadPanelsList() {
   const pluginId = state.selectedControlPlugin;
   if (!pluginId) return;
@@ -1166,7 +1332,7 @@ async function runLifecycle(action) {
 }
 async function toggleControl() { try { const next = state.control?.mode === "managed" ? "native" : "managed"; await post("series/control/mode", { mode: next }); await loadControl(); notify(next === "managed" ? "统一接管已启用" : "已恢复插件自身配置"); } catch (error) { notify(error.message, true); } }
 function exportSummary() { const payload = { generated_at: new Date().toISOString(), modules: state.modules.map(item => ({ plugin_id: item.plugin_id, version: item.version, status: item.status, contracts: item.contracts })) }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "series-control-summary.json"; link.hidden = true; document.body.appendChild(link); link.click(); window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000); notify("已生成脱敏诊断摘要"); }
-async function loadDashboard() { try { const session = await get("session"); state.configured = !!session.configured; if (!session.authenticated) { state.authenticated = false; loginView(); return; } state.authenticated = true; state.session = session.session; const modules = await get("modules"); state.modules = modules.modules || []; if (state.view === "settings") await loadSettings(); else if (state.view === "diagnostics") await loadDiagnostics(); else if (state.view === "updates") { dashboard(); await loadTransactions(); } else if (state.view === "control") await loadControl(); else if (state.view === "rules") await loadRules(); else if (state.view === "mirrors") await loadMirrors(); else if (state.view === "recommendations") await loadRecommendations(); else if (state.view === "security") await loadAdmins(); else dashboard(); } catch (error) { loginView(error.message); } }
+async function loadDashboard() { try { const session = await get("session"); state.configured = !!session.configured; if (!session.authenticated) { state.authenticated = false; loginView(); return; } state.authenticated = true; state.session = session.session; const modules = await get("modules"); state.modules = modules.modules || []; await enterView(state.view); } catch (error) { loginView(error.message); } }
 async function logout() { try { await post("logout", {}); } finally { state.authenticated = false; state.session = null; loginView(); } }
 async function start() { try { await loadDashboard(); } catch (error) { loginView(error.message); } }
 start();

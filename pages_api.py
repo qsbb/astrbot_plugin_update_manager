@@ -7,6 +7,7 @@ import inspect
 import json
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
@@ -29,6 +30,7 @@ from .core.concurrency import (
     bounded_gather,
     normalize_concurrency,
 )
+from .core.link_health import aggregate_link_health
 from .core.mirrors import (
     BENCHMARK_PROBE_URL,
     BUILTIN_MIRRORS,
@@ -712,6 +714,31 @@ class PagesAPIMixin:
             )
         return value
 
+    async def _read_plugin_link_state(self, item: Any) -> dict[str, Any] | None:
+        """读取成员声明的 series.diagnostics@1.1 当前状态（纯读，不产生事件）。"""
+        try:
+            instance = await self._diagnostic_instance(item.plugin_id)
+        except Exception:
+            return None
+        if instance is None:
+            return None
+        reader = getattr(instance, "diagnostic_state", None)
+        if not callable(reader):
+            return None
+        try:
+            payload = await self._diagnostic_call(reader)
+        except Exception:
+            return None
+        if not isinstance(payload, Mapping) or not isinstance(
+            payload.get("links"), Mapping
+        ):
+            return None
+        return {
+            "plugin_id": item.plugin_id,
+            "plugin_name": getattr(item, "display_name", None) or item.key,
+            "payload": payload,
+        }
+
     async def _read_plugin_diagnostics(
         self,
         item: Any,
@@ -912,6 +939,12 @@ class PagesAPIMixin:
                 for item in providers
             )
         )
+        link_contributions = await asyncio.gather(
+            *(self._read_plugin_link_state(item) for item in providers)
+        )
+        link_health = aggregate_link_health(
+            [item for item in link_contributions if item]
+        )
         members = [row[0] for row in rows]
         order = {item.plugin_id: index for index, item in enumerate(providers)}
         events = [event for _, chunk in rows for event in chunk]
@@ -928,6 +961,8 @@ class PagesAPIMixin:
             "events": events,
             "members": members,
             "count": len(events),
+            # 联动健康：成员 diagnostic_state() 的只读合并（事件流仍只做历史）
+            "link_health": link_health,
         }, 200
 
     async def _pages_diagnostic_logs(self):

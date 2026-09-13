@@ -77,7 +77,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.3"
+__version__ = "0.19.4"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -327,7 +327,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
     def diagnostic_log_contract(self) -> dict[str, object]:
         return {
             "name": "series.diagnostics",
-            "version": "1.0",
+            "version": "1.1",
             "series_id": "ningxin_suxi",
             "plugin_id": PLUGIN_NAME,
             "plugin_name": "核",
@@ -335,13 +335,18 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 "read",
                 "clear",
                 "aggregate",
-                "read_events",
+                "read_state", "read_events",
                 "clear_events",
             ),
             "storage": "memory_only",
             "astrbot_log_propagation": False,
         }
 
+    def diagnostic_state(self) -> dict[str, Any]:
+        """series.diagnostics@1.1 可选能力：返回当前联动状态（纯读，不产生事件）。"""
+        from .series_diagnostics import diagnostic_state_payload
+
+        return diagnostic_state_payload()
     def series_model_router_contract(self) -> dict[str, object]:
         """Declare the optional, read-only unified model routing contract."""
         return model_router_contract()
