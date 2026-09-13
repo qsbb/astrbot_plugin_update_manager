@@ -155,3 +155,26 @@ body[data-series-ui] .version-badge.update_available { color: var(--si-success);
 body[data-series-ui] .version-badge.up_to_date { color: var(--si-primary-strong); background: var(--si-primary-soft); }
 body[data-series-ui] .version-badge.local_newer { color: var(--si-warning); background: var(--si-warning-soft); }
 body[data-series-ui] .version-badge.check_failed { color: var(--si-danger); background: var(--si-danger-soft); }
+
+/* 诊断问题聚合：先看问题与影响，再展开事件详情 */
+.diagnostic-problems { display:grid;gap:8px;margin:16px 0 0; }
+.diagnostic-problems-head { display:flex;align-items:baseline;justify-content:space-between;gap:10px;color:var(--si-muted);font-size:12px; }
+.diagnostic-problems-head strong { color:var(--si-ink);font-size:13px; }
+.diagnostic-problems-empty { margin:0;padding:10px 12px;border:1px dashed var(--si-line);border-radius:10px;color:var(--si-muted);font-size:12px; }
+.diagnostic-problem { display:grid;grid-template-columns:auto auto minmax(0,auto);gap:6px 10px;align-items:baseline;justify-items:start;padding:10px 12px;border:1px solid var(--si-line);border-left-width:3px;border-radius:10px;background:var(--si-surface-soft);color:var(--si-ink);text-align:left;font-size:12px; }
+.diagnostic-problem.level-error { border-left-color:#ff7b72; }
+.diagnostic-problem.level-warning { border-left-color:#ffc36b; }
+.diagnostic-problem strong { font-size:13px; }
+.diagnostic-problem code { padding:1px 6px;border-radius:6px;background:rgba(105,115,158,.14); }
+.diagnostic-problem small { grid-column:3;justify-self:end;color:var(--si-muted); }
+.diagnostic-problem-impact,.diagnostic-problem-suggestion { grid-column:1 / -1;color:var(--si-muted);line-height:1.5; }
+.diagnostic-problem-suggestion { color:var(--si-primary-strong); }
+@media (max-width:760px) {
+  .diagnostic-problem { grid-template-columns:auto minmax(0,1fr); }
+  .diagnostic-problem small { grid-column:2;justify-self:start; }
+}
+
+/* 设置区：子导航 + 分区卡片间距（分区由 div 承载，不再依赖 .panel + .panel） */
+.si-subnav { margin-bottom: 14px; }
+#settings [data-si-panel] > * + * { margin-top: 14px; }
+#settings [data-si-panel][hidden] { display: none; }

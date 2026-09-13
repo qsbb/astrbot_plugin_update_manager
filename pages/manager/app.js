@@ -1,16 +1,19 @@
 const messages = {
   "zh-CN": {
-    title: "凝心溯溪-核 · 更新管理", heading: "凝心溯溪-核", subtitle: "安全、串行、可回滚的插件更新控制台",
-    refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", recommendations: "系列推荐", config: "配置", catalog: "目录", mirrors: "镜像加速", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
+    title: "凝心溯溪-核 · 模块运营中心", heading: "凝心溯溪-核", subtitle: "统一管理系列模块的安装、更新、回滚与诊断",
+    refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", catalog: "目录", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
     openWebUi: "打开独立 WebUI", copyWebUiLink: "复制链接", copiedWebUiLink: "WebUI 链接已复制", copyWebUiPrompt: "请复制独立 WebUI 地址", copyWebUiManual: "无法自动复制，已显示地址，请手动复制", openWebUiBlocked: "宿主页面禁止新窗口，可复制地址或点击“在当前面板打开”", webuiManualHint: "手动复制/打开地址", openAddress: "打开地址", openInPanel: "在当前面板打开", webuiPublicUrlHint: "未配置公开地址，若无法打开请在配置中填写 webui_public_url", webuiActionsLabel: "独立 WebUI 操作", startupFailed: "页面启动失败", webuiAddressLoading: "独立 WebUI 地址加载中…", webuiAddressUnavailable: "独立 WebUI 地址不可用", webuiAddressRunning: "运行中", webuiAddressStopped: "未启动，点击按钮启动", webuiAddressDisabled: "已关闭，请在配置中启用", webuiAddressLabel: "地址", portLabel: "端口", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
     retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
     capabilities: "运行时能力", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
     save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
+    settings: "设置", settingsHint: "运行配置、自动更新、控制中心账户与镜像网络都在这里；每个分区独立保存。",
+    settingsConfigTab: "运行配置", settingsAutoTab: "自动更新", settingsAccountsTab: "控制中心账户", settingsMirrorsTab: "镜像与网络",
+    modules: "推荐与目录", modulesHint: "系列推荐与其他目录插件合并展示；系列推荐里已出现的模块不会在目录里重复。",
     recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
     checkLatest: "检查最新版本", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
-    selfUpdateNotice: "更新管理器有新版本：当前 {current}，最新 {latest}。自身更新已禁用，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制", copyInstalledPageUrl: "请复制更新页地址后在浏览器中打开：",
+    selfUpdateNotice: "核有新版本：当前 {current}，最新 {latest}。核禁止自更新，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制", copyInstalledPageUrl: "请复制更新页地址后在浏览器中打开：",
     install: "安装", installed: "已安装", update: "更新", forceUpdate: "强制更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", forceUpdateUnavailable: "强制更新仅支持有新版本、已是最新版或本地版本更新的插件", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
     errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", forceUpdateConfirm: "确定要强制更新“{name}”吗？即使已是最新版或远端版本更旧，也会用远端版本覆盖本地代码。", installRunning: "正在安装…", updateRunning: "正在更新…", forceUpdateRunning: "正在强制更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
@@ -26,17 +29,20 @@ const messages = {
     diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码、摘要或详情", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticDisabled: "已关闭", diagnosticUnavailable: "不可用", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticCount: "显示 {shown} 条，共缓存 {total} 条", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", diagnosticNoDetails: "暂无更多详细信息", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
   },
   "en-US": {
-    title: "Update Manager", heading: "Update Manager", subtitle: "Safe, serial and rollback-ready plugin updates",
-    refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", recommendations: "Recommendations", config: "Configuration", catalog: "Catalog", mirrors: "Mirror acceleration", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
+    title: "Ningxin Suxi Core · Module Operations Center", heading: "Ningxin Suxi Core", subtitle: "Install, update, roll back and diagnose series modules in one place",
+    refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", catalog: "Catalog", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
     openWebUi: "Open standalone WebUI", copyWebUiLink: "Copy link", copiedWebUiLink: "WebUI link copied", copyWebUiPrompt: "Copy the standalone WebUI address", copyWebUiManual: "Automatic copy failed; the address is shown for manual copy", openWebUiBlocked: "The host page blocks new windows; copy the address or open it in this panel", webuiManualHint: "Manually copy/open the address", openAddress: "Open address", openInPanel: "Open in this panel", webuiPublicUrlHint: "No public URL configured; set webui_public_url if this address is unreachable", webuiActionsLabel: "Standalone WebUI actions", startupFailed: "Page startup failed", webuiAddressLoading: "Loading standalone WebUI address…", webuiAddressUnavailable: "Standalone WebUI address unavailable", webuiAddressRunning: "Running", webuiAddressStopped: "Stopped; click the button to start", webuiAddressDisabled: "Disabled; enable it in configuration", webuiAddressLabel: "Address", portLabel: "Port", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
     retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
     capabilities: "Runtime capabilities", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
     save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
+    settings: "Settings", settingsHint: "Runtime config, auto-update, control center accounts and mirrors live here; each section saves on its own.",
+    settingsConfigTab: "Runtime config", settingsAutoTab: "Auto update", settingsAccountsTab: "Control center accounts", settingsMirrorsTab: "Mirrors & network",
+    modules: "Recommendations & catalog", modulesHint: "Series recommendations and other catalog plugins are merged; modules already listed above are not repeated.",
     recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
     checkLatest: "Check latest versions", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
-    selfUpdateNotice: "A newer update manager is available: current {current}, latest {latest}. Self-update is disabled; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.", copyInstalledPageUrl: "Copy this update page URL and open it in a browser:",
+    selfUpdateNotice: "A newer Core release is available: current {current}, latest {latest}. Core never updates itself; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.", copyInstalledPageUrl: "Copy this update page URL and open it in a browser:",
     install: "Install", installed: "Installed", update: "Update", forceUpdate: "Force update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", forceUpdateUnavailable: "Force update requires an available, up-to-date, or locally newer version state", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
     errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", forceUpdateConfirm: "Force update “{name}”? The remote version will overwrite local code even when it is the same version or older.", installRunning: "Installing…", updateRunning: "Updating…", forceUpdateRunning: "Force updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
@@ -106,6 +112,13 @@ const state = {
   catalogBusy: null,
   catalogItems: [],
   catalogDiagnostics: [],
+  recommendationItems: [],
+  // 设置区子导航：配置 / 自动更新 / 账户 / 镜像，跨标签切换保持当前分区。
+  settingsTab: "config",
+  settingsLoaded: false,
+  // 推荐与目录合并后的范围内筛选；默认全部。
+  moduleScope: "all",
+  moduleQuery: "",
   diagnosticEvents: [],
   diagnosticMembers: [],
   diagnosticCursors: {},
@@ -151,14 +164,14 @@ function errorReason(code) {
   if (["REGISTRY_RATE_LIMITED", "REGISTRY_HTTP_403", "REGISTRY_HTTP_429"].includes(value)) return t("errorRateLimit");
   const known = {
     CONFIRMATION_REQUIRED: "停用前必须明确确认",
-    SELF_LIFECYCLE_BLOCKED: "更新管理器不能操作自身启停",
+    SELF_LIFECYCLE_BLOCKED: "核不能操作自身启停",
     RESERVED_PLUGIN: "AstrBot 保留插件不可操作",
     PLUGIN_NOT_LOADED: "插件尚未加载",
     PLUGIN_NOT_FOUND: "未找到该插件",
     PLUGIN_STATE_UNCHANGED: "插件已经处于目标状态",
     LIFECYCLE_CAPABILITY_UNAVAILABLE: "当前 AstrBot 不支持此启停操作",
     ACTIVATION_RESULT_MISMATCH: "操作后插件状态校验失败",
-    SELF_UPDATE_BLOCKED: "更新管理器不能更新自身",
+    SELF_UPDATE_BLOCKED: "核不能更新自身",
     SOURCE_REQUIRED: "无法识别 GitHub 来源，不能更新",
     NO_UPDATE_AVAILABLE: "当前已是最新版本",
     UPDATE_CAPABILITY_UNAVAILABLE: "当前 AstrBot 不支持插件更新"
@@ -380,12 +393,51 @@ function makeField(key, field, value) {
   return `<label><span>${label}</span><input name="${key}" type="${type}" step="${step}" value="${escapeHtml(value)}" ${disabled}/></label>`;
 }
 
+async function loadSettingsPanel() {
+  await Promise.all([loadConfig(), loadRule(), loadMirrors()]);
+  state.settingsLoaded = true;
+}
+
+function bindSettingsSubnav() {
+  const tabs = [...document.querySelectorAll("[data-si-tab]")];
+  const panels = [...document.querySelectorAll("[data-si-panel]")];
+  if (!tabs.length || !panels.length) return;
+  const activate = (value) => {
+    const target = tabs.some((tab) => tab.dataset.siTab === value) ? value : tabs[0].dataset.siTab;
+    state.settingsTab = target;
+    tabs.forEach((tab) => {
+      const active = tab.dataset.siTab === target;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+    panels.forEach((panel) => {
+      panel.hidden = panel.dataset.siPanel !== target;
+    });
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activate(tab.dataset.siTab));
+    tab.addEventListener("keydown", (event) => {
+      let next = index;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(tabs[next].dataset.siTab);
+      tabs[next].focus();
+    });
+  });
+  activate(state.settingsTab);
+}
+
 async function loadConfig() {
   const data = await apiGet("config");
   state.config = data;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
   await loadWebUiAddress();
-  try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("config", error); }
+  try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("settings", error); }
 }
 
 function renderWebUiAddress(data) {
@@ -822,16 +874,47 @@ function catalogUpdateButton(item) {
 }
 
 function renderCatalog() {
-  const items = state.catalogItems || [];
+  const recommended = new Set((state.recommendationItems || []).map((item) => item.plugin_id));
+  // 系列推荐已经展示过的模块不再在目录里重复出现，避免同一插件两套版本信息。
+  const items = (state.catalogItems || []).filter((item) => !recommended.has(item.plugin_id));
   const diagnostics = state.catalogDiagnostics || [];
+  const updateFlag = (pluginId) => String(Boolean(state.catalogVersions[pluginId]?.update_available));
   document.getElementById("catalog-list").innerHTML = items.length
-    ? items.map((item) => `<article class="catalog-item"><div><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code>${catalogVersionLine(item)}</div><div class="catalog-actions"><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span>${catalogUpdateButton(item)}${catalogSwitch(item)}</div></article>`).join("")
+    ? items.map((item) => `<article class="catalog-item" data-update-available="${updateFlag(item.plugin_id)}"><div><strong>${escapeHtml(item.display_name || item.plugin_id)}</strong><code>${escapeHtml(item.plugin_id)}</code>${catalogVersionLine(item)}</div><div class="catalog-actions"><span class="pill ${item.eligible ? "ok" : "off"}">${item.eligible ? t("eligible") : `${t("blocked")}: ${escapeHtml((item.reasons || []).join(", "))}`}</span>${catalogUpdateButton(item)}${catalogSwitch(item)}</div></article>`).join("")
     : `<div class="catalog-empty"><strong>${t("empty")}</strong><span>${escapeHtml(t("emptyDiagnostics"))}: ${escapeHtml(diagnostics.join(", ") || "NO_DIAGNOSTIC")}</span></div>`;
   const button = document.getElementById("catalog-check-updates");
   if (button) {
     button.disabled = state.catalogCheckBusy || Boolean(state.catalogBusy);
     button.textContent = state.catalogCheckBusy ? t("checkingUpdates") : t("checkUpdates");
   }
+}
+
+function applyModuleScope() {
+  const scope = state.moduleScope || "all";
+  const query = String(state.moduleQuery || "").trim().toLowerCase();
+  document.querySelectorAll("[data-module-scope-card]").forEach((card) => {
+    const kind = card.dataset.moduleScopeCard;
+    card.hidden = (scope === "series" && kind !== "series") || (scope === "catalog" && kind !== "catalog");
+  });
+  let visible = 0;
+  document.querySelectorAll("#recommendations-list .recommendation-item, #catalog-list .catalog-item").forEach((item) => {
+    const matchesQuery = !query || item.textContent.toLowerCase().includes(query);
+    const matchesScope = scope !== "updates" || item.dataset.updateAvailable === "true";
+    item.hidden = !(matchesQuery && matchesScope);
+    if (!item.hidden) visible += 1;
+  });
+  const summary = document.getElementById("module-scope-summary");
+  if (summary) {
+    const labels = { all: "全部", series: "系列推荐", catalog: "其他目录插件", updates: "有更新的模块" };
+    summary.textContent = `${labels[scope] || scope}：${visible} 个模块${query ? ` · 关键词「${state.moduleQuery}」` : ""}`;
+  }
+}
+
+async function loadModules() {
+  await Promise.all([loadRecommendations(), loadCatalog()]);
+  // 目录去重要用到推荐结果，两个请求都回来后再渲染一次，避免并发顺序导致重复卡片。
+  renderCatalog();
+  applyModuleScope();
 }
 
 async function loadCatalog() {
@@ -1029,6 +1112,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
     ? await apiPost("recommendations/check-latest", { force_refresh: forceRefresh })
     : await apiGet("recommendations");
   const items = data.items || [];
+  state.recommendationItems = items;
   renderSelfUpdateNotice(data.self_update);
   renderRateLimitNotice(data.rate_limit);
   const list = document.getElementById("recommendations-list");
@@ -1041,7 +1125,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `${actionButton(item, "update", "update", actions.update)}${forceUpdateButton(item, actions.force_update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
 }
 
@@ -1258,8 +1342,62 @@ function filteredDiagnosticEvents() {
   });
 }
 
+function diagnosticProblems() {
+  const groups = new Map();
+  state.diagnosticEvents
+    .filter((event) => ["ERROR", "WARNING", "CRITICAL"].includes(String(event.level || "").toUpperCase()))
+    .forEach((event) => {
+      const key = `${event.plugin_id}:${event.code || "UNKNOWN"}`;
+      const current = groups.get(key) || {
+        pluginId: event.plugin_id,
+        pluginName: event.plugin_name || event.plugin_id,
+        code: event.code || "UNKNOWN",
+        level: "WARNING",
+        count: 0,
+        last: event.timestamp,
+      };
+      current.count += 1;
+      if (String(event.timestamp || "") > String(current.last || "")) current.last = event.timestamp;
+      if (String(event.level || "").toUpperCase() !== "WARNING") current.level = "ERROR";
+      groups.set(key, current);
+    });
+  return [...groups.values()]
+    .sort((a, b) => (b.level === "ERROR") - (a.level === "ERROR") || b.count - a.count)
+    .slice(0, 8);
+}
+
+function diagnosticSuggestion(code) {
+  const value = String(code || "").toUpperCase();
+  if (value.includes("RATE_LIMIT")) return "GitHub 限流：稍后重试，或先在镜像加速里选择可用站点。";
+  if (value.includes("TIMEOUT") || value.includes("UNREACHABLE") || value.includes("NETWORK")) return "网络或超时：确认代理与镜像可达后重试。";
+  if (value.includes("MIGRAT") || value.includes("SCHEMA") || value.includes("CONFIG")) return "配置或迁移：核对配置页中该模块字段后重试。";
+  if (value.includes("AUTH") || value.includes("TOKEN") || value.includes("CREDENTIAL")) return "凭据问题：检查 GitHub Token 或控制中心账户权限。";
+  if (value.includes("IMPORT") || value.includes("LOAD")) return "加载失败：展开事件详情确认依赖与运行环境。";
+  return "展开该事件详情查看上下文，再决定是否重试。";
+}
+
+function renderDiagnosticProblems() {
+  const node = document.getElementById("diagnostic-problems");
+  if (!node) return;
+  const problems = diagnosticProblems();
+  if (!problems.length) {
+    node.innerHTML = `<p class="diagnostic-problems-empty">${state.diagnosticEvents.length ? "当前缓冲区没有错误或警告。" : "还没有读取到诊断事件。"}</p>`;
+    return;
+  }
+  node.innerHTML = `<div class="diagnostic-problems-head"><strong>待处理问题</strong><span>${problems.length} 组 · 点击一组可按模块与错误码筛选下方事件流</span></div>`
+    + problems.map((item) => `<button type="button" class="diagnostic-problem level-${item.level === "ERROR" ? "error" : "warning"}" data-problem-plugin="${escapeHtml(item.pluginId)}" data-problem-code="${escapeHtml(item.code)}">`
+      + `<span class="diagnostic-level">${escapeHtml(item.level)}</span>`
+      + `<strong>${escapeHtml(item.pluginName)}</strong>`
+      + `<code>${escapeHtml(item.code)}</code>`
+      + `<small>${item.count} 次 · ${escapeHtml(diagnosticTime(item.last))}</small>`
+      + `<span class="diagnostic-problem-impact">影响范围：${escapeHtml(item.pluginName)}（当前缓冲区 ${item.count} 条）</span>`
+      + `<span class="diagnostic-problem-suggestion">建议动作：${escapeHtml(diagnosticSuggestion(item.code))}</span>`
+      + `</button>`).join("");
+}
+
 function renderDiagnostics() {
   syncDiagnosticPluginFilter();
+  renderDiagnosticProblems();
   const memberNode = document.getElementById("diagnostic-members");
   memberNode.innerHTML = state.diagnosticMembers.map((member) => (
     `<span class="diagnostic-member ${diagnosticStatusClass(member.status)}" title="${escapeHtml(member.reason || "")}"><strong>${escapeHtml(member.plugin_name)}</strong>${escapeHtml(t(diagnosticStatusKey(member.status)))}</span>`
@@ -1410,10 +1548,10 @@ async function clearDiagnostics() {
 
 const sectionLoaders = {
   overview: { targetId: "summary", labelKey: "overview", load: loadOverview },
-  recommendations: { targetId: "recommendations-list", labelKey: "recommendations", load: loadRecommendations },
-  config: { targetId: "config-fields", labelKey: "config", load: loadConfig },
+  modules: { targetId: "recommendations-list", labelKey: "modules", load: loadModules },
+  settings: { targetId: "config-fields", labelKey: "settings", load: loadSettingsPanel },
   rule: { targetId: "rule-plugins", labelKey: "ruleTitle", load: loadRule },
-  mirrors: { targetId: "mirror-list", labelKey: "mirrors", load: loadMirrors },
+
   catalog: { targetId: "catalog-list", labelKey: "catalog", load: loadCatalog },
   diagnostics: { targetId: "diagnostic-log-list", labelKey: "diagnosticTitle", load: () => loadDiagnostics(true) }
 };
@@ -1482,6 +1620,12 @@ function activateTab(button, focus = false) {
   });
   if (focus) button.focus();
   if (button.dataset.tab !== "logs") stopDiagnosticPolling();
+  if (button.dataset.tab === "modules") {
+    loadModules().catch((error) => renderSectionLoadError("modules", error));
+  }
+  if (button.dataset.tab === "settings" && !state.settingsLoaded) {
+    loadSettingsPanel().catch((error) => renderSectionLoadError("settings", error));
+  }
   if (button.dataset.tab === "logs") {
     loadDiagnostics(!state.diagnosticLoaded).catch((error) => renderSectionLoadError("diagnostics", error));
     startDiagnosticPolling();
@@ -1513,6 +1657,21 @@ function bindEvents() {
     event.preventDefault();
     activateTab(tabs[next], true);
   });
+  bindSettingsSubnav();
+  const scopeSelect = document.getElementById("module-scope");
+  if (scopeSelect) {
+    scopeSelect.addEventListener("change", (event) => {
+      state.moduleScope = event.target.value;
+      applyModuleScope();
+    });
+  }
+  const moduleSearch = document.getElementById("module-search");
+  if (moduleSearch) {
+    moduleSearch.addEventListener("input", (event) => {
+      state.moduleQuery = event.target.value;
+      applyModuleScope();
+    });
+  }
   // 自更新提示与推荐卡片里的仓库链接共用显式打开，避免 iframe 拦截 target=_blank。
   document.addEventListener("click", async (event) => {
     const retryButton = event.target.closest("[data-retry-section]");
@@ -1605,6 +1764,16 @@ function bindEvents() {
   document.getElementById("diagnostic-clear").addEventListener("click", () => {
     clearDiagnostics().catch((error) => notify(`${t("operationFailed")}: ${error.message}`, true));
   });
+  const problemsNode = document.getElementById("diagnostic-problems");
+  if (problemsNode) {
+    problemsNode.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-problem-plugin]");
+      if (!button) return;
+      document.getElementById("diagnostic-plugin-filter").value = button.dataset.problemPlugin || "";
+      document.getElementById("diagnostic-search").value = button.dataset.problemCode || "";
+      renderDiagnostics();
+    });
+  }
   document.getElementById("diagnostic-plugin-filter").addEventListener("change", renderDiagnostics);
   document.getElementById("diagnostic-level-filter").addEventListener("change", renderDiagnostics);
   document.getElementById("diagnostic-search").addEventListener("input", () => {

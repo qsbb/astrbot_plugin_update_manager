@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title data-i18n="title">凝心溯溪-核 · 更新管理</title>
-  <link rel="stylesheet" href="./style.css" />
-    <link rel="stylesheet" href="./series-ui.css" />
+  <title data-i18n="title">凝心溯溪-核 · 模块运营中心</title>
+  <link rel="stylesheet" href="./style.css?v=0.19.1-2" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.19.1-2" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -37,10 +37,8 @@
 
     <nav class="tabs" role="tablist" aria-label="管理页分区" data-i18n-aria-label="managerSectionsLabel">
       <button id="tab-overview" class="active" role="tab" aria-selected="true" aria-controls="overview" tabindex="0" data-tab="overview" data-i18n="overview">总览</button>
-      <button id="tab-recommendations" role="tab" aria-selected="false" aria-controls="recommendations" tabindex="-1" data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
-      <button id="tab-config" role="tab" aria-selected="false" aria-controls="config" tabindex="-1" data-tab="config" data-i18n="config">配置</button>
-      <button id="tab-mirrors" role="tab" aria-selected="false" aria-controls="mirrors" tabindex="-1" data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
-      <button id="tab-catalog" role="tab" aria-selected="false" aria-controls="catalog" tabindex="-1" data-tab="catalog" data-i18n="catalog">目录</button>
+      <button id="tab-modules" role="tab" aria-selected="false" aria-controls="modules" tabindex="-1" data-tab="modules" data-i18n="modules">推荐与目录</button>
+      <button id="tab-settings" role="tab" aria-selected="false" aria-controls="settings" tabindex="-1" data-tab="settings" data-i18n="settings">设置</button>
       <button id="tab-logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1" data-tab="logs" data-i18n="logs">日志</button>
     </nav>
 
@@ -49,27 +47,44 @@
       <article class="card"><h2 data-i18n="capabilities">运行时能力</h2><div id="capabilities" class="capability-list"></div></article>
     </section>
 
-    <section id="recommendations" class="panel" role="tabpanel" aria-labelledby="tab-recommendations" tabindex="0">
+    <section id="modules" class="panel" role="tabpanel" aria-labelledby="tab-modules" tabindex="0">
       <div id="self-update-notice" class="self-update-notice" role="status" aria-live="polite" hidden></div>
       <div id="rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
-      <article class="card"><div class="section-heading"><div><h2 data-i18n="recommendationsTitle">凝心溯溪系列推荐</h2><p data-i18n="recommendationsHint">官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。</p></div><div class="section-actions"><button id="apply-all-recommendations" type="button" data-i18n="applyAll">一键全部安装/更新</button><button id="check-latest" type="button" data-i18n="checkLatest">检查最新版本</button></div></div><div id="recommendations-list" class="recommendations-list"><p data-i18n="loading">加载中…</p></div></article>
+      <div id="catalog-rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
+      <div class="card module-scope-bar si-filter-bar">
+        <label><span>范围</span><select id="module-scope">
+          <option value="all">全部</option>
+          <option value="series">只看系列推荐</option>
+          <option value="catalog">只看其他目录插件</option>
+          <option value="updates">只看有更新的模块</option>
+        </select></label>
+        <label class="module-search"><span>搜索</span><input id="module-search" type="search" placeholder="模块名称或 ID" /></label>
+        <span id="module-scope-summary" class="field-hint" role="status" aria-live="polite">正在读取模块…</span>
+      </div>
+      <p class="field-hint" data-i18n="modulesHint"></p>
+      <article class="card" data-module-scope-card="series">
+        <div class="section-heading"><div><h2 data-i18n="recommendationsTitle">凝心溯溪系列推荐</h2><p data-i18n="recommendationsHint">官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。</p></div><div class="section-actions"><button id="apply-all-recommendations" type="button" data-i18n="applyAll">一键全部安装/更新</button><button id="check-latest" type="button" data-i18n="checkLatest">检查最新版本</button><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查目录更新</button></div></div><div id="recommendations-list" class="recommendations-list"><p data-i18n="loading">加载中…</p></div>
+      </article>
+      <article class="card" data-module-scope-card="catalog">
+        <div class="section-heading"><div><h2 data-i18n="catalogTitle">其他插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。系列推荐里已经出现的模块不会在这里重复显示。</p></div></div><div id="catalog-list" class="catalog-list"></div>
+      </article>
     </section>
 
-    <section id="config" class="panel" role="tabpanel" aria-labelledby="tab-config" tabindex="0">
+    <section id="settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" tabindex="0">
+      <nav class="si-subnav" role="tablist" aria-label="设置分区">
+        <button type="button" role="tab" data-si-tab="config" data-i18n="settingsConfigTab">运行配置</button>
+        <button type="button" role="tab" data-si-tab="auto" data-i18n="settingsAutoTab">自动更新</button>
+        <button type="button" role="tab" data-si-tab="accounts" data-i18n="settingsAccountsTab">控制中心账户</button>
+        <button type="button" role="tab" data-si-tab="mirrors" data-i18n="settingsMirrorsTab">镜像与网络</button>
+      </nav>
+      <p class="field-hint" data-i18n="settingsHint"></p>
+      <div id="config" data-si-panel="config">
       <form id="config-form" class="card">
         <div class="section-heading"><div><h2 data-i18n="configTitle">配置读取与保存</h2><p data-i18n="tokenHint">敏感 token 仅显示是否已配置，留空不会覆盖。</p></div><button type="submit" data-i18n="save">保存</button></div>
         <div id="config-fields" class="form-grid"></div>
       </form>
-      <article class="card" id="webui-admins">
-        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><div class="section-actions"><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button><button id="open-webui-config" type="button" data-i18n="openWebUi">打开独立 WebUI</button></div></div>
-        <form id="webui-admin-create-form" class="admin-form">
-          <label><span data-i18n="adminUsername">用户名</span><input id="webui-admin-username" autocomplete="off" required /></label>
-          <label><span data-i18n="adminPassword">初始密码</span><input id="webui-admin-password" type="password" autocomplete="new-password" minlength="8" required /></label>
-          <label><span data-i18n="adminRole">角色</span><select id="webui-admin-role"><option value="admin">admin</option><option value="owner">owner</option><option value="viewer">viewer</option></select></label>
-          <button type="submit" data-i18n="createAdmin">创建管理员</button>
-        </form>
-        <div id="webui-admin-list" class="admin-list"><p data-i18n="loading">加载中…</p></div>
-      </article>
+      </div>
+      <div data-si-panel="auto" hidden>
       <form id="rule-form" class="card">
         <div class="section-heading"><div><h2 data-i18n="ruleTitle">每日自动更新</h2><p id="rule-gate-hint"></p></div><button type="submit" data-i18n="saveRule">保存规则</button></div>
         <div class="rule-grid">
@@ -86,9 +101,20 @@
         <fieldset class="plugin-picker"><legend data-i18n="selectPlugins">选择插件</legend><div id="rule-plugins"></div></fieldset>
         <p class="next-run"><span data-i18n="nextRun">下次运行</span>：<strong id="rule-next-run">—</strong></p>
       </form>
-    </section>
-
-    <section id="mirrors" class="panel" role="tabpanel" aria-labelledby="tab-mirrors" tabindex="0">
+      </div>
+      <div data-si-panel="accounts" hidden>
+      <article class="card" id="webui-admins">
+        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><div class="section-actions"><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button><button id="open-webui-config" type="button" data-i18n="openWebUi">打开独立 WebUI</button></div></div>
+        <form id="webui-admin-create-form" class="admin-form">
+          <label><span data-i18n="adminUsername">用户名</span><input id="webui-admin-username" autocomplete="off" required /></label>
+          <label><span data-i18n="adminPassword">初始密码</span><input id="webui-admin-password" type="password" autocomplete="new-password" minlength="8" required /></label>
+          <label><span data-i18n="adminRole">角色</span><select id="webui-admin-role"><option value="admin">admin</option><option value="owner">owner</option><option value="viewer">viewer</option></select></label>
+          <button type="submit" data-i18n="createAdmin">创建管理员</button>
+        </form>
+        <div id="webui-admin-list" class="admin-list"><p data-i18n="loading">加载中…</p></div>
+      </article>
+      </div>
+      <div id="mirrors" data-si-panel="mirrors" hidden>
       <article class="card">
         <div class="section-heading"><div><h2 data-i18n="mirrorsTitle">GitHub 镜像加速</h2><p data-i18n="mirrorsHint">加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。</p></div><button id="mirror-benchmark" type="button" data-i18n="mirrorBenchmark">一键测速</button></div>
         <div id="mirror-list" class="mirror-list"><p data-i18n="loading">加载中…</p></div>
@@ -98,11 +124,7 @@
         <div class="section-heading"><div><h2 data-i18n="mirrorAddTitle">添加自定义加速站</h2></div><button type="submit" data-i18n="mirrorAdd">添加</button></div>
         <label class="mirror-add"><span data-i18n="mirrorCustom">自定义</span><input id="mirror-add-input" type="url" inputmode="url" data-i18n-placeholder="mirrorAddPlaceholder" placeholder="https://your-mirror.example.com" required /></label>
       </form>
-    </section>
-
-    <section id="catalog" class="panel" role="tabpanel" aria-labelledby="tab-catalog" tabindex="0">
-      <div id="catalog-rate-limit-notice" class="rate-limit-notice" role="status" aria-live="polite" hidden></div>
-      <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
+      </div>
     </section>
 
     <section id="logs" class="panel" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
@@ -118,6 +140,7 @@
             <button id="diagnostic-clear" type="button" data-i18n="clearLogs">清空</button>
           </div>
         </div>
+        <div id="diagnostic-problems" class="diagnostic-problems" aria-live="polite"></div>
         <div class="diagnostic-filters">
           <label><span data-i18n="pluginFilter">插件</span><select id="diagnostic-plugin-filter"><option value="" data-i18n="allPlugins">全部插件</option></select></label>
           <label><span data-i18n="levelFilter">级别</span><select id="diagnostic-level-filter"><option value="" data-i18n="allLevels">全部级别</option><option value="DEBUG">DEBUG</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option><option value="CRITICAL">CRITICAL</option></select></label>
@@ -131,7 +154,7 @@
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script src="./series-ui.js?v=0.19.1-2"></script>
+  <script type="module" src="./app.js?v=0.19.1-2"></script>
 </body>
 </html>

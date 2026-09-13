@@ -125,7 +125,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         global _current_instance
         _current_instance = self
         self.context, self._config = context, config
-        diagnostic_event("plugin.init", "更新管理插件开始初始化")
+        diagnostic_event("plugin.init", "核（模块运营中心）开始初始化")
         self._native_config = (
             config if callable(getattr(config, "save_config", None)) else None
         )
@@ -203,7 +203,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         )
         diagnostic_event(
             "plugin.ready",
-            "更新管理插件初始化完成",
+            "核（模块运营中心）初始化完成",
             details={
                 "recovered_count": interrupted,
                 "automatic_update_enabled": self.auto_update_enabled,
@@ -1498,5 +1498,5 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 self._terminated = True
                 if _current_instance is self:
                     _current_instance = None
-        diagnostic_event("plugin.terminated", "更新管理插件已卸载")
+        diagnostic_event("plugin.terminated", "核（模块运营中心）已卸载")
         logger.info("[update-manager] terminated")

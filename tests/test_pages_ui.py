@@ -31,13 +31,15 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert '<script src="/api/plugin/page/bridge-sdk.js"></script>' in html
-    assert '<script type="module" src="./app.js"></script>' in html
+    assert 'src="./app.js?v=' in html
     assert html.index("bridge-sdk.js") < html.index("./app.js")
     assert 'data-tab="overview"' in html
-    assert 'data-tab="recommendations"' in html
-    assert 'data-tab="config"' in html
-    assert 'data-tab="mirrors"' in html
-    assert 'data-tab="catalog"' in html
+    assert 'data-tab="modules"' in html
+    assert 'data-tab="recommendations"' not in html
+    assert 'data-tab="settings"' in html
+    assert 'data-tab="config"' not in html
+    assert 'data-tab="mirrors"' not in html
+    assert 'data-tab="catalog"' not in html
     assert 'data-tab="logs"' in html
     assert 'id="tab-overview" class="active" role="tab"' in html
     assert 'id="tab-logs" role="tab" aria-selected="false"' in html
@@ -374,6 +376,64 @@ def test_recommendations_tab_does_not_start_implicit_network_check():
     assert "autoCheckRecommendations()" not in tab_handler
 
 
+def test_manager_settings_area_uses_four_sub_tabs():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+
+    assert 'id="tab-settings"' in html
+    assert 'id="settings" class="panel" role="tabpanel"' in html
+    assert html.count("data-si-tab=") == 4
+    for tab in ("config", "auto", "accounts", "mirrors"):
+        assert f'data-si-tab="{tab}"' in html
+        assert f'data-si-panel="{tab}"' in html
+    # 四个分区各自保留原有表单与列表 id，不改变保存/加载接口
+    for element_id in ("config-form", "rule-form", "webui-admins", "mirror-list", "mirror-add-form"):
+        assert f'id="{element_id}"' in html
+    # 旧顶层 tab 已合并
+    assert 'data-tab="config"' not in html
+    assert 'data-tab="mirrors"' not in html
+
+    assert "function bindSettingsSubnav()" in js
+    assert 'state.settingsTab = target;' in js
+    assert "async function loadSettingsPanel()" in js
+    assert 'settings: { targetId: "config-fields", labelKey: "settings", load: loadSettingsPanel },' in js
+    assert 'if (button.dataset.tab === "settings" && !state.settingsLoaded) {' in js
+    assert 'settings: "设置"' in js
+    assert "#settings [data-si-panel] > * + *" in css
+    assert "#settings [data-si-panel][hidden]" in css
+
+
+def test_manager_merges_recommendations_and_catalog_into_one_tab():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="tab-modules"' in html
+    assert 'id="modules" class="panel" role="tabpanel"' in html
+    assert 'id="module-scope"' in html
+    assert 'id="module-search"' in html
+    assert 'id="module-scope-summary"' in html
+    assert 'data-module-scope-card="series"' in html
+    assert 'data-module-scope-card="catalog"' in html
+    assert 'id="recommendations-list"' in html
+    assert 'id="catalog-list"' in html
+    # 两个旧面板不再存在，避免同一插件两套版本信息
+    assert 'id="catalog" class="panel"' not in html
+    assert 'id="recommendations" class="panel"' not in html
+
+    assert "function applyModuleScope()" in js
+    assert "scope === \"series\"" in js
+    assert "scope === \"catalog\"" in js
+    assert 'scope !== "updates" || item.dataset.updateAvailable === "true"' in js
+    assert "async function loadModules()" in js
+    assert "state.recommendationItems = items;" in js
+    assert "const recommended = new Set((state.recommendationItems || []).map((item) => item.plugin_id));" in js
+    assert 'data-update-available="${String(Boolean(item.update_available))}"' in js
+    assert 'modules: { targetId: "recommendations-list", labelKey: "modules", load: loadModules },' in js
+    assert 'modules: "推荐与目录"' in js
+    assert 'if (button.dataset.tab === "modules")' in js
+
+
 def test_manual_and_auto_version_check_share_one_busy_lock():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert "function setVersionCheckBusy(labelKey)" in js
@@ -411,7 +471,7 @@ def test_recommendations_show_self_update_repository_notice():
     assert "a[data-internal-route]" in js
     assert 'link.href = internalRouteUrl(installedRoute) || "#"' in js
     assert 'data-external-url="${escapeHtml(item.repo_url)}"' in js
-    assert "自身更新已禁用，请前往已安装插件页更新" in js
+    assert "核禁止自更新，请前往已安装插件页更新" in js
     assert 'goToInstalledPlugins: "前往已安装插件页"' in js
     assert ".self-update-notice" in css
 
@@ -643,7 +703,7 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     zh_block = js[js.index('"zh-CN": {') : js.index('"en-US": {')]
     en_block = js[js.index('"en-US": {') :]
     mirror_keys = (
-        "mirrors:",
+        "settingsMirrorsTab:",
         "mirrorsTitle:",
         "mirrorsHint:",
         "mirrorDirect:",
@@ -685,7 +745,9 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     resilient_refresh = js[
         js.index("const sectionLoaders") : js.index("function showStartupError")
     ]
-    assert "load: loadMirrors" in resilient_refresh
+    # 镜像与网络现在是「设置」下的子分区，随设置区一起加载。
+    assert "load: loadSettingsPanel" in resilient_refresh
+    assert "await Promise.all([loadConfig(), loadRule(), loadMirrors()]);" in js
     assert "Promise.allSettled" in resilient_refresh
 
 
