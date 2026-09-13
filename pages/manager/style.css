@@ -162,3 +162,24 @@ body[data-series-ui] #toast.error {
   color: var(--si-danger);
   background: rgba(255,240,242,.94);
 }
+
+/* 状态条、推荐版本和镜像列表统一为浅色玻璃，替换旧深色块。 */
+body[data-series-ui] .operation-status {
+  border-color: var(--si-line);
+  color: var(--si-ink);
+  background: rgba(255,255,255,.72);
+  box-shadow: var(--si-shadow);
+  backdrop-filter: blur(16px);
+}
+body[data-series-ui] .diagnostic-member,
+body[data-series-ui] .version-badge,
+body[data-series-ui] .plugin-option,
+body[data-series-ui] .mirror-item {
+  border-color: var(--si-line-solid);
+  color: var(--si-muted);
+  background: rgba(255,255,255,.48);
+}
+body[data-series-ui] .version-badge.update_available { color: var(--si-success); background: var(--si-success-soft); }
+body[data-series-ui] .version-badge.up_to_date { color: var(--si-primary-strong); background: var(--si-primary-soft); }
+body[data-series-ui] .version-badge.local_newer { color: var(--si-warning); background: var(--si-warning-soft); }
+body[data-series-ui] .version-badge.check_failed { color: var(--si-danger); background: var(--si-danger-soft); }
