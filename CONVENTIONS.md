@@ -420,7 +420,7 @@ astrbot_plugin_xxx/
 | 境 | astrbot_plugin_environment_awareness | 0.6.0 | >=4.16,<5 |
 | 声 | astrbot_plugin_voice_hub | 0.12.0 | >=4.16,<5 |
 | 临 | astrbot_plugin_embodiment_bridge | 1.7.0 | >=4.26,<5 |
-| 核 | astrbot_plugin_update_manager | 0.19.0 | >=4.16,<5 |
+| 核 | astrbot_plugin_update_manager | 0.19.1 | >=4.16,<5 |
 | 通 | astrbot_plugin_companion_phone | 0.0.4 | >=4.16,<5 |
 
 枢（astrbot_plugin_orchestration_hub 0.2.1）已忽略，不纳入治理范围，故不列于此表。

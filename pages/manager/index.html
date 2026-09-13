@@ -36,15 +36,15 @@
     </header>
 
     <nav class="tabs" role="tablist" aria-label="管理页分区" data-i18n-aria-label="managerSectionsLabel">
-      <button id="tab-logs" class="active" role="tab" aria-selected="true" aria-controls="logs" tabindex="0" data-tab="logs" data-i18n="logs">日志</button>
+      <button id="tab-overview" class="active" role="tab" aria-selected="true" aria-controls="overview" tabindex="0" data-tab="overview" data-i18n="overview">总览</button>
       <button id="tab-recommendations" role="tab" aria-selected="false" aria-controls="recommendations" tabindex="-1" data-tab="recommendations" data-i18n="recommendations">系列推荐</button>
       <button id="tab-config" role="tab" aria-selected="false" aria-controls="config" tabindex="-1" data-tab="config" data-i18n="config">配置</button>
       <button id="tab-mirrors" role="tab" aria-selected="false" aria-controls="mirrors" tabindex="-1" data-tab="mirrors" data-i18n="mirrors">镜像加速</button>
       <button id="tab-catalog" role="tab" aria-selected="false" aria-controls="catalog" tabindex="-1" data-tab="catalog" data-i18n="catalog">目录</button>
-      <button id="tab-overview" role="tab" aria-selected="false" aria-controls="overview" tabindex="-1" data-tab="overview" data-i18n="overview">总览</button>
+      <button id="tab-logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1" data-tab="logs" data-i18n="logs">日志</button>
     </nav>
 
-    <section id="overview" class="panel" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+    <section id="overview" class="panel active" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
       <div id="summary" class="cards"><p data-i18n="loading">加载中…</p></div>
       <article class="card"><h2 data-i18n="capabilities">运行时能力</h2><div id="capabilities" class="capability-list"></div></article>
     </section>
@@ -105,7 +105,7 @@
       <article class="card"><div class="section-heading"><div><h2 data-i18n="catalogTitle">插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。</p></div><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查更新</button></div><div id="catalog-list" class="catalog-list"></div></article>
     </section>
 
-    <section id="logs" class="panel active" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
+    <section id="logs" class="panel" role="tabpanel" aria-labelledby="tab-logs" tabindex="0">
       <article class="card diagnostic-card">
         <div class="section-heading">
           <div>
@@ -129,17 +129,6 @@
     </section>
     <div id="startup-error" class="startup-error" role="alert" hidden></div>
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
-    <div id="toast" role="status" aria-live="polite"></div>
-    <dialog id="confirmation-dialog" aria-labelledby="confirmation-title">
-      <form method="dialog">
-        <h2 id="confirmation-title" data-i18n="confirmTitle">确认插件操作</h2>
-        <p id="confirmation-message"></p>
-        <div class="dialog-actions">
-          <button type="submit" value="cancel" data-i18n="cancel">取消</button>
-          <button type="submit" value="confirm" class="primary" data-i18n="confirmAction">确认操作</button>
-        </div>
-      </form>
-    </dialog>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
   <script src="./series-ui.js"></script>

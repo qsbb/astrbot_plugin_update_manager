@@ -42,12 +42,51 @@ let state = {
   selectedModule: "",
 };
 const app = document.getElementById("app");
+const NAV_ITEMS = [
+  ["modules", "▦", "模块总览"],
+  ["control", "◈", "系列接管"],
+  ["recommendations", "＋", "系列推荐"],
+  ["rules", "▤", "每日规则"],
+  ["mirrors", "⇄", "镜像加速"],
+  ["diagnostics", "⌁", "运行诊断"],
+  ["updates", "↻", "更新与回滚"],
+  ["settings", "⚙", "全局设置"],
+  ["security", "◇", "安全与账户"],
+];
+const VIEW_TITLES = Object.fromEntries(NAV_ITEMS.map(([view, , label]) => [view, label]));
+
+const notify = (message, error = false) => {
+  if (window.SeriesUI?.toast) {
+    window.SeriesUI.toast(message, error ? "error" : "info");
+    return;
+  }
+  const fallback = document.querySelector("[data-toast-fallback], #bridge-error, #startup-error, #page-error");
+  if (fallback) {
+    fallback.textContent = String(message || "");
+    fallback.hidden = false;
+  } else {
+    console.error(message);
+  }
+};
 
 function parse(value) { return typeof value === "string" ? JSON.parse(value) : value; }
 function esc(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 async function get(name) { const response = await fetch(`${API_PREFIX}/${name}`, { credentials: "same-origin" }); const data = parse(await response.json()); if (!response.ok || data?.success === false) throw new Error(data.error || "请求失败"); return data; }
 async function post(name, payload, extraHeaders = {}) { const response = await fetch(`${API_PREFIX}/${name}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...extraHeaders }, body: JSON.stringify(payload || {}) }); const data = parse(await response.json()); if (!response.ok || data?.success === false) throw new Error(data.error || "请求失败"); return data; }
-function showToast(message, error = false) { const node = document.createElement("div"); node.className = `toast${error ? " error" : ""}`; node.textContent = message; document.body.appendChild(node); setTimeout(() => node.remove(), 2200); }
+
+async function confirmDialog(message, options = {}) {
+  if (window.SeriesUI?.confirm) {
+    return window.SeriesUI.confirm({
+      title: options.title || "确认操作",
+      message,
+      confirmText: options.confirmText || "确认",
+      cancelText: "取消",
+      danger: options.danger !== false,
+    });
+  }
+  notify("确认组件未加载，操作已取消", true);
+  return false;
+}
 function loginView(message = "") {
   app.innerHTML = `<section class="login"><div class="login-side"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="login-copy"><h1>把每个模块，放进同一张工作台。</h1><p>管理员账户由“核” Page 创建和维护。WebUI 只负责安全登录，不提供注册入口。</p></div><small>Dashboard Page 二次认证 · 管理员会话受服务端控制</small></div><div class="login-main"><form class="login-card" id="login-form"><h2>登录模块运营中心</h2><p>${state.configured ? "请输入在“核” Page 中配置的管理员账户。" : "当前还没有可用管理员，请先回到“核” Page 设置管理员。"}</p><div class="field"><label for="username">管理员账户</label><input id="username" name="username" autocomplete="username" required ${state.configured ? "" : "disabled"}></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required ${state.configured ? "" : "disabled"}></div><div class="error" role="alert">${esc(message)}</div><button class="btn primary" type="submit" ${state.configured ? "" : "disabled"}>安全登录</button><div class="note">WebUI 不在浏览器保存账户、密码或会话令牌。请在“核” Page 管理多个管理员、角色和禁用状态。</div></form></div></section>`;
   document.getElementById("login-form")?.addEventListener("submit", async event => {
@@ -439,12 +478,10 @@ function securityView() {
 }
 function viewContent() { if (state.view === "diagnostics") return diagnosticsView(); if (state.view === "updates") return updatesView(); if (state.view === "settings") return settingsView(); if (state.view === "control") return controlView(); if (state.view === "security") return securityView(); if (state.view === "rules") return rulesView(); if (state.view === "mirrors") return mirrorsView(); if (state.view === "recommendations") return recommendationsView(); return modulesView(); }
 function rail() {
-  const links = [["modules", "▦", "模块总览"], ["control", "◈", "系列接管"], ["recommendations", "＋", "系列推荐"], ["rules", "▤", "每日规则"], ["mirrors", "⇄", "镜像加速"], ["diagnostics", "⌁", "运行诊断"], ["updates", "↻", "更新与回滚"], ["settings", "⚙", "全局设置"], ["security", "◇", "安全与账户"]];
-  return `<aside class="rail"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="nav-label">工作区</div><nav class="nav">${links.map(([view, icon, label]) => `<button class="${state.view === view ? "active" : ""}" data-view="${view}">${icon}　${label}</button>`).join("")}</nav><div class="spacer"></div><div class="health"><b>系列健康度</b><p>${state.modules.length} 个可信模块已纳管。模块发现不执行任意第三方代码。</p><div class="bar"><i></i></div></div><div class="user"><span class="avatar">管</span><span>${esc(state.session?.username || "管理员")}</span><button class="logout" id="rail-logout">↪</button></div></aside>`;
+  return `<aside class="rail"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="nav-label">工作区</div><nav class="nav">${NAV_ITEMS.map(([view, icon, label]) => `<button class="${state.view === view ? "active" : ""}" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}">${icon}　${label}</button>`).join("")}</nav><div class="spacer"></div><div class="health"><b>系列健康度</b><p>${state.modules.length} 个可信模块已纳管。模块发现不执行任意第三方代码。</p><div class="bar"><i></i></div></div><div class="user"><span class="avatar">管</span><span>${esc(state.session?.username || "管理员")}</span><button class="logout" id="rail-logout">↪</button></div></aside>`;
 }
 function dashboard() {
-  const titles = { modules: "模块运营中心", control: "系列接管", recommendations: "系列推荐", rules: "每日规则", mirrors: "镜像加速", diagnostics: "运行诊断", updates: "更新与回滚", settings: "全局设置", security: "安全与账户" };
-  app.innerHTML = `<div class="shell">${rail()}<main class="main"><header class="topbar"><div class="crumb">凝心溯溪 / <b>核 · ${titles[state.view]}</b></div><div class="top-actions"><button class="btn" id="refresh">刷新</button><button class="btn" id="logout">退出登录</button></div></header><div class="content">${viewContent()}</div></main><nav class="mobile-nav"><button data-view="modules"><span>▦</span>模块</button><button data-view="diagnostics"><span>⌁</span>诊断</button><button data-view="settings"><span>⚙</span>设置</button><button id="mobile-logout"><span>⇥</span>退出</button></nav></div>`;
+  app.innerHTML = `<div class="shell">${rail()}<main class="main"><header class="topbar"><div class="crumb">凝心溯溪 / <b>核 · ${VIEW_TITLES[state.view] || "模块运营中心"}</b></div><div class="top-actions"><button class="btn" id="refresh">刷新</button><button class="btn" id="logout">退出登录</button></div></header><div class="content">${viewContent()}</div></main></div><nav class="mobile-nav" aria-label="移动端工作区导航">${["modules", "control", "diagnostics"].map((view) => { const item = NAV_ITEMS.find(([id]) => id === view); return `<button class="${state.view === view ? "active" : ""}" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${item[1]}</span>${item[2]}</button>`; }).join("")}<button id="mobile-more" aria-expanded="false"><span>⋯</span>更多</button></nav><div id="mobile-more-sheet" class="si-mobile-more-sheet" hidden>${NAV_ITEMS.filter(([view]) => !["modules", "control", "diagnostics"].includes(view)).map(([view, icon, label]) => `<button class="btn" data-view="${view}" aria-current="${state.view === view ? "page" : "false"}"><span>${icon}</span>${label}</button>`).join("")}<button class="btn" id="mobile-logout"><span>⇥</span>退出</button></div>`;
   bindDashboard();
 }
 function bindDashboard() {
@@ -457,6 +494,8 @@ function bindDashboard() {
   document.querySelectorAll("[data-route-provider]").forEach(node => node.addEventListener("change", () => { const kind = node.dataset.routeProvider; const model = document.querySelector(`[data-route-model="${CSS.escape(kind)}"]`); const next = modelSelect(kind, node.value, "", !(model?.disabled)); if (model) { const wrapper = model.parentElement; wrapper.innerHTML = next; bindRouteModels(); } }));
   bindRouteModels();
   document.getElementById("check-updates")?.addEventListener("click", () => checkUpdates()); document.getElementById("reload-transactions")?.addEventListener("click", () => loadTransactions()); document.querySelectorAll("[data-rollback]").forEach(node => node.addEventListener("click", () => rollbackUpdate(node.dataset.rollback)));
+  document.getElementById("mobile-more")?.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); sheet.hidden = !sheet.hidden; document.getElementById("mobile-more")?.setAttribute("aria-expanded", String(!sheet.hidden)); });
+  document.querySelectorAll("#mobile-more-sheet [data-view], #mobile-more-sheet #mobile-logout").forEach(node => node.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); if (sheet) sheet.hidden = true; document.getElementById("mobile-more")?.setAttribute("aria-expanded", "false"); }));
   document.querySelectorAll("[data-view]").forEach(node => node.addEventListener("click", () => { state.view = node.dataset.view || "modules"; state.selectedModule = node.dataset.module || ""; if (state.view === "diagnostics") loadDiagnostics(); else if (state.view === "settings") loadSettings(); else if (state.view === "updates") { dashboard(); loadTransactions(); } else if (state.view === "control") loadControl(); else if (state.view === "rules") loadRules(); else if (state.view === "mirrors") loadMirrors(); else if (state.view === "recommendations") loadRecommendations(); else if (state.view === "security") loadAdmins(); else dashboard(); }));
   document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", async () => { state.logModules = [node.dataset.diagnostic]; await loadDiagnostics(); })); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
   document.querySelectorAll("[data-filter]").forEach(node => node.addEventListener("click", () => { state.filter = node.dataset.filter; dashboard(); })); const query = document.getElementById("query"); query?.addEventListener("input", () => { state.query = query.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("query"); next?.focus(); next?.setSelectionRange(state.query.length, state.query.length); }); });
@@ -475,7 +514,7 @@ function bindDashboard() {
   document.querySelectorAll("[data-control-open]").forEach(node => node.addEventListener("click", async () => { state.view = "control"; await loadControl(); await loadControlPlugin(node.dataset.controlOpen); }));
   document.querySelectorAll("[data-install]").forEach(node => node.addEventListener("click", () => installModule(node.dataset.install)));
 }
-async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { showToast(error.message, true); } }
+async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { notify(error.message, true); } }
 function logCursors() { const cursors = {}; const streams = {}; (state.logMembers || []).forEach(item => { cursors[item.plugin_id] = item.reset ? 0 : (item.next_seq || 0); streams[item.plugin_id] = item.stream_id || ""; }); return { cursors, streams }; }
 async function loadDiagnosticLogs(reset = false) {
   try {
@@ -488,11 +527,11 @@ async function loadDiagnosticLogs(reset = false) {
     state.logs = [...state.logs, ...incoming];
     if (state.logs.length > 3000) state.logs = state.logs.slice(-3000);
     dashboard();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function clearDiagnosticLogs() {
-  if (!confirm("清空所有模块的诊断日志？该操作不可恢复。")) return;
-  try { await post("diagnostics/clear", { confirm: true }); state.logs = []; state.logMembers = []; showToast("诊断日志已清空"); await loadDiagnostics(); } catch (error) { showToast(error.message, true); }
+  if (!(await confirmDialog("清空所有模块的诊断日志？该操作不可恢复。"))) return;
+  try { await post("diagnostics/clear", { confirm: true }); state.logs = []; state.logMembers = []; notify("诊断日志已清空"); await loadDiagnostics(); } catch (error) { notify(error.message, true); }
 }
 function toggleLogAuto() {
   state.logAuto = !state.logAuto;
@@ -501,17 +540,17 @@ function toggleLogAuto() {
   dashboard();
 }
 async function checkUpdates() {
-  try { showToast("正在检查更新…"); state.updatesCheck = await post("updates/check", {}); showToast("检查完成"); await loadDashboard(); if (state.view === "updates") await loadTransactions(); } catch (error) { showToast(error.message, true); }
+  try { notify("正在检查更新…"); state.updatesCheck = await post("updates/check", {}); notify("检查完成"); await loadDashboard(); if (state.view === "updates") await loadTransactions(); } catch (error) { notify(error.message, true); }
 }
 async function loadTransactions() {
-  try { state.transactions = (await get("updates/transactions")).transactions || []; if (state.view === "updates") dashboard(); } catch (error) { showToast(error.message, true); }
+  try { state.transactions = (await get("updates/transactions")).transactions || []; if (state.view === "updates") dashboard(); } catch (error) { notify(error.message, true); }
 }
 async function rollbackUpdate(txId) {
-  if (!confirm("确定回滚该次更新？插件将恢复到更新前版本并热重载。")) return;
-  try { const result = await post("updates/rollback", { tx_id: txId }); showToast(`已回滚 ${result.plugin_id || ""} → v${result.from_version || "?"}`); await Promise.all([loadDashboard(), loadTransactions()]); } catch (error) { showToast(error.message, true); }
+  if (!(await confirmDialog("确定回滚该次更新？插件将恢复到更新前版本并热重载。"))) return;
+  try { const result = await post("updates/rollback", { tx_id: txId }); notify(`已回滚 ${result.plugin_id || ""} → v${result.from_version || "?"}`); await Promise.all([loadDashboard(), loadTransactions()]); } catch (error) { notify(error.message, true); }
 }
 async function loadRules() {
-  try { state.rulesData = await get("rules"); } catch (error) { showToast(error.message, true); }
+  try { state.rulesData = await get("rules"); } catch (error) { notify(error.message, true); }
   if (state.view === "rules") dashboard();
 }
 async function saveRule() {
@@ -532,40 +571,40 @@ async function saveRule() {
     on_failure: document.getElementById("rule-failure")?.value || "rollback_continue",
     prerelease: !!document.getElementById("rule-prerelease")?.checked,
   };
-  try { await post("rules", payload); showToast("每日规则已保存并重建调度"); await loadRules(); } catch (error) { showToast(error.message, true); await loadRules(); }
+  try { await post("rules", payload); notify("每日规则已保存并重建调度"); await loadRules(); } catch (error) { notify(error.message, true); await loadRules(); }
 }
 async function loadMirrors() {
-  try { state.mirrorsData = await get("mirrors"); } catch (error) { showToast(error.message, true); }
+  try { state.mirrorsData = await get("mirrors"); } catch (error) { notify(error.message, true); }
   if (state.view === "mirrors") dashboard();
 }
 async function saveMirror() {
   const selected = document.querySelector('input[name="mirror-choice"]:checked')?.value || "";
-  try { await post("settings", { github_mirror: selected }); showToast(selected ? "镜像已启用" : "已恢复 GitHub 直连"); await loadMirrors(); } catch (error) { showToast(error.message, true); }
+  try { await post("settings", { github_mirror: selected }); notify(selected ? "镜像已启用" : "已恢复 GitHub 直连"); await loadMirrors(); } catch (error) { notify(error.message, true); }
 }
 async function benchmarkMirrors() {
   const urls = (state.mirrorsData?.candidates || []).map(item => item.url);
-  try { const result = await post("mirrors/benchmark", { mirrors: urls }); state.mirrorResults = result.results || []; showToast(`测速完成：${state.mirrorResults.length} 个站点`); dashboard(); } catch (error) { showToast(error.message, true); }
+  try { const result = await post("mirrors/benchmark", { mirrors: urls }); state.mirrorResults = result.results || []; notify(`测速完成：${state.mirrorResults.length} 个站点`); dashboard(); } catch (error) { notify(error.message, true); }
 }
 async function loadRecommendations() {
-  try { state.recommendationsData = await get("recommendations"); } catch (error) { showToast(error.message, true); }
+  try { state.recommendationsData = await get("recommendations"); } catch (error) { notify(error.message, true); }
   if (state.view === "recommendations") dashboard();
 }
 async function checkRecommendations() {
-  try { state.recommendationsData = await post("recommendations/check", {}); showToast("最新版本检查完成"); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { showToast(error.message, true); }
+  try { state.recommendationsData = await post("recommendations/check", {}); notify("最新版本检查完成"); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { notify(error.message, true); }
 }
 async function applyAllRecommendations() {
-  if (!confirm("确定安装未安装模块并更新所有确有新版本的模块？核自身不会更新。")) return;
-  try { const result = await post("recommendations/apply-all", { confirm: true }); showToast(`批量完成：成功 ${result.succeeded} / 失败 ${result.failed}`); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { showToast(error.message, true); }
+  if (!(await confirmDialog("确定安装未安装模块并更新所有确有新版本的模块？核自身不会更新。"))) return;
+  try { const result = await post("recommendations/apply-all", { confirm: true }); notify(`批量完成：成功 ${result.succeeded} / 失败 ${result.failed}`); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { notify(error.message, true); }
 }
 async function loadAdmins() {
-  try { state.adminsData = await get("admins"); } catch (error) { showToast(error.message, true); }
+  try { state.adminsData = await get("admins"); } catch (error) { notify(error.message, true); }
   if (state.view === "security") dashboard();
 }
 async function createAdmin() {
   const username = document.getElementById("admin-new-username")?.value.trim() || "";
   const password = document.getElementById("admin-new-password")?.value || "";
   const role = document.getElementById("admin-new-role")?.value || "viewer";
-  try { await post("admins/create", { username, password, role }); showToast(`已创建 ${username}`); await loadAdmins(); } catch (error) { showToast(error.message, true); }
+  try { await post("admins/create", { username, password, role }); notify(`已创建 ${username}`); await loadAdmins(); } catch (error) { notify(error.message, true); }
 }
 async function updateAdmin(adminId) {
   const role = document.querySelector(`[data-admin-role="${CSS.escape(adminId)}"]`)?.value || "viewer";
@@ -573,7 +612,7 @@ async function updateAdmin(adminId) {
   const password = document.querySelector(`[data-admin-password="${CSS.escape(adminId)}"]`)?.value || "";
   const payload = { admin_id: adminId, role, enabled };
   if (password) payload.password = password;
-  try { await post("admins/update", payload); showToast("账户已更新"); await loadAdmins(); } catch (error) { showToast(error.message, true); }
+  try { await post("admins/update", payload); notify("账户已更新"); await loadAdmins(); } catch (error) { notify(error.message, true); }
 }
 async function loadSettings() {
   try {
@@ -581,10 +620,10 @@ async function loadSettings() {
     try { state.modelOptions = await get("model-options"); } catch (error) { state.modelOptions = null; }
     try { state.routes = await get("model-routing"); } catch (error) { state.routes = null; }
     if (state.view === "settings") dashboard();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function saveSettings() {
-  if (!(state.session?.role === "owner" || state.session?.role === "admin")) { showToast("设置修改仅 admin 及以上可执行", true); return; }
+  if (!(state.session?.role === "owner" || state.session?.role === "admin")) { notify("设置修改仅 admin 及以上可执行", true); return; }
   const routes = {};
   document.querySelectorAll("[data-route-provider]").forEach(node => {
     const kind = node.dataset.routeProvider;
@@ -605,7 +644,7 @@ async function saveSettings() {
   const host = document.getElementById("setting-webui-host")?.value.trim() || "";
   const portRaw = document.getElementById("setting-webui-port")?.value.trim() || "";
   const publicUrl = document.getElementById("setting-webui-url")?.value.trim() || "";
-  if (portRaw) { const port = parseInt(portRaw, 10); if (!(port >= 1 && port <= 65535)) { showToast("WebUI 端口必须是 1-65535", true); return; } payload.webui_port = port; }
+  if (portRaw) { const port = parseInt(portRaw, 10); if (!(port >= 1 && port <= 65535)) { notify("WebUI 端口必须是 1-65535", true); return; } payload.webui_port = port; }
   if (host) payload.webui_host = host;
   if (publicUrl) payload.webui_public_url = publicUrl;
   document.querySelectorAll("[data-setting-key]").forEach(node => {
@@ -619,10 +658,10 @@ async function saveSettings() {
     if (type === "float") { const value = parseFloat(raw); if (Number.isFinite(value)) payload[key] = value; return; }
     payload[key] = raw;
   });
-  try { const result = await post("settings", payload); showToast("设置已保存并生效（连接项重启后生效）"); await Promise.all([loadSettings(), loadDashboard()]); } catch (error) { showToast(error.message, true); }
+  try { const result = await post("settings", payload); notify("设置已保存并生效（连接项重启后生效）"); await Promise.all([loadSettings(), loadDashboard()]); } catch (error) { notify(error.message, true); }
 }
-async function loadModelRouting() { try { state.routes = await get("model-routing"); state.view = "settings"; dashboard(); } catch (error) { showToast(error.message, true); } }
-async function loadControl() { try { state.control = await get("series/control"); state.view = "control"; dashboard(); } catch (error) { showToast(error.message, true); } }
+async function loadModelRouting() { try { state.routes = await get("model-routing"); state.view = "settings"; dashboard(); } catch (error) { notify(error.message, true); } }
+async function loadControl() { try { state.control = await get("series/control"); state.view = "control"; dashboard(); } catch (error) { notify(error.message, true); } }
 async function loadControlPlugin(pluginId) {
   state.selectedControlPlugin = pluginId;
   state.controlTab = "fields";
@@ -643,7 +682,7 @@ async function loadControlPlugin(pluginId) {
   else state.takeoverDisabled = String(panelsResult.reason?.message || panelsResult.reason || "").includes("TAKEOVER_DISABLED");
   const panelCount = state.panelsList?.panels?.length || 0;
   if (!state.controlSchema && panelCount > 0) state.controlTab = "panels";
-  if (!state.controlSchema && panelCount === 0) showToast("该插件未提供统一接管或管理面板契约", true);
+  if (!state.controlSchema && panelCount === 0) notify("该插件未提供统一接管或管理面板契约", true);
   state.view = "control"; dashboard();
   if (panelCount > 0) loadPanelData(state.panelsList.panels[0].id);
 }
@@ -675,29 +714,29 @@ async function applyControlPatch() {
   const snapshot = state.controlSnapshot;
   if (!pluginId || !schema) return;
   const patch = collectControlPatch(schema, snapshot);
-  if (!Object.keys(patch).length) { showToast("没有修改需要应用"); return; }
+  if (!Object.keys(patch).length) { notify("没有修改需要应用"); return; }
   try {
     const revision = schema.revision;
     await post(`series/${encodeURIComponent(pluginId)}/control/validate`, { patch, expected_revision: revision });
     await post(`series/${encodeURIComponent(pluginId)}/control/apply`, { patch, expected_revision: revision });
-    showToast("覆盖已应用");
+    notify("覆盖已应用");
     await loadControlPlugin(pluginId);
     await loadControl();
   } catch (error) {
-    showToast(error.message, true);
+    notify(error.message, true);
     if (String(error.message).includes("REVISION")) await loadControlPlugin(pluginId);
   }
 }
 async function resetControlFields() {
   const pluginId = state.selectedControlPlugin;
   if (!pluginId) return;
-  if (!confirm("重置该插件的全部核覆盖字段？插件自身配置将立即恢复生效。")) return;
+  if (!(await confirmDialog("重置该插件的全部核覆盖字段？插件自身配置将立即恢复生效。"))) return;
   try {
     await post(`series/${encodeURIComponent(pluginId)}/control/reset`, { fields: null });
-    showToast("已恢复插件自身配置");
+    notify("已恢复插件自身配置");
     await loadControlPlugin(pluginId);
     await loadControl();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function refreshControlFields() {
   if (state.selectedControlPlugin) await loadControlPlugin(state.selectedControlPlugin);
@@ -710,7 +749,7 @@ async function loadPanelsList() {
     state.panelData = null;
     state.selectedPanel = "";
     dashboard();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function loadPanelData(panelId) {
   const pluginId = state.selectedControlPlugin;
@@ -719,7 +758,7 @@ async function loadPanelData(panelId) {
     state.selectedPanel = panelId;
     state.panelData = await get(`series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}`);
     dashboard();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function uploadArtifact(file, pluginId, panelId) {
   const form = new FormData();
@@ -758,20 +797,20 @@ async function runPanelAction(actionId) {
     if (field.type === "number") payload[field.name] = value === "" ? null : Number(value);
     else if (value !== "" || field.secret !== true) payload[field.name] = value;
   });
-  if (missing) { showToast("请填写动作所需的必填字段", true); return; }
+  if (missing) { notify("请填写动作所需的必填字段", true); return; }
   try {
     for (const [name, file, multiple] of fileUploads) {
       const artifactId = await uploadArtifact(file, pluginId, panelId);
       if (multiple) payload[name] = [...(Array.isArray(payload[name]) ? payload[name] : []), artifactId];
       else payload[name] = artifactId;
     }
-  } catch (error) { showToast(error.message, true); return; }
-  if (action.confirm && !confirm(action.confirm)) return;
+  } catch (error) { notify(error.message, true); return; }
+  if (action.confirm && !(await confirmDialog(action.confirm))) return;
   const headers = { "X-Request-Id": (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`) };
   if (action.revision_required && state.panelData?.revision != null) headers["X-Expected-Revision"] = String(state.panelData.revision);
   try {
     const result = await post(`series/${encodeURIComponent(pluginId)}/panels/${encodeURIComponent(panelId)}/actions/${encodeURIComponent(actionId)}`, payload, headers);
-    showToast(result.message || "操作完成");
+    notify(result.message || "操作完成");
     if (result.job_id) { pollJob(result.job_id, panelId); return; }
     if ((Array.isArray(result.artifacts) && result.artifacts.length) || result.audio?.artifact_id) {
       state.panelData = {
@@ -783,16 +822,16 @@ async function runPanelAction(actionId) {
       return;
     }
     await loadPanelData(panelId);
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 async function installModule(pluginId) {
-  if (state.session?.role !== "owner") { showToast("安装仅 owner 可执行", true); return; }
-  if (!confirm(`确定安装「${pluginId}」？`)) return;
+  if (state.session?.role !== "owner") { notify("安装仅 owner 可执行", true); return; }
+  if (!(await confirmDialog(`确定安装「${pluginId}」？`))) return;
   try {
     const result = await post(`series/${encodeURIComponent(pluginId)}/lifecycle/install`, {});
-    showToast(result.message || `已请求安装 ${pluginId}`);
+    notify(result.message || `已请求安装 ${pluginId}`);
     await loadDashboard();
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
 function streamPanel(pluginId, panelId) {
   const output = document.getElementById("panel-stream");
@@ -811,33 +850,33 @@ async function pollJob(jobId, panelId) {
     try {
       const job = await get(`jobs/${encodeURIComponent(jobId)}`);
       const progress = Math.round((job.progress || 0) * 100);
-      if (job.message) showToast(`${job.message} ${progress}%`);
+      if (job.message) notify(`${job.message} ${progress}%`);
       if (job.status === "done") { await loadPanelData(panelId); return; }
-      if (job.status === "failed") { showToast(job.error || "任务失败", true); return; }
+      if (job.status === "failed") { notify(job.error || "任务失败", true); return; }
       if (job.status === "cancelled") return;
-    } catch (error) { showToast(error.message, true); return; }
+    } catch (error) { notify(error.message, true); return; }
   }
-  showToast("任务轮询超时，请稍后刷新面板", true);
+  notify("任务轮询超时，请稍后刷新面板", true);
 }
 async function runLifecycle(action) {
   const pluginId = state.selectedControlPlugin;
   if (!pluginId) return;
-  if (state.session?.role !== "owner") { showToast("生命周期操作仅 owner 可执行", true); return; }
+  if (state.session?.role !== "owner") { notify("生命周期操作仅 owner 可执行", true); return; }
   const labels = { install: "安装", update: "更新", enable: "启用", disable: "停用" };
   const forceNode = document.getElementById("lifecycle-force");
   const force = action === "update" && forceNode && forceNode.checked;
   const confirmText = force ? `确定强制更新「${pluginId}」？远端版本将覆盖本地代码。` : `确定对「${pluginId}」执行${labels[action] || action}？`;
-  if (!confirm(confirmText)) return;
+  if (!(await confirmDialog(confirmText))) return;
   try {
     const result = await post(`series/${encodeURIComponent(pluginId)}/lifecycle/${action}`, { force });
-    showToast(`${labels[action] || action}完成${result.version ? ` · v${result.version}` : ""}`);
+    notify(`${labels[action] || action}完成${result.version ? ` · v${result.version}` : ""}`);
     await loadDashboard();
     await loadControl();
     if (state.selectedControlPlugin) await loadControlPlugin(state.selectedControlPlugin);
-  } catch (error) { showToast(error.message, true); }
+  } catch (error) { notify(error.message, true); }
 }
-async function toggleControl() { try { const next = state.control?.mode === "managed" ? "native" : "managed"; await post("series/control/mode", { mode: next }); await loadControl(); showToast(next === "managed" ? "统一接管已启用" : "已恢复插件自身配置"); } catch (error) { showToast(error.message, true); } }
-function exportSummary() { const payload = { generated_at: new Date().toISOString(), modules: state.modules.map(item => ({ plugin_id: item.plugin_id, version: item.version, status: item.status, contracts: item.contracts })) }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "series-control-summary.json"; link.hidden = true; document.body.appendChild(link); link.click(); window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000); showToast("已生成脱敏诊断摘要"); }
+async function toggleControl() { try { const next = state.control?.mode === "managed" ? "native" : "managed"; await post("series/control/mode", { mode: next }); await loadControl(); notify(next === "managed" ? "统一接管已启用" : "已恢复插件自身配置"); } catch (error) { notify(error.message, true); } }
+function exportSummary() { const payload = { generated_at: new Date().toISOString(), modules: state.modules.map(item => ({ plugin_id: item.plugin_id, version: item.version, status: item.status, contracts: item.contracts })) }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "series-control-summary.json"; link.hidden = true; document.body.appendChild(link); link.click(); window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000); notify("已生成脱敏诊断摘要"); }
 async function loadDashboard() { try { const session = await get("session"); state.configured = !!session.configured; if (!session.authenticated) { state.authenticated = false; loginView(); return; } state.authenticated = true; state.session = session.session; const modules = await get("modules"); state.modules = modules.modules || []; if (state.view === "settings") await loadSettings(); else if (state.view === "diagnostics") await loadDiagnostics(); else if (state.view === "updates") { dashboard(); await loadTransactions(); } else if (state.view === "control") await loadControl(); else if (state.view === "rules") await loadRules(); else if (state.view === "mirrors") await loadMirrors(); else if (state.view === "recommendations") await loadRecommendations(); else if (state.view === "security") await loadAdmins(); else dashboard(); } catch (error) { loginView(error.message); } }
 async function logout() { try { await post("logout", {}); } finally { state.authenticated = false; state.session = null; loginView(); } }
 async function start() { try { await loadDashboard(); } catch (error) { loginView(error.message); } }

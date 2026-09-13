@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
 from pathlib import Path
 
@@ -77,6 +78,74 @@ def verify(root: Path) -> list[str]:
     return errors
 
 
+def audit_interactions(root: Path) -> dict[str, list[str]]:
+    """Audit page-owned interaction implementations that bypass SeriesUI.
+
+    Native dialogs, page-local toast implementations, and static #toast nodes are
+    hard errors. Static page modals are reported as warnings because some legacy
+    business dialogs still need a migration pass.
+    """
+    root = root.resolve()
+    errors: list[str] = []
+    warnings: list[str] = []
+    native_dialog = re.compile(
+        r"(?:window|globalThis|self)\s*\??\s*\.\s*(alert|confirm|prompt)\s*\("
+        r"|(?<![.\w])(alert|confirm|prompt)\s*\("
+    )
+    local_toast = re.compile(
+        r"(?:function\s+|(?:const|let|var)\s+)(toast|showToast)\s*(?:=|\(|\{)"
+    )
+    static_toast = re.compile(r"""id=["']toast["']""")
+    static_modal = re.compile(r"""class=["'][^"']*\bmodal(?:\s|["'])""")
+    page_css_toast = re.compile(r"#toast\b")
+    page_css_generic_toast = re.compile(r"(?<![-\w])\.toast\s*(?:[,{])")
+    fallback_node = re.compile(r"""data-toast-fallback|id=["'](?:bridge-error|startup-error|page-error)["']""")
+    for plugin_id, page_dirs in TARGETS.items():
+        for page_dir in page_dirs:
+            target = root / plugin_id / page_dir
+            if not target.is_dir():
+                continue
+            for script in sorted(target.glob("*.js")):
+                if script.name == "series-ui.js":
+                    continue
+                text = script.read_text(encoding="utf-8", errors="ignore")
+                for match in native_dialog.finditer(text):
+                    errors.append(
+                        f"native dialog bypass: {plugin_id}/{page_dir}/{script.name} ({match.group(1) or match.group(2)})"
+                    )
+                for match in local_toast.finditer(text):
+                    errors.append(
+                        f"page-local toast bypass: {plugin_id}/{page_dir}/{script.name} ({match.group(1)})"
+                    )
+            index = target / "index.html"
+            if not index.is_file():
+                continue
+            html = index.read_text(encoding="utf-8", errors="ignore")
+            if static_toast.search(html):
+                errors.append(f"static #toast node: {plugin_id}/{page_dir}/index.html")
+            if static_modal.search(html):
+                warnings.append(
+                    f"static modal remains page-owned: {plugin_id}/{page_dir}/index.html"
+                )
+            for css in sorted(target.glob("*.css")):
+                if css.name == "series-ui.css":
+                    continue
+                css_text = css.read_text(encoding="utf-8", errors="ignore")
+                if page_css_toast.search(css_text):
+                    errors.append(f"page-local #toast CSS: {plugin_id}/{page_dir}/{css.name}")
+                if page_css_generic_toast.search(css_text):
+                    warnings.append(
+                        f"page-local .toast CSS override: {plugin_id}/{page_dir}/{css.name}"
+                    )
+            if (target / "index.html").is_file() and not fallback_node.search(html):
+                if any("const notify =" in script.read_text(encoding="utf-8", errors="ignore")
+                       for script in target.glob("*.js") if script.name != "series-ui.js"):
+                    warnings.append(
+                        f"notify() has no inline fallback node: {plugin_id}/{page_dir}/index.html"
+                    )
+    return {"errors": errors, "warnings": warnings}
+
+
 def sync(root: Path) -> list[str]:
     root = root.resolve()
     source = root / "astrbot_plugin_update_manager" / "ui"
@@ -107,8 +176,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"synced {path}")
         return 0
     errors = verify(root)
+    interactions = audit_interactions(root)
+    errors.extend(interactions["errors"])
+    for warning in interactions["warnings"]:
+        print(f"WARNING: {warning}")
     for error in errors:
-        print(error)
+        print(f"ERROR: {error}")
     print(f"series.ui {UI_VERSION}: {'ok' if not errors else 'drift'}")
     return 1 if errors else 0
 

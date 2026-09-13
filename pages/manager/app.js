@@ -53,6 +53,20 @@ const messages = {
   }
 };
 
+const notify = (message, error = false) => {
+  if (window.SeriesUI?.toast) {
+    window.SeriesUI.toast(message, error ? "error" : "info");
+    return;
+  }
+  const fallback = document.querySelector("[data-toast-fallback], #bridge-error, #startup-error, #page-error");
+  if (fallback) {
+    fallback.textContent = String(message || "");
+    fallback.hidden = false;
+  } else {
+    console.error(message);
+  }
+};
+
 let bridge = null;
 
 function readStoredLocale() {
@@ -307,10 +321,10 @@ function revealWebUiUrl(url) {
 async function copyInstalledPageUrl(link, url) {
   revealInstalledPageUrl(link, url);
   if (await copyText(url)) {
-    toast(t("installedPageUrlCopied"));
+    notify(t("installedPageUrlCopied"));
     return;
   }
-  toast(t("copyWebUiManual"), true);
+  notify(t("copyWebUiManual"), true);
 }
 
 async function openSelfUpdateTarget(link, route) {
@@ -319,19 +333,7 @@ async function openSelfUpdateTarget(link, route) {
   return false;
 }
 
-function toast(message, error = false) {
-  if (window.SeriesUI?.toast) {
-    window.SeriesUI.toast(message, error ? "error" : "info");
-    return;
-  }
-  const node = document.getElementById("toast");
-  if (!node) return;
-  node.textContent = message;
-  node.classList.toggle("error", error);
-  node.classList.add("visible");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => node.classList.remove("visible"), 2600);
-}
+
 
 function applyI18n() {
   document.documentElement.lang = state.locale;
@@ -438,17 +440,17 @@ async function openStandaloneWebUi() {
     }
     if (openStandaloneWebUiInFrame()) return;
     revealWebUiUrl(data.url);
-    toast(t("openWebUiBlocked"), true);
+    notify(t("openWebUiBlocked"), true);
   } catch (error) {
     if (popup && !popup.closed) popup.close();
     if (data?.url) {
       renderWebUiAddress(data);
       if (openStandaloneWebUiInFrame()) return;
       revealWebUiUrl(data.url);
-      toast(t("openWebUiBlocked"), true);
+      notify(t("openWebUiBlocked"), true);
       return;
     }
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   }
 }
 
@@ -464,7 +466,7 @@ function normalizeStandaloneWebUiUrl(value) {
 
 function openStandaloneWebUiInFrame() {
   const url = normalizeStandaloneWebUiUrl(state.webUi?.url || document.getElementById("webui-manual-url")?.value);
-  if (!url) { toast(t("webuiAddressUnavailable"), true); return false; }
+  if (!url) { notify(t("webuiAddressUnavailable"), true); return false; }
   // sandbox 只禁止顶层导航/弹窗，不允许改父页面；导航当前 iframe 是唯一
   // 不依赖宿主源码修改的一键打开路径。浏览器后退即可回到 Plugin Page。
   window.location.assign(url);
@@ -479,19 +481,19 @@ async function copyStandaloneWebUiLink() {
     if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
     renderWebUiAddress(data);
     if (await copyText(data.url)) {
-      toast(t("copiedWebUiLink"));
+      notify(t("copiedWebUiLink"));
       return;
     }
     revealWebUiUrl(data.url);
-    toast(t("copyWebUiManual"), true);
+    notify(t("copyWebUiManual"), true);
   } catch (error) {
     if (data?.url) {
       renderWebUiAddress(data);
       revealWebUiUrl(data.url);
-      toast(t("copyWebUiManual"), true);
+      notify(t("copyWebUiManual"), true);
       return;
     }
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   }
 }
 
@@ -525,22 +527,30 @@ async function createWebUiAdmin(event) {
   try {
     await apiPost("webui/admins/create", { username, password, role });
     form.reset();
-    toast(t("adminCreated"));
+    notify(t("adminCreated"));
     await loadWebUiAdmins();
-  } catch (error) { toast(`${t("operationFailed")}: ${error.message}`, true); }
+  } catch (error) { notify(`${t("operationFailed")}: ${error.message}`, true); }
   finally { button.disabled = false; }
 }
 
 async function updateWebUiAdmin(adminId, action) {
   if (action === "password") {
-    const password = window.prompt(t("adminNewPassword"));
+    const password = window.SeriesUI?.prompt
+      ? await window.SeriesUI.prompt({
+        title: t("adminNewPassword"),
+        message: "",
+        input: { type: "password", label: t("adminNewPassword") },
+        confirmText: t("confirmAction"),
+        cancelText: t("cancel"),
+      })
+      : null;
     if (password === null) return;
     await apiPost("webui/admins/update", { admin_id: adminId, password });
-    toast(t("adminUpdated"));
+    notify(t("adminUpdated"));
   } else {
-    if (action === "disable" && !window.confirm(t("adminConfirmDisable"))) return;
+    if (action === "disable" && !(await showConfirmation(t("adminConfirmDisable")))) return;
     await apiPost("webui/admins/update", { admin_id: adminId, enabled: action === "enable" });
-    toast(action === "enable" ? t("adminEnable") : t("adminDisabled"));
+    notify(action === "enable" ? t("adminEnable") : t("adminDisabled"));
   }
   await loadWebUiAdmins();
 }
@@ -601,14 +611,14 @@ async function saveRule(event) {
       await apiPost("rule", payload);
       await apiPost("config", { auto_update_enabled: true });
     }
-    toast(t("ruleSaved"));
+    notify(t("ruleSaved"));
   } catch (error) {
     try {
       await apiPost("config", { auto_update_enabled: false });
     } catch (safetyError) {
       console.error("Failed to close automatic-update master switch", safetyError);
     }
-    toast(`${t("saveFailed")}: ${error.message}`, true);
+    notify(`${t("saveFailed")}: ${error.message}`, true);
   } finally {
     await Promise.allSettled([loadConfig(), loadRule(), loadOverview()]);
     setFormBusy(form, false);
@@ -637,9 +647,9 @@ async function saveConfig(event) {
   }
   try {
     await apiPost("config", payload);
-    toast(t("saved"));
+    notify(t("saved"));
     await Promise.allSettled([loadConfig(), loadOverview()]);
-  } catch (error) { toast(`${t("saveFailed")}: ${error.message}`, true); }
+  } catch (error) { notify(`${t("saveFailed")}: ${error.message}`, true); }
   finally {
     setFormBusy(form, false);
   }
@@ -701,9 +711,9 @@ async function benchmarkMirrors() {
   try {
     const data = await apiPost("mirrors/benchmark", {});
     for (const result of data.results || []) state.mirrorLatency[result.url] = result;
-    toast(t("mirrorBenchmarkDone"));
+    notify(t("mirrorBenchmarkDone"));
   } catch (error) {
-    toast(`${t("loadFailed")}: ${error.message}`, true);
+    notify(`${t("loadFailed")}: ${error.message}`, true);
   } finally {
     state.mirrorBusy = false;
     renderMirrors();
@@ -713,15 +723,15 @@ async function benchmarkMirrors() {
 async function selectMirror(value) {
   const mirror = normalizeMirrorInput(value);
   if (mirror && !isValidMirror(mirror)) {
-    toast(t("mirrorInvalid"), true);
+    notify(t("mirrorInvalid"), true);
     await loadMirrors();
     return;
   }
   try {
     await apiPost("config", { github_mirror: mirror });
-    toast(t("mirrorApplied"));
+    notify(t("mirrorApplied"));
   } catch (error) {
-    toast(`${t("saveFailed")}: ${error.message}`, true);
+    notify(`${t("saveFailed")}: ${error.message}`, true);
   } finally {
     await Promise.all([loadMirrors(), loadConfig()]);
   }
@@ -730,9 +740,9 @@ async function selectMirror(value) {
 async function saveMirrorCandidates(candidates, successKey) {
   try {
     await apiPost("config", { github_mirror_candidates: candidates.join("\n") });
-    toast(t(successKey));
+    notify(t(successKey));
   } catch (error) {
-    toast(`${t("saveFailed")}: ${error.message}`, true);
+    notify(`${t("saveFailed")}: ${error.message}`, true);
   } finally {
     await Promise.all([loadMirrors(), loadConfig()]);
   }
@@ -743,13 +753,13 @@ async function addCustomMirror(event) {
   const input = document.getElementById("mirror-add-input");
   const mirror = normalizeMirrorInput(input.value);
   if (!isValidMirror(mirror)) {
-    toast(t("mirrorInvalid"), true);
+    notify(t("mirrorInvalid"), true);
     return;
   }
   const custom = state.mirrors?.custom || [];
   const known = (state.mirrors?.candidates || []).map((item) => item.url);
   if (known.includes(mirror)) {
-    toast(t("mirrorDuplicate"), true);
+    notify(t("mirrorDuplicate"), true);
     return;
   }
   input.value = "";
@@ -853,9 +863,9 @@ async function runCatalogCheck() {
   renderCatalog();
   try {
     await checkCatalogUpdates();
-    toast(t("updatesChecked"));
+    notify(t("updatesChecked"));
   } catch (error) {
-    toast(`${t("checkFailed")}: ${error.message}`, true);
+    notify(`${t("checkFailed")}: ${error.message}`, true);
   } finally {
     state.catalogCheckBusy = false;
     renderCatalog();
@@ -881,11 +891,11 @@ async function runCatalogUpdate(button) {
       ? { plugin_id: pluginId, confirm: true, force: true }
       : { plugin_id: pluginId, confirm: true };
     await apiPost("catalog/update", payload);
-    toast(t("operationDone"));
+    notify(t("operationDone"));
     // 更新成功后该行的版本结果已过期，只复查这一个插件而不是全量重扫。
     delete state.catalogVersions[pluginId];
   } catch (error) {
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   } finally {
     state.catalogBusy = null;
     status.hidden = true;
@@ -1070,13 +1080,8 @@ function showConfirmation(message) {
       cancelText: t("cancel"),
     });
   }
-  const dialog = document.getElementById("confirmation-dialog");
-  if (!dialog) return Promise.resolve(window.confirm(message));
-  document.getElementById("confirmation-message").textContent = message;
-  return new Promise((resolve) => {
-    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
-    dialog.showModal();
-  });
+  notify("确认组件未加载，操作已取消", true);
+  return Promise.resolve(false);
 }
 
 function confirmRecommendationAction(action, pluginName) {
@@ -1114,9 +1119,9 @@ async function runApplyAllRecommendations() {
   try {
     const result = await apiPost("recommendations/apply-all", { confirm: true });
     const message = `${result.all_succeeded ? t("applyAllDone") : t("applyAllPartial")}：${result.succeeded}/${result.total}`;
-    toast(message, !result.all_succeeded);
+    notify(message, !result.all_succeeded);
   } catch (error) {
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   } finally {
     clearRecommendationBusy();
     button.disabled = false;
@@ -1148,9 +1153,9 @@ async function runRecommendationAction(button) {
         ? { plugin_id: pluginId, confirm: true }
         : { plugin_id: pluginId };
     await apiPost(action, payload);
-    toast(t("operationDone"));
+    notify(t("operationDone"));
   } catch (error) {
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   } finally {
     clearRecommendationBusy();
     await Promise.all([loadRecommendations(), loadOverview(), loadCatalog()]);
@@ -1177,9 +1182,9 @@ async function runCatalogAction(input) {
       ? { plugin_id: pluginId, confirm: true }
       : { plugin_id: pluginId };
     await apiPost(`catalog/${action}`, payload);
-    toast(t("operationDone"));
+    notify(t("operationDone"));
   } catch (error) {
-    toast(`${t("operationFailed")}: ${error.message}`, true);
+    notify(`${t("operationFailed")}: ${error.message}`, true);
   } finally {
     await Promise.all([loadCatalog(), loadOverview(), loadRule(), loadRecommendations()]);
   }
@@ -1382,7 +1387,7 @@ function startDiagnosticPolling() {
   if (state.diagnosticPaused) return;
   state.diagnosticTimer = window.setInterval(() => {
     if (document.getElementById("logs").classList.contains("active")) {
-      loadDiagnostics().catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
+      loadDiagnostics().catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true));
     }
   }, 2000);
 }
@@ -1399,7 +1404,7 @@ async function clearDiagnostics() {
   state.diagnosticLoaded = true;
   renderDiagnostics();
   await loadDiagnostics(true);
-  toast(t("diagnosticsCleared"));
+  notify(t("diagnosticsCleared"));
 }
 
 
@@ -1462,7 +1467,7 @@ async function refreshAll(includeDiagnostics = true) {
     failed += 1;
     renderSectionLoadError(entries[index][0], result.reason);
   });
-  if (failed) toast(`${t("loadFailed")}：${failed}`, true);
+  if (failed) notify(`${t("loadFailed")}：${failed}`, true);
 }
 
 function activateTab(button, focus = false) {
@@ -1490,7 +1495,7 @@ function showStartupError(error) {
     node.textContent = message;
     node.hidden = false;
   }
-  toast(message, true);
+  notify(message, true);
 }
 
 function bindEvents() {
@@ -1533,7 +1538,7 @@ function bindEvents() {
       return;
     }
     event.preventDefault();
-    if (!await openExternalUrl(url)) toast(t("operationFailed"), true);
+    if (!await openExternalUrl(url)) notify(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
@@ -1542,13 +1547,13 @@ function bindEvents() {
   document.getElementById("copy-webui")?.addEventListener("click", copyStandaloneWebUiLink);
   document.getElementById("open-webui-config")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("webui-open-frame")?.addEventListener("click", openStandaloneWebUiInFrame);
-  document.getElementById("webui-admins-refresh")?.addEventListener("click", () => loadWebUiAdmins().catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true)));
+  document.getElementById("webui-admins-refresh")?.addEventListener("click", () => loadWebUiAdmins().catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true)));
   document.getElementById("webui-admin-list")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-action]");
     if (!button) return;
     button.disabled = true;
     updateWebUiAdmin(button.dataset.adminId, button.dataset.adminAction)
-      .catch((error) => toast(`${t("operationFailed")}: ${error.message}`, true))
+      .catch((error) => notify(`${t("operationFailed")}: ${error.message}`, true))
       .finally(() => { button.disabled = false; });
   });
   document.getElementById("rule-form").addEventListener("submit", saveRule);
@@ -1595,10 +1600,10 @@ function bindEvents() {
     renderDiagnostics();
   });
   document.getElementById("diagnostic-refresh").addEventListener("click", () => {
-    loadDiagnostics(true).catch((error) => toast(`${t("loadFailed")}: ${error.message}`, true));
+    loadDiagnostics(true).catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true));
   });
   document.getElementById("diagnostic-clear").addEventListener("click", () => {
-    clearDiagnostics().catch((error) => toast(`${t("operationFailed")}: ${error.message}`, true));
+    clearDiagnostics().catch((error) => notify(`${t("operationFailed")}: ${error.message}`, true));
   });
   document.getElementById("diagnostic-plugin-filter").addEventListener("change", renderDiagnostics);
   document.getElementById("diagnostic-level-filter").addEventListener("change", renderDiagnostics);
@@ -1612,9 +1617,9 @@ function bindEvents() {
     setVersionCheckBusy("checkingLatest");
     try {
       await loadRecommendations(true);
-      toast(t("latestChecked"));
+      notify(t("latestChecked"));
     } catch (error) {
-      toast(`${t("loadFailed")}: ${error.message}`, true);
+      notify(`${t("loadFailed")}: ${error.message}`, true);
     } finally {
       clearVersionCheckBusy();
     }

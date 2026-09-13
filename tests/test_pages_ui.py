@@ -39,10 +39,11 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="mirrors"' in html
     assert 'data-tab="catalog"' in html
     assert 'data-tab="logs"' in html
-    assert 'id="tab-logs" class="active" role="tab"' in html
-    assert 'id="logs" class="panel active" role="tabpanel"' in html
-    assert 'id="overview" class="panel" role="tabpanel"' in html
-    assert html.index('data-tab="logs"') < html.index('data-tab="overview"')
+    assert 'id="tab-overview" class="active" role="tab"' in html
+    assert 'id="tab-logs" role="tab" aria-selected="false"' in html
+    assert 'id="overview" class="panel active" role="tabpanel"' in html
+    assert 'id="logs" class="panel" role="tabpanel"' in html
+    assert html.index('data-tab="overview"') < html.index('data-tab="logs"')
     assert 'id="startup-error"' in html
     assert 'role="alert"' in html
     assert '"zh-CN"' in js and '"en-US"' in js
@@ -418,7 +419,7 @@ def test_recommendations_show_self_update_repository_notice():
 def test_mobile_self_update_prefers_bridge_then_top_level_dashboard_route():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     helper = js[
-        js.index("async function invokeBridgeNavigation") : js.index("function toast")
+        js.index("async function invokeBridgeNavigation") : js.index("function applyI18n")
     ]
     self_update = helper[helper.index("async function openSelfUpdateTarget") :]
 
@@ -442,7 +443,7 @@ def test_restricted_host_reveals_and_copies_update_page_url_without_prompt_fallb
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     fallback = js[
-        js.index("function revealInstalledPageUrl") : js.index("function toast")
+        js.index("function revealInstalledPageUrl") : js.index("function applyI18n")
     ]
 
     assert 'link.closest(".self-update-notice")' in fallback
@@ -451,7 +452,7 @@ def test_restricted_host_reveals_and_copies_update_page_url_without_prompt_fallb
     assert "function legacyCopyText" in fallback
     assert 'document.execCommand("copy")' in fallback
     assert "async function copyText" in fallback
-    assert 'toast(t("installedPageUrlCopied"))' in fallback
+    assert 'notify(t("installedPageUrlCopied"))' in fallback
     assert "window.prompt" not in fallback
     assert ".installed-page-url-fallback" in css
     assert "user-select:all" in css
@@ -462,7 +463,8 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     assert "item.description_zh" in js
-    assert 'id="confirmation-dialog"' in html
+    assert "window.SeriesUI.confirm" in js
+    assert "showConfirmation(" in js
     assert 'id="recommendation-status"' in html
     assert "const confirmed = !requiresConfirmation" in js
     assert "await confirmRecommendationAction(action, pluginName)" in js
@@ -472,7 +474,6 @@ def test_recommendation_cards_confirm_only_destructive_actions_and_show_progress
     assert "clearRecommendationBusy()" in js
     assert ".recommendation-description" in css
     assert ".operation-status" in css
-    assert "dialog::backdrop" in css
 
 
 def test_daily_rule_card_has_all_controls_and_check_only_warning():
@@ -513,7 +514,7 @@ def test_daily_rule_master_gate_uses_safe_save_order_and_refreshes_all_sources()
         save_rule.index("if (!autoUpdateEnabled)") : save_rule.index("} else {")
     ]
     enable_branch = save_rule[
-        save_rule.index("} else {") : save_rule.index('toast(t("ruleSaved"))')
+        save_rule.index("} else {") : save_rule.index('notify(t("ruleSaved"))')
     ]
     assert disable_branch.index(
         'apiPost("config", { auto_update_enabled: false })'
@@ -730,8 +731,8 @@ def test_manager_page_is_responsive_and_accessible():
     assert 'aria-live="polite"' in html
     assert "@media (max-width:760px)" in css
     assert "prefers-reduced-motion" in css
-    assert "transition:transform 140ms var(--ease-out)" in css
-    assert "button:active:not(:disabled)" in css
+    assert "transition:transform 140ms var(--ease-out)" not in css
+    assert "button:active:not(:disabled)" not in css
     assert "@media (hover:hover) and (pointer:fine)" in css
     assert "transition:.2s" not in css
 
@@ -750,6 +751,8 @@ def test_control_center_has_login_only_and_trusted_module_ui():
     assert "source=registry_and_qsbb_repository" not in js
     assert "@media(max-width:720px)" in css
     assert "@media (min-width:721px){.mobile-nav{display:none!important}}" in css
+    assert '<p data-toast-fallback' in html
+    assert ".toast{position:fixed;right:22px;bottom:22px" not in css
 
 
 def test_control_center_export_uses_document_download_lifecycle():
@@ -865,3 +868,61 @@ def test_series_control_is_grouped_by_function_domain():
     assert 'data-domain-view=' in js
     assert 'memberReady}/${memberTotal} 正常' in js
     assert '成员管理台' not in js
+
+
+def test_control_center_mobile_nav_can_reach_every_view():
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+
+    nav_start = js.index("const NAV_ITEMS = [")
+    assert nav_start < js.index("function rail()")
+    assert "const links = [" not in js
+    nav_block = js[js.index('class="mobile-nav"') : js.index("</nav>", js.index('class="mobile-nav"'))]
+    assert '["modules", "control", "diagnostics"]' in nav_block
+    assert 'id="mobile-more"' in nav_block
+    assert 'NAV_ITEMS.filter(([view])' in js
+    assert 'data-view="${view}"' in js
+    assert 'aria-current="${state.view === view ? "page" : "false"}"' in js
+    mobile_css = css[css.index("@media(max-width:720px)") : css.index("@media (min-width:721px)")]
+    assert ".mobile-nav{" in mobile_css
+    assert "overflow-x:auto" in mobile_css
+    assert "flex:0 0 auto" in mobile_css
+
+
+def test_manager_page_does_not_duplicate_dark_legacy_theme():
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    assert "color-scheme: dark" not in css
+    assert "#102236" not in css
+    assert "#26364a" not in css
+    assert "var(--surface)" not in css
+    assert ".diagnostic-log-list" in css
+    assert ".diagnostic-log-detail" in css
+
+
+def test_control_center_uses_shared_confirmation_component():
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    assert "async function confirmDialog(" in js
+    assert "window.SeriesUI.confirm" in js
+    assert "!confirm(" not in js
+    assert "确认组件未加载，操作已取消" in js
+
+
+def test_manager_page_uses_shared_confirmation_and_prompt():
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "window.confirm" not in js
+    assert "window.prompt" not in js
+    assert "window.SeriesUI.confirm" in js
+    assert "window.SeriesUI?.prompt" in js
+
+
+def test_manager_page_style_does_not_duplicate_series_ui_controls():
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    shared = (PLUGIN_ROOT / "ui" / "series-ui.css").read_text(encoding="utf-8")
+    assert ":root {" not in css
+    assert "button,select,input" not in css
+    assert "dialog::backdrop" not in css
+    assert "#toast" not in css
+    assert "body[data-series-ui] .card," in shared
+    assert "body[data-series-ui] .modal-card {" in shared
+    assert ".diagnostic-log-list" in css
+    assert ".diagnostic-log-detail" in css
