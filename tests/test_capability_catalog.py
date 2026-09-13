@@ -99,6 +99,11 @@ def test_switch_field_is_declared_on_boolean_master_switch_capabilities():
         provider = caps[capability_id]["providers"][0]
         assert provider["switch_field"] == field, capability_id
         assert field in provider["fields"], capability_id
+        # 卡面开关必须有中文短标签（插件 schema 常常不带标签，缺了会显示原始字段名）
+        assert provider["switch_label"].strip(), capability_id
+    assert caps["identity_auth"]["providers"][0]["switch_label"] == "身份守卫"
+    assert caps["security_guard"]["providers"][0]["switch_label"] == "接口防护"
+    assert caps["join_review"]["providers"][0]["switch_label"] == "自动审核"
 
 
 def test_capabilities_without_boolean_master_switch_declare_none():

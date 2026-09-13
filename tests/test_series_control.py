@@ -65,3 +65,36 @@ def test_unknown_plugin_fails_closed(tmp_path):
         else:
             raise AssertionError("third-party plugin was accepted")
     asyncio.run(run())
+
+
+class FakePluginModeBroken(FakePlugin):
+    """模拟线上 序(identity_guardian) 0.8.5 的缺陷：set_mode 转发到不存在的方法。"""
+
+    def series_control_set_mode(self, mode):
+        raise AttributeError("'SeriesControlAdapter' object has no attribute 'set_mode'")
+
+
+class FakeAdapterModeBroken:
+    async def get_plugin_instance(self, plugin_id):
+        return FakePluginModeBroken() if plugin_id == "astrbot_plugin_active_learner" else None
+
+
+def test_plugin_mode_sync_failure_does_not_break_reads(tmp_path):
+    """插件侧模式同步失败时，schema/snapshot 仍要可用，并把原因回报给前端。"""
+    gateway = SeriesControlGateway(FakeAdapterModeBroken(), AtomicJsonStore(tmp_path))
+
+    async def run():
+        schema = await gateway.schema("astrbot_plugin_active_learner")
+        snapshot = await gateway.snapshot("astrbot_plugin_active_learner")
+        assert schema["success"] and snapshot["success"]
+        assert "set_mode" in schema["mode_error"] and "set_mode" in snapshot["mode_error"]
+        overview = await gateway.overview()
+        row = next(
+            item
+            for item in overview["members"]
+            if item["plugin_id"] == "astrbot_plugin_active_learner"
+        )
+        assert row["reason"] == "MODE_SYNC_FAILED"
+        assert "set_mode" in row["mode_error"]
+
+    asyncio.run(run())

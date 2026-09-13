@@ -82,6 +82,9 @@ class SeriesControlGateway:
         self.call_timeout = max(0.1, float(call_timeout))
         raw = store.read("series-control.json", {})
         self._state = self._normalize_state(raw)
+        # 插件侧 series_control_set_mode 失败不清空状态：只读 schema/snapshot 仍可用，
+        # 失败原因在 overview 与各只读响应里回报（reason=MODE_SYNC_FAILED）。
+        self._mode_errors: dict[str, str] = {}
 
     @staticmethod
     def _normalize_state(raw: Any) -> dict[str, Any]:
@@ -151,9 +154,14 @@ class SeriesControlGateway:
             raise LookupError("CONTRACT_VERSION_UNSUPPORTED")
         mode_setter = getattr(instance, "series_control_set_mode", None)
         if callable(mode_setter):
-            result = mode_setter(self._state["mode"])
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = mode_setter(self._state["mode"])
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:  # 插件侧缺陷不应让整个能力页变成“读取失败”
+                self._mode_errors[canonical] = str(exc) or exc.__class__.__name__
+            else:
+                self._mode_errors.pop(canonical, None)
         return canonical, instance
 
     def _member(self, plugin_id: str) -> dict[str, Any]:
@@ -175,7 +183,8 @@ class SeriesControlGateway:
             try:
                 canonical, instance = await self._instance(trusted.plugin_id)
                 contract = await self._call(instance, "series_control_contract")
-                row.update({"status": "managed" if self._state["mode"] == "managed" else "native", "reason": "OK", "contract": dict(_public_schema(contract)), "plugin_id": canonical})
+                mode_error = self._mode_errors.get(canonical, "")
+                row.update({"status": "managed" if self._state["mode"] == "managed" else "native", "reason": "MODE_SYNC_FAILED" if mode_error else "OK", "mode_error": mode_error, "contract": dict(_public_schema(contract)), "plugin_id": canonical})
             except Exception as exc:
                 row["reason"] = str(exc) if str(exc) in {"PLUGIN_NOT_LOADED", "CONTRACT_UNAVAILABLE", "CONTRACT_VERSION_UNSUPPORTED"} else "CONTRACT_UNAVAILABLE"
             rows.append(row)
@@ -193,14 +202,14 @@ class SeriesControlGateway:
         schema = await self._call(instance, "series_control_schema")
         if not isinstance(schema, Mapping):
             raise ValueError("SCHEMA_INVALID")
-        return {"success": True, "plugin_id": canonical, "mode": self._state["mode"], "revision": self._member(canonical)["revision"], "schema": _public_schema(schema)}
+        return {"success": True, "plugin_id": canonical, "mode": self._state["mode"], "mode_error": self._mode_errors.get(canonical, ""), "revision": self._member(canonical)["revision"], "schema": _public_schema(schema)}
 
     async def snapshot(self, plugin_id: str) -> dict[str, Any]:
         canonical, instance = await self._instance(plugin_id)
         snapshot = await self._call(instance, "series_control_snapshot")
         if not isinstance(snapshot, Mapping):
             raise ValueError("SNAPSHOT_INVALID")
-        return {"success": True, "plugin_id": canonical, "mode": self._state["mode"], "revision": self._member(canonical)["revision"], "snapshot": _public_snapshot(snapshot)}
+        return {"success": True, "plugin_id": canonical, "mode": self._state["mode"], "mode_error": self._mode_errors.get(canonical, ""), "revision": self._member(canonical)["revision"], "snapshot": _public_snapshot(snapshot)}
 
     async def validate(self, plugin_id: str, patch: Mapping[str, Any], expected_revision: int) -> dict[str, Any]:
         canonical, instance = await self._instance(plugin_id)

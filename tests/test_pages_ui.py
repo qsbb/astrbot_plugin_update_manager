@@ -974,6 +974,7 @@ def test_capability_cards_expose_inline_master_switch():
     assert "provider.switch_field" in js
     assert "function capabilitySwitchState(" in js
     assert "function capabilitySwitchHtml(" in js
+    assert "provider.switch_label" in js
     assert "data-cap-switch-field=" in js
     assert "data-cap-switch-plugin=" in js
     assert "async function ensureCapabilitySwitchData(" in js
@@ -994,6 +995,10 @@ def test_capability_cards_expose_inline_master_switch():
     assert 'label: "撤销"' in js
     assert "onClick: () => revertCapabilitySwitch(" in js
     assert "toast-action" in (PLUGIN_ROOT / "ui" / "series-ui.css").read_text(encoding="utf-8")
+    # 插件侧模式同步失败要给出中文原因，而不是让整页“读取失败”
+    assert "MODE_SYNC_FAILED" in js
+    assert '"接管模式同步失败"' in js
+    assert "modeError" in js
 
 
 def test_series_boolean_switches_use_shared_toggle_not_local_checkbox():
@@ -1121,7 +1126,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.5-1" in html
+    assert "?v=0.19.6-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1156,4 +1161,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.5-1" in webui_html
+    assert "?v=0.19.6-1" in webui_html

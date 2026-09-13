@@ -1,4 +1,10 @@
 ## [Unreleased]
+## 0.19.6 - 2026-09-14
+
+### 修复
+
+- 插件侧接管模式同步失败不再让整页变成「读取失败」：`SeriesControlGateway._instance()` 对 `series_control_set_mode` 调用改为 fail-soft，失败时在概览与 schema/snapshot 响应里回报 `mode_error`，成员 `reason` 标为 `MODE_SYNC_FAILED`，WebUI 显示中文「接管模式同步失败」并在开关 tooltip 给出原因。
+- 能力目录新增 `providers[].switch_label`（17 项能力中文短标签：身份守卫 / 自动审核 / 接口防护 / 插话中断 / 智能分段 …），`validate_catalog()` 要求它与 `switch_field` 成对出现；能力卡开关标签改为「目录标签优先」，不再依赖插件 schema 是否自带中文名。
 
 ## 0.19.5 - 2026-09-14
 

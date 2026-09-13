@@ -95,6 +95,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _CF,
                 "fields": ["silence_enabled", "silence_strategy"],
                 "switch_field": "silence_enabled",
+                "switch_label": "沉默判断",
                 "hint": "沉默标记、预判模型等细节在「言 → 设置中心 → 沉默判断」。",
             }
         ],
@@ -109,6 +110,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _CF,
                 "fields": ["chunking_enabled", "chunking_min_length", "chunking_max_segments"],
                 "switch_field": "chunking_enabled",
+                "switch_label": "智能分段",
                 "hint": "段落策略与「分段延迟」（打字节奏）在「言 → 设置中心 → 智能分段 / 分段延迟」。",
             }
         ],
@@ -123,6 +125,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _CF,
                 "fields": ["interrupt_enabled", "interrupt_mode", "interrupt_scope", "interrupt_merge_strategy"],
                 "switch_field": "interrupt_enabled",
+                "switch_label": "插话中断",
                 "hint": "steering 窗口等高级项在「言 → 设置中心 → 插话中断」。",
             }
         ],
@@ -146,6 +149,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "recent_activity_retention_minutes",
                 ],
                 "switch_field": "private_context_bridge_enabled",
+                "switch_label": "私聊上下文承接",
             }
         ],
     },
@@ -167,6 +171,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "group_air_guard_polite_loop_limit",
                 ],
                 "switch_field": "group_context_enabled",
+                "switch_label": "群聊语境",
             }
         ],
     },
@@ -186,6 +191,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "scene_awareness_enabled",
                 ],
                 "switch_field": "followup_guard_enabled",
+                "switch_label": "追问护栏",
             }
         ],
     },
@@ -210,6 +216,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "context_budget_hard_limit",
                 ],
                 "switch_field": "context_budget_enforce",
+                "switch_label": "预算强制",
             }
         ],
     },
@@ -235,6 +242,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "mood_max_consecutive_silences",
                 ],
                 "switch_field": "mood_enabled",
+                "switch_label": "情绪波动",
             },
             {"plugin_id": _RL, "fields": ["mood_enabled"], "hint": "关系侧情绪联动。"},
         ],
@@ -283,6 +291,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _AL,
                 "fields": ["embedding_enabled"],
                 "switch_field": "embedding_enabled",
+                "switch_label": "向量检索",
                 "hint": "嵌入模型与检索权重在「知 → 设置中心 → 搜索」。",
             }
         ],
@@ -317,6 +326,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "cross_platform_memory_max_chars",
                 ],
                 "switch_field": "cross_platform_memory_enabled",
+                "switch_label": "跨平台记忆",
             }
         ],
     },
@@ -330,6 +340,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _EA,
                 "fields": ["opportunity_cache_enabled", "opportunity_refresh_seconds"],
                 "switch_field": "opportunity_cache_enabled",
+                "switch_label": "事实缓存",
             }
         ],
     },
@@ -369,7 +380,8 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "description": "owner/管理员识别、私聊授权与行动许可。",
         "providers": [
             {"plugin_id": _ID, "fields": ["enabled"],
-            "switch_field": "enabled", "hint": "owner/管理员名单在「序 → 设置中心」。"}
+            "switch_field": "enabled",
+                "switch_label": "身份守卫", "hint": "owner/管理员名单在「序 → 设置中心」。"}
         ],
     },
     {
@@ -382,6 +394,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _ID,
                 "fields": ["auto_moderate", "join_audit_mode"],
                 "switch_field": "auto_moderate",
+                "switch_label": "自动审核",
                 "hint": "入群问题、通过阈值与推送模型在「序 → 设置中心 → 入群」。",
             }
         ],
@@ -405,6 +418,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _ID,
                 "fields": ["enable_api_guard"],
                 "switch_field": "enable_api_guard",
+                "switch_label": "接口防护",
                 "hint": "保护名单与跨群规则在「序 → 设置中心 → 安全」。",
             }
         ],
@@ -434,7 +448,8 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "title": "主动环境关心",
         "description": "达到阈值时主动提一句天气/风险。",
         "providers": [{"plugin_id": _EA, "fields": ["proactive_enabled"],
-        "switch_field": "proactive_enabled",}],
+        "switch_field": "proactive_enabled",
+                "switch_label": "主动关心",}],
     },
     {
         "id": "location",
@@ -469,6 +484,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 "plugin_id": _VH,
                 "fields": ["segment_enabled", "segment_threshold_chars", "segment_max_segments"],
                 "switch_field": "segment_enabled",
+                "switch_label": "句界兜底",
             },
             {
                 "plugin_id": _CF,
@@ -518,6 +534,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "sse_heartbeat_seconds",
                 ],
                 "switch_field": "diagnostic_log_enabled",
+                "switch_label": "桥接日志",
             }
         ],
     },
@@ -589,6 +606,7 @@ def _public_provider(provider: Mapping[str, Any]) -> dict[str, Any]:
         "plugin_id": str(provider.get("plugin_id") or ""),
         "fields": [str(field) for field in (provider.get("fields") or [])],
         "switch_field": str(provider.get("switch_field") or ""),
+        "switch_label": str(provider.get("switch_label") or ""),
         "panels": [str(panel) for panel in (provider.get("panels") or [])],
         "hint": str(provider.get("hint") or ""),
     }
@@ -648,6 +666,8 @@ def validate_catalog() -> list[str]:
             switch_field = str(provider.get("switch_field") or "")
             if switch_field and switch_field not in fields:
                 problems.append(f"{cid}: switch_field {switch_field!r} not in fields")
+            if switch_field and not str(provider.get("switch_label") or "").strip():
+                problems.append(f"{cid}: switch_label missing for switch_field {switch_field!r}")
     if len(capability_ids) != len(set(capability_ids)):
         problems.append("duplicate capability id")
     return problems

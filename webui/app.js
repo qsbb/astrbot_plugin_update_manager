@@ -510,6 +510,7 @@ function controlReasonLabel(reason) {
     PLUGIN_NOT_LOADED: "模块未加载",
     CONTRACT_VERSION_UNSUPPORTED: "契约版本不兼容",
     TAKEOVER_DISABLED: "当前为独立配置",
+    MODE_SYNC_FAILED: "接管模式同步失败",
   })[String(reason || "")] || String(reason || "运行正常");
 }
 
@@ -555,6 +556,7 @@ function capabilitySwitchState(provider, field) {
   if (!def || def.type !== "bool") return { unsupported: true };
   const value = data.snapshot?.snapshot?.fields?.[field] || {};
   return {
+    data,
     def,
     checked: value.effective_value === true,
     managed: !!value.managed_configured,
@@ -566,12 +568,16 @@ function capabilitySwitchHtml(capability) {
   if (!provider) return "";
   const field = provider.switch_field;
   const info = capabilitySwitchState(provider, field);
-  const label = info.def ? fieldLabel(field, info.def) : field;
+  // 目录里的 switch_label 优先（插件 schema 往往不带中文标签，兜底会是原始字段名）
+  const label = provider.switch_label || (info.def ? fieldLabel(field, info.def) : field);
+  const modeError = info.data?.schema?.mode_error || "";
   const title = info.error
     ? `开关读取失败：${info.error}`
     : info.pending
       ? `${label}：正在读取当前状态`
-      : `${label} · ${info.managed ? "核覆盖" : "插件原生"}`;
+      : modeError
+        ? `${label} · 接管模式同步失败：${modeError}`
+        : `${label} · ${info.managed ? "核覆盖" : "插件原生"}`;
   const disabled = Boolean(info.pending || info.error || info.unsupported || !info.canWrite);
   return `<label class="si-switch cap-switch${info.pending ? " busy" : ""}" title="${esc(title)}"><span class="cap-switch-text">${esc(label)}</span><input type="checkbox" role="switch" data-cap-switch-plugin="${esc(provider.plugin_id)}" data-cap-switch-field="${esc(field)}" aria-label="${esc(label)}" ${info.checked ? "checked" : ""} ${disabled ? "disabled" : ""} /></label>`;
 }
