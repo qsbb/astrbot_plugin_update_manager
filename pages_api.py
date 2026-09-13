@@ -72,8 +72,10 @@ except ImportError:  # AstrBot < 4.26
 
 
 PLUGIN_ID = "astrbot_plugin_update_manager"
+INSTALLED_COMMITS_FILE = "installed-commits.json"
 SENSITIVE_KEYS = frozenset({"github_token"})
 READ_ONLY_KEYS = frozenset({"data_dir", "plugin_root"})
+_COMMIT_SHA = re.compile(r"^[0-9a-fA-F]{7,64}$")
 DIAGNOSTIC_CONTRACT_NAME = "series.diagnostics"
 DIAGNOSTIC_CONTRACT_MAJOR = "1"
 DIAGNOSTIC_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -788,6 +790,7 @@ class PagesAPIMixin:
         except (TypeError, ValueError):
             member.update(status="invalid", reason="INVALID_CURSOR")
             return member, []
+        has_more = bool(payload.get("has_more") or payload.get("truncated"))
         provider_status = payload.get("status", "ready")
         if provider_status in DIAGNOSTIC_PROVIDER_REASONS.values():
             reason = payload.get("reason")
@@ -843,9 +846,14 @@ class PagesAPIMixin:
             except (TypeError, ValueError):
                 member.update(status="invalid", reason="INVALID_CURSOR")
                 return member, []
+            has_more = bool(payload.get("has_more") or payload.get("truncated"))
+        raw_events = payload["events"]
+        if len(raw_events) > limit:
+            # 提供方未声明截断，但连接器按 limit 截取会导致静默丢失：这里显式标记。
+            has_more = True
         events = [
             normalized
-            for raw_event in payload["events"][:limit]
+            for raw_event in raw_events[:limit]
             if (
                 normalized := self._normalize_diagnostic_event(
                     raw_event, plugin_id=item.plugin_id, plugin_name=item.key
@@ -859,6 +867,8 @@ class PagesAPIMixin:
             dropped_before=dropped_before,
             gap=bool(not reset and after_seq < dropped_before),
             reset=reset,
+            has_more=has_more,
+            truncated=has_more,
             count=len(events),
         )
         return member, events
@@ -1193,6 +1203,12 @@ class PagesAPIMixin:
                         per_state.get("version_status") or "not_checked"
                     ),
                     "latest_version": str(per_state.get("latest_version") or ""),
+                    "local_commit": per_state.get("local_commit"),
+                    "remote_commit": per_state.get("remote_commit"),
+                    "commit_status": str(per_state.get("commit_status") or "unknown"),
+                    "commit_source": str(per_state.get("commit_source") or "none"),
+                    "commit_reason": str(per_state.get("commit_reason") or "unknown"),
+                    "check_reason": str(per_state.get("check_reason") or "unknown"),
                     "versions_checked_at": checked_at,
                 }
             )
@@ -1228,7 +1244,13 @@ class PagesAPIMixin:
                     "status": "not_installed",
                     "update_available": False,
                     "version_status": "not_checked",
-                    "latest_version": "",
+                    "latest_version": str(per_state.get("latest_version") or ""),
+                    "local_commit": per_state.get("local_commit"),
+                    "remote_commit": per_state.get("remote_commit"),
+                    "commit_status": str(per_state.get("commit_status") or "unknown"),
+                    "commit_source": str(per_state.get("commit_source") or "none"),
+                    "commit_reason": str(per_state.get("commit_reason") or "unknown"),
+                    "check_reason": str(per_state.get("check_reason") or "unknown"),
                     "versions_checked_at": checked_at,
                 }
             )
@@ -1905,6 +1927,219 @@ class PagesAPIMixin:
         )
         self._apply_log_level(str(self._get("log_level", "INFO")))
 
+    @staticmethod
+    def _clean_commit(value: Any) -> str | None:
+        if value is None:
+            return None
+        candidate = str(value).strip()
+        return candidate.lower() if _COMMIT_SHA.fullmatch(candidate) else None
+
+    def _installed_commit_records(self) -> dict[str, dict[str, Any]]:
+        raw = self.store.read(INSTALLED_COMMITS_FILE, {})
+        if not isinstance(raw, dict):
+            return {}
+        items = raw.get("items", raw)
+        if not isinstance(items, dict):
+            return {}
+        return {
+            str(plugin_id): dict(record)
+            for plugin_id, record in items.items()
+            if isinstance(record, dict)
+        }
+
+    def _persisted_installed_commit(self, plugin_id: str) -> str | None:
+        records = self._installed_commit_records()
+        identities = [str(plugin_id)]
+        trusted = TRUSTED_BY_ID.get(str(plugin_id))
+        if trusted is not None and trusted.plugin_id not in identities:
+            identities.append(trusted.plugin_id)
+        for identity in identities:
+            record = records.get(identity)
+            if not isinstance(record, dict):
+                continue
+            commit = self._clean_commit(record.get("commit"))
+            if commit:
+                return commit
+        return None
+
+    def _remember_installed_commit(
+        self,
+        plugin_id: str,
+        commit: Any,
+        *,
+        source_url: str = "",
+    ) -> str | None:
+        clean = self._clean_commit(commit)
+        if not plugin_id or clean is None:
+            return None
+        items = self._installed_commit_records()
+        items[str(plugin_id)] = {
+            "commit": clean,
+            "source_url": str(source_url or ""),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.store.write(
+            INSTALLED_COMMITS_FILE,
+            {"schema_version": 1, "items": items},
+        )
+        return clean
+
+    def _forget_installed_commit(self, plugin_id: str) -> None:
+        items = self._installed_commit_records()
+        identities = [str(plugin_id)]
+        trusted = TRUSTED_BY_ID.get(str(plugin_id))
+        if trusted is not None and trusted.plugin_id not in identities:
+            identities.append(trusted.plugin_id)
+        changed = False
+        for identity in identities:
+            if items.pop(identity, None) is not None:
+                changed = True
+        if changed:
+            self.store.write(
+                INSTALLED_COMMITS_FILE,
+                {"schema_version": 1, "items": items},
+            )
+
+    def _set_installed_commit_after_mutation(
+        self,
+        plugin_id: str,
+        commit: Any,
+        *,
+        source_url: str = "",
+    ) -> str | None:
+        """成功写入后记录新 commit；未知 commit 时清除旧记录避免误报最新。"""
+        clean = self._clean_commit(commit)
+        if clean is None:
+            self._forget_installed_commit(plugin_id)
+            return None
+        return self._remember_installed_commit(
+            plugin_id, clean, source_url=source_url
+        )
+
+    @staticmethod
+    def _candidate_installed_commit(candidate: Any) -> str | None:
+        evidence = getattr(candidate, "evidence", {}) or {}
+        return (
+            PagesAPIMixin._clean_commit(getattr(candidate, "commit", None))
+            or PagesAPIMixin._clean_commit(evidence.get("installed_commit"))
+        )
+
+    async def _installed_commit_for_mutation(
+        self,
+        plugin_id: str,
+        source_url: str,
+        snapshot: Any,
+        *,
+        candidate: Any = None,
+    ) -> str | None:
+        """更新成功后尽量解析真实安装 commit；解析不到时以 None 清除旧记录。"""
+        commit = self._candidate_installed_commit(candidate) if candidate else None
+        if commit is None:
+            directory = self._plugin_directory(
+                getattr(snapshot, "root_dir_name", None)
+            )
+            commit = self.registry.read_local_git_commit(directory)
+        repo = self.registry.repository_from_url(source_url)
+        if commit is None and repo:
+            remembered = self.registry.remembered_commit(repo)
+            tag = str(getattr(candidate, "tag", "") or "") if candidate else ""
+            archive_url = str(getattr(candidate, "archive_url", "") or "") if candidate else ""
+            if tag:
+                try:
+                    resolved, reason, _etag = await self.registry.resolve_ref_commit(
+                        repo, tag
+                    )
+                except Exception:
+                    resolved, reason = None, "unavailable"
+                if reason == "ok":
+                    commit = resolved
+            elif candidate is None or "/zipball/" in archive_url:
+                commit = remembered
+        if commit is None and candidate is None and repo:
+            try:
+                statuses = await self.registry.commit_statuses(
+                    {repo: {"fetch_remote": True}}, force_refresh=False
+                )
+            except Exception:
+                statuses = {}
+            commit = statuses.get(repo, {}).get("remote_commit")
+        return self._clean_commit(commit)
+
+    def _plugin_directory(self, root_dir_name: str | None) -> Path | None:
+        if not root_dir_name:
+            return None
+        root = getattr(self, "plugin_root", None)
+        if root is None:
+            root = getattr(getattr(self, "transaction", None), "plugin_root", None)
+        if root is None:
+            return None
+        root_path = Path(root).resolve()
+        candidate = (root_path / str(root_dir_name)).resolve()
+        try:
+            candidate.relative_to(root_path)
+        except ValueError:
+            return None
+        return candidate
+
+    def _local_commit_identity(
+        self, plugin_id: str, root_dir_name: str | None
+    ) -> tuple[str | None, str]:
+        directory = self._plugin_directory(root_dir_name)
+        git_commit = self.registry.read_local_git_commit(directory)
+        if git_commit:
+            return git_commit, "git"
+        persisted = self._persisted_installed_commit(plugin_id)
+        if persisted:
+            return persisted, "persisted"
+        return None, "none"
+
+    @staticmethod
+    def _unknown_commit_fields(reason: str = "local_commit_missing") -> dict[str, Any]:
+        return {
+            "local_commit": None,
+            "remote_commit": None,
+            "commit_status": "unknown",
+            "commit_source": "none",
+            "local_commit_source": "none",
+            "remote_commit_source": "none",
+            "commit_reason": reason,
+            "commit_checked_at": None,
+            "commit_release_tag": None,
+            "commit_release_published_at": None,
+            "commit_stale": False,
+            "commit_backoff_seconds": None,
+        }
+
+    async def _commit_fields_for_targets(
+        self, targets: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        if not targets:
+            return {}
+        try:
+            return await self.registry.commit_statuses(
+                targets, force_refresh=True
+            )
+        except Exception:
+            return {}
+
+    def _remember_committed_plan_items(self, plan: Any, run: Any) -> None:
+        """把事务已提交计划项的目标 commit 写为 installed_commit。"""
+        if not isinstance(run, dict):
+            return
+        committed = {
+            str(item.get("plugin_id") or "")
+            for item in run.get("results", [])
+            if isinstance(item, dict) and item.get("state") == "COMMITTED"
+        }
+        for item in getattr(plan, "items", ()):
+            if str(getattr(item, "plugin_id", "") or "") not in committed:
+                continue
+            self._set_installed_commit_after_mutation(
+                str(getattr(item, "plugin_id", "") or ""),
+                getattr(item, "commit", None),
+                source_url=str(getattr(item, "source_url", "") or ""),
+            )
+
     def _catalog_lifecycle(self, item, capabilities) -> dict[str, Any]:
         reason = None
         if not item.loaded:
@@ -2033,6 +2268,12 @@ class PagesAPIMixin:
 
         async def inspect(item):
             checked_at = datetime.now(timezone.utc).isoformat()
+            local_commit, local_source = self._local_commit_identity(
+                item.plugin_id, getattr(item, "root_dir_name", None)
+            )
+            repo = self.registry.repository_from_url(item.source_url or "")
+            branch = ""
+            check_reason = "check_failed"
             try:
                 candidate = await self._check_latest_with_timeout(
                     item.plugin_id,
@@ -2041,6 +2282,15 @@ class PagesAPIMixin:
                     force_refresh=force_refresh,
                 )
                 latest_version = candidate.target_version
+                branch = str(getattr(candidate, "default_branch", "") or "")
+                check_reason = (
+                    self.registry.latest_check_reason(
+                        item.plugin_id,
+                        item.current_version or "",
+                        item.source_url or "",
+                    )
+                    or "network"
+                )
                 update_available, version_status = self._version_state(
                     item.current_version or "", latest_version
                 )
@@ -2061,13 +2311,44 @@ class PagesAPIMixin:
                 "update_available": update_available,
                 "version_status": version_status,
                 "checked_at": checked_at,
+                "check_reason": check_reason,
+                "_commit_repo": repo,
+                "_commit_branch": branch,
+                "_commit_local": local_commit,
+                "_commit_local_source": local_source,
                 **failure,
             }
 
-        checked = await bounded_gather(
-            [partial(inspect, item) for item in targets],
-            limit=self._version_check_concurrency(),
-        )
+        with self.registry.check_only_mode():
+            checked = await bounded_gather(
+                [partial(inspect, item) for item in targets],
+                limit=self._version_check_concurrency(),
+            )
+        commit_targets = {
+            str(row["_commit_repo"]): {
+                "branch": row.get("_commit_branch") or None,
+                "local_commit": row.get("_commit_local"),
+                "local_source": row.get("_commit_local_source") or "none",
+                "fetch_remote": not bool(row.get("_commit_local")),
+            }
+            for row in checked
+            if row.get("_commit_repo")
+        }
+        commit_map = await self._commit_fields_for_targets(commit_targets)
+        for row in checked:
+            repo = str(row.pop("_commit_repo", "") or "")
+            had_local = bool(row.get("_commit_local"))
+            row.pop("_commit_branch", None)
+            row.pop("_commit_local", None)
+            row.pop("_commit_local_source", None)
+            row.update(
+                commit_map.get(repo)
+                or self._unknown_commit_fields(
+                    "local_commit_missing"
+                    if not had_local
+                    else "remote_commit_unavailable"
+                )
+            )
         return json_response(
             {
                 "success": True,
@@ -2140,6 +2421,17 @@ class PagesAPIMixin:
                 source_kind="github",
                 source_url=item.source_url or "",
                 archive_url=candidate.archive_url,
+            )
+            remembered_commit = await self._installed_commit_for_mutation(
+                item.plugin_id,
+                item.source_url or "",
+                snapshot,
+                candidate=candidate,
+            )
+            self._set_installed_commit_after_mutation(
+                item.plugin_id,
+                remembered_commit,
+                source_url=item.source_url or "",
             )
             return json_response(
                 {
@@ -2384,6 +2676,7 @@ class PagesAPIMixin:
                     },
                 )
             checked_at = datetime.now(timezone.utc).isoformat()
+            check_reason = "check_failed"
             try:
                 candidate = await self._check_latest_with_timeout(
                     trusted.plugin_id,
@@ -2392,6 +2685,14 @@ class PagesAPIMixin:
                     force_refresh=force_refresh,
                 )
                 latest_version = candidate.target_version
+                check_reason = (
+                    self.registry.latest_check_reason(
+                        trusted.plugin_id,
+                        snapshot.version if snapshot else "",
+                        trusted.repo_url,
+                    )
+                    or "network"
+                )
                 update_available, version_status = self._version_state(
                     snapshot.version if snapshot else "", latest_version
                 )
@@ -2420,18 +2721,57 @@ class PagesAPIMixin:
                     "download_url": download_url,
                     "default_branch": default_branch,
                     "checked_at": checked_at,
+                    "check_reason": check_reason,
                     "error": error,
                     "error_detail": error_detail,
                     "error_context": error_context,
                 },
             )
 
-        checked = await bounded_gather(
-            [partial(inspect_latest, trusted) for trusted in TRUSTED_SERIES],
-            limit=self._version_check_concurrency(),
-        )
+        with self.registry.check_only_mode():
+            checked = await bounded_gather(
+                [partial(inspect_latest, trusted) for trusted in TRUSTED_SERIES],
+                limit=self._version_check_concurrency(),
+            )
+        commit_targets: dict[str, dict[str, Any]] = {}
+        commit_lookup: dict[str, tuple[str | None, str | None, str]] = {}
+        if check_versions:
+            for trusted, snapshot, version_check in checked:
+                repo = self.registry.repository_from_url(trusted.repo_url)
+                if snapshot is None:
+                    local_commit, local_source = None, "none"
+                else:
+                    local_commit, local_source = self._local_commit_identity(
+                        trusted.plugin_id, snapshot.root_dir_name
+                    )
+                commit_lookup[trusted.plugin_id] = (
+                    repo,
+                    local_commit,
+                    local_source,
+                )
+                if repo:
+                    commit_targets[repo] = {
+                        "branch": version_check.get("default_branch") or None,
+                        "local_commit": local_commit,
+                        "local_source": local_source,
+                        "fetch_remote": not bool(local_commit),
+                    }
+        commit_map = await self._commit_fields_for_targets(commit_targets)
         items = []
         for trusted, snapshot, version_check in checked:
+            repo, local_commit, local_source = commit_lookup.get(
+                trusted.plugin_id, (None, None, "none")
+            )
+            commit_fields = (
+                commit_map.get(repo)
+                or self._unknown_commit_fields(
+                    "local_commit_missing"
+                    if check_versions and not local_commit
+                    else "remote_commit_unavailable"
+                )
+                if check_versions
+                else {}
+            )
             items.append(
                 {
                     "key": trusted.key,
@@ -2444,6 +2784,7 @@ class PagesAPIMixin:
                     "loaded": snapshot.loaded if snapshot else False,
                     "activated": snapshot.activated if snapshot else False,
                     **version_check,
+                    **commit_fields,
                     "actions": {
                         "install": snapshot is None and capabilities.install_plugin,
                         "update": bool(
@@ -2491,6 +2832,28 @@ class PagesAPIMixin:
                 "error": self_item["error"],
                 "repo_url": self_item["repo_url"],
             }
+            if check_versions:
+                self_update.update(
+                    {
+                        key: self_item[key]
+                        for key in (
+                            "local_commit",
+                            "remote_commit",
+                            "commit_status",
+                            "commit_source",
+                            "local_commit_source",
+                            "remote_commit_source",
+                            "commit_reason",
+                            "check_reason",
+                            "commit_checked_at",
+                            "commit_release_tag",
+                            "commit_release_published_at",
+                            "commit_stale",
+                            "commit_backoff_seconds",
+                        )
+                        if key in self_item
+                    }
+                )
         rate_limit = (
             self.registry.rate_limit_status()
             if callable(getattr(self.registry, "rate_limit_status", None))
@@ -2557,6 +2920,12 @@ class PagesAPIMixin:
             snapshot = await self.adapter.install_plugin(
                 plugin_id, repo_url=item.repo_url
             )
+            remembered_commit = await self._installed_commit_for_mutation(
+                plugin_id, item.repo_url, snapshot
+            )
+            self._set_installed_commit_after_mutation(
+                plugin_id, remembered_commit, source_url=item.repo_url
+            )
             version_status = "not_installed"
         elif operation == "update":
             if plugin_id == PLUGIN_ID:
@@ -2587,6 +2956,15 @@ class PagesAPIMixin:
                 source_kind="github",
                 source_url=item.repo_url,
                 archive_url=candidate.archive_url,
+            )
+            remembered_commit = await self._installed_commit_for_mutation(
+                plugin_id,
+                item.repo_url,
+                snapshot,
+                candidate=candidate,
+            )
+            self._set_installed_commit_after_mutation(
+                plugin_id, remembered_commit, source_url=item.repo_url
             )
         else:
             raise ValueError("INVALID_OPERATION")

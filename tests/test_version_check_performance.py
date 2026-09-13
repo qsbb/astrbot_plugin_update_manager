@@ -25,6 +25,14 @@ from astrbot_plugin_update_manager.core.concurrency import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _offline_commit_checks(monkeypatch):
+    async def unavailable(_repos, *, force_refresh=False):
+        return {}
+
+    monkeypatch.setattr(CandidateRegistry, "commit_statuses", unavailable)
+
+
 def unwrap(response):
     return response[0] if isinstance(response, tuple) else response
 
@@ -544,3 +552,147 @@ def test_command_candidates_keep_duplicate_ids_resolved_once(monkeypatch, tmp_pa
 
     assert calls == ["alpha"]
     assert set(candidates) == {"alpha"}
+
+
+# ------------------------------------------------------- commit head 与 TTL
+
+LOCAL_COMMIT_SHA = "c" * 40
+
+
+def test_local_git_head_uses_rev_parse_and_rejects_invalid_output(
+    monkeypatch, tmp_path
+):
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout=LOCAL_COMMIT_SHA + "\n")
+
+    monkeypatch.setattr(registry_module.subprocess, "run", fake_run)
+    assert CandidateRegistry.read_local_git_commit(plugin_dir) == LOCAL_COMMIT_SHA
+    assert calls[0][0][:4] == ["git", "-C", str(plugin_dir), "rev-parse"]
+    assert calls[0][1]["timeout"] == 2.0
+
+    missing_calls = []
+    monkeypatch.setattr(
+        registry_module.subprocess,
+        "run",
+        lambda *args, **kwargs: missing_calls.append(args),
+    )
+    assert CandidateRegistry.read_local_git_commit(tmp_path / "missing") is None
+    assert missing_calls == []
+
+
+def test_github_latest_reuses_repo_ttl_cache_without_network(monkeypatch):
+    client = RecordingClient(
+        Response(200, body="name: demo\nversion: 1.2.3\n"),
+        Response(
+            200,
+            payload={
+                "tag_name": "v1.2.3",
+                "zipball_url": "https://api.github.com/repos/acme/demo/zipball/v1.2.3",
+            },
+        ),
+    )
+    registry = CandidateRegistry()
+    monkeypatch.setattr(registry, "_client", bind(registry, client))
+
+    first = asyncio.run(
+        registry.github_latest(
+            "demo",
+            "1.2.2",
+            "https://github.com/acme/demo",
+            force_refresh=True,
+        )
+    )
+    second = asyncio.run(
+        registry.github_latest(
+            "demo",
+            "1.2.2",
+            "https://github.com/acme/demo",
+            force_refresh=True,
+        )
+    )
+
+    assert second is first
+    assert len(client.calls) == 2
+    assert registry.latest_check_reason(
+        "demo", "1.2.2", "https://github.com/acme/demo"
+    ) == "ttl"
+
+
+def test_commit_ttl_differs_for_token_and_anonymous_modes():
+    assert CandidateRegistry()._commit_ttl_seconds() == 900.0
+    assert (
+        CandidateRegistry(github_token="ghp_example")._commit_ttl_seconds() == 300.0
+    )
+
+
+def test_rest_budget_threshold_uses_max_five_or_twenty_percent():
+    registry = CandidateRegistry()
+    registry._rate_limits[registry_module.GITHUB_API_HOST] = (
+        registry_module.RateLimitWindow(limit=60, remaining=12)
+    )
+    assert registry._rest_budget_allows() == (False, "rest_rate_budget")
+    registry._rate_limits[registry_module.GITHUB_API_HOST].remaining = 13
+    assert registry._rest_budget_allows() == (True, None)
+
+    registry._rate_limits[registry_module.GITHUB_API_HOST] = (
+        registry_module.RateLimitWindow(limit=10, remaining=5)
+    )
+    assert registry._rest_budget_allows() == (False, "rest_rate_budget")
+    registry._rate_limits[registry_module.GITHUB_API_HOST].remaining = 6
+    assert registry._rest_budget_allows() == (True, None)
+
+
+def test_check_only_mode_raw_hit_makes_no_rest_requests(monkeypatch):
+    client = RecordingClient(
+        Response(200, body="name: demo\nversion: 1.2.3\n")
+    )
+    registry = CandidateRegistry()
+    monkeypatch.setattr(registry, "_client", bind(registry, client))
+
+    with registry.check_only_mode():
+        candidate = asyncio.run(
+            registry.github_latest(
+                "demo",
+                "1.2.2",
+                "https://github.com/acme/demo",
+                force_refresh=True,
+            )
+        )
+
+    assert candidate.target_version == "1.2.3"
+    assert len(client.calls) == 1
+    assert GITHUB_RAW_HOST in client.calls[0][0]
+
+
+def test_check_only_mode_raw_miss_uses_one_contents_request(monkeypatch):
+    import base64
+
+    metadata = base64.b64encode(b"name: demo\nversion: 1.2.3\n").decode("ascii")
+    client = RecordingClient(
+        Response(404),
+        Response(404),
+        Response(200, {"encoding": "base64", "content": metadata}),
+    )
+    registry = CandidateRegistry()
+    monkeypatch.setattr(registry, "_client", bind(registry, client))
+
+    with registry.check_only_mode():
+        candidate = asyncio.run(
+            registry.github_latest(
+                "demo",
+                "1.2.2",
+                "https://github.com/acme/demo",
+                force_refresh=True,
+            )
+        )
+
+    assert candidate.target_version == "1.2.3"
+    assert client.urls[2] == (
+        "https://api.github.com/repos/acme/demo/contents/metadata.yaml"
+    )
+    assert all("/releases/" not in url and "/tags" not in url for url in client.urls)

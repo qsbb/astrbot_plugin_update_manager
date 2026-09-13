@@ -5,9 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import math
+import re
+import subprocess
 import time
+import xml.etree.ElementTree as ET
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -15,6 +23,7 @@ import aiohttp
 import yaml
 from packaging.version import InvalidVersion, Version
 
+from ..concurrency import bounded_gather
 from ..mirrors import apply_mirror, resolve_mirror
 from ..models import Candidate
 
@@ -32,6 +41,27 @@ DEFAULT_RAW_TIMEOUT_SECONDS = 8.0
 #: 仓库默认分支极少变动，记住它即可让后续检查只探测一个分支。
 DEFAULT_BRANCH_CACHE_TTL_SECONDS = 86400.0
 RATE_LIMITED = "REGISTRY_RATE_LIMITED"
+
+#: commit head 的远端结果缓存：匿名环境更保守，token 环境可以更及时。
+DEFAULT_COMMIT_TTL_NO_TOKEN_SECONDS = 900.0
+DEFAULT_COMMIT_TTL_TOKEN_SECONDS = 300.0
+#: 手动刷新即使绕过 TTL，也不能在短窗口内重复打网络。
+MANUAL_REFRESH_COOLDOWN_SECONDS = 60.0
+#: Atom/REST commit 探测并发。GraphQL 是单请求批量，不受这个值影响。
+COMMIT_CHECK_CONCURRENCY = 4
+#: REST core 剩余配额低于 max(5, 20%) 时不再启动新的 REST 请求。
+REST_BUDGET_MIN_REMAINING = 5
+REST_BUDGET_MIN_RATIO = 0.20
+#: 连续失败退避阶梯；403/429 若带 Retry-After 则优先采用服务端值。
+COMMIT_FAILURE_BACKOFF_SECONDS = (60.0, 300.0, 900.0, 3600.0)
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_COMMIT_SHA_SEARCH_RE = re.compile(
+    r"(?i)(?:commit/|Commit/)?([0-9a-f]{40}|[0-9a-f]{64})"
+)
+_CHECK_ONLY_MODE: ContextVar[bool] = ContextVar(
+    "update_manager_check_only", default=False
+)
 
 
 def _header_int(value: Any) -> int | None:
@@ -57,6 +87,21 @@ def _epoch_to_iso(epoch: float | None) -> str | None:
         return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
     except (OverflowError, OSError, ValueError):
         return None
+
+
+def _clean_commit_sha(value: Any) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    return candidate.lower() if _COMMIT_SHA_RE.fullmatch(candidate) else None
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 class RegistryError(RuntimeError):
@@ -132,6 +177,37 @@ class RateLimitWindow:
         return remaining
 
 
+@dataclass
+class LatestCacheEntry:
+    """完整或 check-only 版本检查结果的内存缓存。"""
+
+    cached_at: float
+    attempted_at: float
+    candidate: Candidate
+    token_configured: bool
+    mode: str = "full"
+
+
+@dataclass
+class CommitCacheEntry:
+    """一个仓库的远端默认分支 head 缓存与退避状态。"""
+
+    checked_at: float = 0.0
+    checked_at_iso: str | None = None
+    attempted_at: float = 0.0
+    head_sha: str | None = None
+    branch: str | None = None
+    source: str = "none"
+    reason: str = "none"
+    release_tag: str | None = None
+    release_published_at: str | None = None
+    etag: str | None = None
+    last_modified: str | None = None
+    negative_until: float = 0.0
+    backoff_until: float = 0.0
+    failure_count: int = 0
+
+
 #: metadata.yaml 是版本权威来源；仅当权威源"确实缺失或不可信"时才允许回退到
 #: Release/Tag。网络类错误（超时、连接失败、限流）不在此列——那种情况下宁可
 #: 让检查失败，也不要用可能陈旧的标签冒充最新版。
@@ -181,6 +257,31 @@ class CandidateRegistry:
         self._rate_limits: dict[str, RateLimitWindow] = {}
         #: repo -> (记录时刻, 默认分支)，让后续检查跳过无用的第二次分支探测。
         self._default_branches: dict[str, tuple[float, str]] = {}
+        #: 完整版本检查结果缓存；force_refresh 也受 per-repo TTL 约束。
+        self._latest_cache: dict[tuple[str, str, str], LatestCacheEntry] = {}
+        self._latest_check_reasons: dict[tuple[str, str, str], str] = {}
+        #: repo -> 默认分支 head 缓存；不保存 token，只在进程内使用。
+        self._commit_cache: dict[str, CommitCacheEntry] = {}
+        self._source_limits: dict[str, dict[str, Any]] = {
+            "rest": {
+                "requests": 0,
+                "successes": 0,
+                "failures": 0,
+                "limited": False,
+            },
+            "graphql": {
+                "requests": 0,
+                "successes": 0,
+                "failures": 0,
+                "limited": False,
+            },
+            "atom": {
+                "requests": 0,
+                "successes": 0,
+                "failures": 0,
+                "limited": False,
+            },
+        }
 
     async def _client(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -265,6 +366,23 @@ class CandidateRegistry:
         now = time.monotonic()
         window = self._rate_limits.get(GITHUB_API_HOST)
         wait = window.wait_seconds(now) if window else None
+        rest = dict(self._source_limits.get("rest") or {})
+        rest.update(
+            {
+                "limited": wait is not None,
+                "retry_after_seconds": None
+                if wait is None
+                else max(0, int(round(wait))),
+                "reset_at": _epoch_to_iso(window.reset_epoch) if window else None,
+                "remaining": window.remaining if window else None,
+                "limit": window.limit if window else None,
+            }
+        )
+        sources = {
+            "rest": rest,
+            "graphql": dict(self._source_limits.get("graphql") or {}),
+            "atom": dict(self._source_limits.get("atom") or {}),
+        }
         return {
             "limited": wait is not None,
             "retry_after_seconds": None if wait is None else max(0, int(round(wait))),
@@ -272,6 +390,7 @@ class CandidateRegistry:
             "remaining": window.remaining if window else None,
             "limit": window.limit if window else None,
             "token_configured": bool(self.token),
+            "sources": sources,
         }
 
     def _blocked(self, url: str) -> RegistryError | None:
@@ -280,6 +399,57 @@ class CandidateRegistry:
         if window is None or window.wait_seconds(time.monotonic()) is None:
             return None
         return self._rate_limit_error(url, window)
+
+    def _source_status(self, source: str) -> dict[str, Any]:
+        state = self._source_limits.setdefault(
+            source,
+            {"requests": 0, "successes": 0, "failures": 0, "limited": False},
+        )
+        return state
+
+    def _record_source_result(
+        self,
+        source: str,
+        *,
+        request: bool = False,
+        success: bool = False,
+        failure: bool = False,
+        limited: bool = False,
+        limit: int | None = None,
+        remaining: int | None = None,
+        reset_at: str | None = None,
+    ) -> None:
+        state = self._source_status(source)
+        if request:
+            state["requests"] = int(state.get("requests") or 0) + 1
+        if success:
+            state["successes"] = int(state.get("successes") or 0) + 1
+        if failure:
+            state["failures"] = int(state.get("failures") or 0) + 1
+        if limited:
+            state["limited"] = True
+        elif success:
+            state["limited"] = False
+        if limit is not None:
+            state["limit"] = limit
+        if remaining is not None:
+            state["remaining"] = remaining
+        if reset_at is not None:
+            state["reset_at"] = reset_at
+
+    def _rest_budget_allows(self) -> tuple[bool, str | None]:
+        """REST core 剩余配额低于 max(5, 20%) 时拒绝启动新请求。"""
+        window = self._rate_limits.get(GITHUB_API_HOST)
+        if window is None or window.remaining is None:
+            return True, None
+        limit = window.limit if window.limit is not None else 60
+        threshold = max(
+            REST_BUDGET_MIN_REMAINING,
+            math.ceil(max(0, limit) * REST_BUDGET_MIN_RATIO),
+        )
+        if window.remaining <= threshold:
+            return False, "rest_rate_budget"
+        return True, None
 
     # ------------------------------------------------------------ 默认分支缓存
 
@@ -304,6 +474,47 @@ class CandidateRegistry:
         if known is None:
             return DEFAULT_BRANCH_CANDIDATES
         return (known,)
+
+    @staticmethod
+    def repository_from_url(source_url: str) -> str | None:
+        """把严格 GitHub 仓库 URL 归一化为 owner/repo。"""
+        try:
+            parsed = urlsplit(source_url)
+        except ValueError:
+            return None
+        parts = parsed.path.strip("/").split("/")
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "github.com"
+            or parsed.username
+            or parsed.password
+            or len(parts) != 2
+            or not all(parts)
+        ):
+            return None
+        return "/".join(parts)
+
+    @staticmethod
+    def read_local_git_commit(plugin_dir: Path | str | None) -> str | None:
+        """只读解析插件目录 HEAD；失败、无 git 或非 Git 目录均返回 None。"""
+        if plugin_dir is None:
+            return None
+        try:
+            directory = Path(plugin_dir)
+            if not directory.is_dir():
+                return None
+            result = subprocess.run(
+                ["git", "-C", str(directory), "rev-parse", "--verify", "HEAD"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+        if result.returncode != 0:
+            return None
+        return _clean_commit_sha(result.stdout)
 
     # ------------------------------------------------------------------ 镜像
 
@@ -340,6 +551,13 @@ class CandidateRegistry:
             if cached:
                 return cached[2]
             raise blocked
+        rest_request = self._host(url) == GITHUB_API_HOST
+        if rest_request:
+            allowed, budget_reason = self._rest_budget_allows()
+            if not allowed:
+                if cached:
+                    return cached[2]
+                raise RegistryError("REGISTRY_RATE_BUDGET_EXHAUSTED")
         headers = {"Accept": "application/vnd.github+json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -348,6 +566,8 @@ class CandidateRegistry:
         client = await self._client()
         for attempt in range(3):
             try:
+                if rest_request:
+                    self._record_source_result("rest", request=True)
                 async with client.get(
                     url, headers=headers, proxy=self.proxy, allow_redirects=False
                 ) as response:
@@ -356,17 +576,25 @@ class CandidateRegistry:
                     )
                     if response.status == 304 and cached:
                         self._cache[url] = (time.monotonic(), cached[1], cached[2])
+                        if rest_request:
+                            self._record_source_result("rest", success=True)
                         return cached[2]
                     if response.status in {301, 302, 307, 308}:
                         raise RegistryError(
                             "SOURCE_REDIRECT_BLOCKED", http_status=response.status
                         )
                     if rate_limited:
+                        if rest_request:
+                            self._record_source_result(
+                                "rest", failure=True, limited=True
+                            )
                         # 重试只会加速耗尽配额；直接给出可重试时间。
                         if cached:
                             return cached[2]
                         raise self._rate_limit_error(url, window)
                     if response.status >= 500:
+                        if rest_request:
+                            self._record_source_result("rest", failure=True)
                         if attempt < 2:
                             await asyncio.sleep(min(2**attempt, 4))
                             continue
@@ -375,8 +603,12 @@ class CandidateRegistry:
                             http_status=response.status,
                         )
                     if response.status == 404:
+                        if rest_request:
+                            self._record_source_result("rest", failure=True)
                         raise RegistryError("REGISTRY_HTTP_404", http_status=404)
                     if response.status >= 400:
+                        if rest_request:
+                            self._record_source_result("rest", failure=True)
                         raise RegistryError(
                             f"REGISTRY_HTTP_{response.status}",
                             http_status=response.status,
@@ -390,6 +622,8 @@ class CandidateRegistry:
                         _lowered_headers(getattr(response, "headers", {})).get("etag"),
                         payload,
                     )
+                    if rest_request:
+                        self._record_source_result("rest", success=True)
                     return payload
             except asyncio.TimeoutError as exc:
                 if attempt == 2:
@@ -405,6 +639,7 @@ class CandidateRegistry:
         force_refresh: bool = False,
         timeout_seconds: float | None = None,
         attempts: int = 3,
+        send_auth: bool = True,
     ) -> str | None:
         """读取纯文本；404 返回 None 供调用方继续探测其他分支。
 
@@ -421,7 +656,7 @@ class CandidateRegistry:
         if self._blocked(url) is not None:
             return cached[2] if cached else None
         headers = {"Accept": "text/plain"}
-        if self.token:
+        if self.token and send_auth:
             headers["Authorization"] = f"Bearer {self.token}"
         if cached and cached[1]:
             headers["If-None-Match"] = cached[1]
@@ -703,6 +938,48 @@ class CandidateRegistry:
         self._remember_default_branch(repo, branch)
         return branch
 
+    def _commit_ttl_seconds(self) -> float:
+        return (
+            DEFAULT_COMMIT_TTL_TOKEN_SECONDS
+            if self.token
+            else DEFAULT_COMMIT_TTL_NO_TOKEN_SECONDS
+        )
+
+    @staticmethod
+    def _latest_cache_key(
+        repo: str, plugin_id: str, current_version: str
+    ) -> tuple[str, str, str]:
+        return repo, plugin_id, current_version
+
+    @contextmanager
+    def check_only_mode(self) -> Iterator[None]:
+        """在批量页面检查期间只取版本权威源，不补 release/tag 证据。"""
+        token = _CHECK_ONLY_MODE.set(True)
+        try:
+            yield
+        finally:
+            _CHECK_ONLY_MODE.reset(token)
+
+    def latest_check_reason(
+        self, plugin_id: str, current_version: str, source_url: str
+    ) -> str | None:
+        repo = self.repository_from_url(source_url)
+        if repo is None:
+            return None
+        return self._latest_check_reasons.get(
+            self._latest_cache_key(repo, plugin_id, current_version)
+        )
+
+    def remembered_commit(self, repo: str) -> str | None:
+        entry = self._commit_cache.get(repo)
+        return entry.head_sha if entry is not None else None
+
+    async def resolve_ref_commit(
+        self, repo: str, ref: str | None = None
+    ) -> tuple[str | None, str, str | None]:
+        """解析分支或 tag 对应的 commit；供更新成功后写入 installed_commit。"""
+        return await self._fetch_rest_commit(repo, ref)
+
     async def github_latest(
         self,
         plugin_id: str,
@@ -711,21 +988,682 @@ class CandidateRegistry:
         *,
         force_refresh: bool = False,
     ) -> Candidate:
-        try:
-            parsed = urlsplit(source_url)
-        except ValueError as exc:
-            raise RegistryError("SOURCE_REQUIRED") from exc
-        parts = parsed.path.strip("/").split("/")
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname != "github.com"
-            or parsed.username
-            or parsed.password
-            or len(parts) != 2
-            or not all(parts)
-        ):
+        """带 per-repo TTL 与手动刷新冷却的版本检查入口。"""
+        repo = self.repository_from_url(source_url)
+        if repo is None:
             raise RegistryError("SOURCE_REQUIRED")
-        repo = "/".join(parts)
+        key = self._latest_cache_key(repo, plugin_id, current_version)
+        now = time.monotonic()
+        mode = "check" if _CHECK_ONLY_MODE.get() else "full"
+        cached = self._latest_cache.get(key)
+        cache_compatible = bool(
+            cached is not None
+            and cached.token_configured == bool(self.token)
+            and cached.mode in {mode, "full"}
+        )
+        if cache_compatible and cached is not None:
+            age = now - cached.cached_at
+            if age < self._commit_ttl_seconds():
+                self._latest_check_reasons[key] = "ttl"
+                return cached.candidate
+            if (
+                force_refresh
+                and now - cached.attempted_at < MANUAL_REFRESH_COOLDOWN_SECONDS
+            ):
+                self._latest_check_reasons[key] = "manual_cooldown"
+                return cached.candidate
+        fetch = (
+            self._github_latest_check_uncached
+            if mode == "check"
+            else self._github_latest_uncached
+        )
+        try:
+            candidate = await fetch(
+                plugin_id,
+                current_version,
+                source_url,
+                force_refresh=force_refresh,
+            )
+        except RegistryError as exc:
+            if cache_compatible and cached is not None:
+                self._latest_check_reasons[key] = (
+                    "rest_rate_budget"
+                    if "RATE_BUDGET" in str(exc)
+                    else "stale_cache"
+                )
+                return cached.candidate
+            raise
+        attempted_at = time.monotonic()
+        self._latest_cache[key] = LatestCacheEntry(
+            cached_at=attempted_at,
+            attempted_at=attempted_at,
+            candidate=candidate,
+            token_configured=bool(self.token),
+            mode=mode,
+        )
+        self._latest_check_reasons[key] = "network"
+        return candidate
+
+    @staticmethod
+    def _normalize_commit_targets(
+        repos: Mapping[str, Mapping[str, Any] | str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized: dict[str, dict[str, Any]] = {}
+        for raw_repo, raw_meta in repos.items():
+            repo = str(raw_repo or "").strip().strip("/")
+            parts = repo.split("/")
+            if (
+                len(parts) != 2
+                or not all(parts)
+                or any(" " in part for part in parts)
+            ):
+                continue
+            if isinstance(raw_meta, Mapping):
+                meta = dict(raw_meta)
+            elif isinstance(raw_meta, str):
+                meta = {"branch": raw_meta}
+            else:
+                meta = {}
+            local_commit = _clean_commit_sha(meta.get("local_commit"))
+            local_source = str(
+                meta.get("local_source") or ("git" if local_commit else "none")
+            )
+            if local_source not in {"git", "persisted", "none"}:
+                local_source = "persisted" if local_commit else "none"
+            branch = str(meta.get("branch") or "").strip() or None
+            normalized[repo] = {
+                "branch": branch,
+                "local_commit": local_commit,
+                "local_source": local_source if local_commit else "none",
+                "fetch_remote": bool(meta.get("fetch_remote")),
+            }
+        return normalized
+
+    @staticmethod
+    def _commit_result(
+        repo: str,
+        meta: Mapping[str, Any],
+        entry: CommitCacheEntry | None,
+        *,
+        reason: str,
+        now: float,
+    ) -> dict[str, Any]:
+        local_commit = _clean_commit_sha(meta.get("local_commit"))
+        remote_commit = entry.head_sha if entry is not None else None
+        local_source = str(meta.get("local_source") or "none")
+        remote_source = entry.source if entry is not None and remote_commit else "none"
+        if local_commit and remote_commit:
+            status = "latest" if local_commit == remote_commit else "different"
+        else:
+            status = "unknown"
+        commit_source = (
+            remote_source
+            if remote_source != "none"
+            else local_source
+            if local_commit
+            else "none"
+        )
+        backoff_seconds = None
+        if entry is not None and entry.backoff_until > now:
+            backoff_seconds = max(0, round(entry.backoff_until - now))
+        return {
+            "repo": repo,
+            "local_commit": local_commit,
+            "remote_commit": remote_commit,
+            "commit_status": status,
+            "commit_source": commit_source,
+            "local_commit_source": local_source if local_commit else "none",
+            "remote_commit_source": remote_source,
+            "commit_reason": reason,
+            "commit_checked_at": (
+                entry.checked_at_iso if entry is not None else _iso_now()
+            ),
+            "commit_release_tag": (
+                entry.release_tag if entry is not None else None
+            ),
+            "commit_release_published_at": (
+                entry.release_published_at if entry is not None else None
+            ),
+            "commit_stale": bool(
+                entry is not None
+                and entry.head_sha
+                and reason
+                not in {"ttl", "graphql", "atom", "rest", "local_commit_missing"}
+            ),
+            "commit_backoff_seconds": backoff_seconds,
+        }
+
+    def _store_commit_success(
+        self,
+        repo: str,
+        *,
+        head_sha: str,
+        branch: str | None,
+        source: str,
+        release_tag: str | None = None,
+        release_published_at: str | None = None,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> CommitCacheEntry:
+        now = time.monotonic()
+        entry = self._commit_cache.get(repo) or CommitCacheEntry()
+        entry.checked_at = now
+        entry.checked_at_iso = _iso_now()
+        entry.attempted_at = now
+        entry.head_sha = _clean_commit_sha(head_sha)
+        entry.branch = branch
+        entry.source = source
+        entry.reason = source
+        entry.release_tag = release_tag
+        entry.release_published_at = release_published_at
+        entry.etag = etag
+        entry.last_modified = last_modified
+        entry.negative_until = 0.0
+        entry.backoff_until = 0.0
+        entry.failure_count = 0
+        self._commit_cache[repo] = entry
+        return entry
+
+    def _store_commit_failure(
+        self,
+        repo: str,
+        *,
+        source: str,
+        reason: str,
+        negative: bool = False,
+        retry_after_seconds: float | None = None,
+    ) -> CommitCacheEntry:
+        now = time.monotonic()
+        entry = self._commit_cache.get(repo) or CommitCacheEntry()
+        entry.attempted_at = now
+        entry.source = source
+        entry.reason = reason
+        if negative:
+            entry.head_sha = None
+            entry.branch = None
+            entry.negative_until = now + self._commit_ttl_seconds()
+            entry.backoff_until = 0.0
+            entry.failure_count = 0
+        else:
+            entry.failure_count = max(0, int(entry.failure_count)) + 1
+            wait = retry_after_seconds
+            if wait is None:
+                index = min(
+                    entry.failure_count - 1,
+                    len(COMMIT_FAILURE_BACKOFF_SECONDS) - 1,
+                )
+                wait = COMMIT_FAILURE_BACKOFF_SECONDS[max(0, index)]
+            entry.backoff_until = now + max(1.0, float(wait))
+        self._commit_cache[repo] = entry
+        return entry
+
+    async def commit_statuses(
+        self,
+        repos: Mapping[str, Mapping[str, Any] | str],
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        """检查仓库默认分支 head，返回 commit 三态及来源信息。
+
+        调用方只需给出 repo -> {branch, local_commit, local_source}。没有本地
+        commit 且未显式设置 fetch_remote 的仓库直接返回 unknown，避免无意义配额。
+        """
+        normalized = self._normalize_commit_targets(repos)
+        now = time.monotonic()
+        results: dict[str, dict[str, Any]] = {}
+        pending: list[tuple[str, dict[str, Any]]] = []
+        for repo, meta in normalized.items():
+            if not meta["local_commit"] and not meta.get("fetch_remote"):
+                results[repo] = self._commit_result(
+                    repo, meta, None, reason="local_commit_missing", now=now
+                )
+                continue
+            entry = self._commit_cache.get(repo)
+            branch = meta["branch"]
+            branch_matches = entry is not None and (
+                not branch or not entry.branch or entry.branch == branch
+            )
+            if (
+                entry is not None
+                and entry.head_sha
+                and branch_matches
+                and now - entry.checked_at < self._commit_ttl_seconds()
+            ):
+                results[repo] = self._commit_result(
+                    repo, meta, entry, reason="ttl", now=now
+                )
+                continue
+            if (
+                entry is not None
+                and entry.head_sha
+                and force_refresh
+                and now - entry.attempted_at < MANUAL_REFRESH_COOLDOWN_SECONDS
+            ):
+                results[repo] = self._commit_result(
+                    repo, meta, entry, reason="manual_cooldown", now=now
+                )
+                continue
+            if entry is not None and now < entry.backoff_until:
+                results[repo] = self._commit_result(
+                    repo, meta, entry, reason="backoff", now=now
+                )
+                continue
+            if entry is not None and now < entry.negative_until:
+                results[repo] = self._commit_result(
+                    repo, meta, entry, reason="negative_cache", now=now
+                )
+                continue
+            pending.append((repo, meta))
+
+        if pending and self.token:
+            resolved = await self._fetch_graphql_commits(pending)
+            remaining_pending: list[tuple[str, dict[str, Any]]] = []
+            for repo, meta in pending:
+                entry = resolved.get(repo)
+                if entry is None:
+                    remaining_pending.append((repo, meta))
+                    continue
+                results[repo] = self._commit_result(
+                    repo, meta, entry, reason="graphql", now=time.monotonic()
+                )
+            pending = remaining_pending
+
+        if pending:
+            async def resolve(repo: str, meta: dict[str, Any]) -> dict[str, Any]:
+                return await self._fetch_commit_head(repo, meta)
+
+            resolved_rows = await bounded_gather(
+                [lambda repo=repo, meta=meta: resolve(repo, meta) for repo, meta in pending],
+                limit=COMMIT_CHECK_CONCURRENCY,
+            )
+            for row in resolved_rows:
+                results[str(row["repo"])] = row
+        return results
+
+    async def _fetch_commit_head(
+        self, repo: str, meta: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        branch = str(meta.get("branch") or "").strip() or None
+        atom_sha, atom_branch, _atom_reason = await self._fetch_atom_commit(repo, branch)
+        if atom_sha:
+            entry = self._store_commit_success(
+                repo,
+                head_sha=atom_sha,
+                branch=atom_branch,
+                source="atom",
+            )
+            return self._commit_result(
+                repo, meta, entry, reason="atom", now=time.monotonic()
+            )
+
+        allowed, budget_reason = self._rest_budget_allows()
+        if not allowed:
+            entry = self._store_commit_failure(
+                repo,
+                source="atom",
+                reason=budget_reason or "rest_rate_budget",
+            )
+            return self._commit_result(
+                repo,
+                meta,
+                entry,
+                reason=budget_reason or "rest_rate_budget",
+                now=time.monotonic(),
+            )
+
+        rest_sha, rest_reason, etag = await self._fetch_rest_commit(repo, branch)
+        if rest_sha:
+            entry = self._store_commit_success(
+                repo,
+                head_sha=rest_sha,
+                branch=branch or self.remembered_default_branch(repo),
+                source="rest",
+                etag=etag,
+            )
+            return self._commit_result(
+                repo, meta, entry, reason="rest", now=time.monotonic()
+            )
+        if rest_reason == "not_found":
+            entry = self._store_commit_failure(
+                repo, source="rest", reason="negative_cache", negative=True
+            )
+            return self._commit_result(
+                repo, meta, entry, reason="negative_cache", now=time.monotonic()
+            )
+        if rest_reason == "rest_rate_budget":
+            entry = self._store_commit_failure(
+                repo, source="rest", reason="rest_rate_budget"
+            )
+            return self._commit_result(
+                repo, meta, entry, reason="rest_rate_budget", now=time.monotonic()
+            )
+        entry = self._store_commit_failure(
+            repo,
+            source="rest",
+            reason=rest_reason,
+        )
+        return self._commit_result(
+            repo, meta, entry, reason=rest_reason, now=time.monotonic()
+        )
+
+    async def _fetch_atom_commit(
+        self, repo: str, branch: str | None
+    ) -> tuple[str | None, str | None, str]:
+        branches: tuple[str, ...]
+        if branch:
+            branches = (branch,)
+        else:
+            remembered = self.remembered_default_branch(repo)
+            branches = (remembered,) if remembered else DEFAULT_BRANCH_CANDIDATES
+        saw_document = False
+        saw_rate_limited = False
+        for candidate_branch in branches:
+            atom_url = (
+                f"https://github.com/{repo}/commits/"
+                f"{quote(candidate_branch, safe='')}.atom"
+            )
+            for probe_url in self._probe_urls(atom_url):
+                self._record_source_result("atom", request=True)
+                try:
+                    document = await self.fetch_text(
+                        probe_url,
+                        force_refresh=True,
+                        timeout_seconds=self.raw_timeout_seconds,
+                        attempts=1,
+                        send_auth=False,
+                    )
+                except RegistryError as exc:
+                    self._record_source_result(
+                        "atom",
+                        failure=True,
+                        limited=bool(exc.rate_limited),
+                    )
+                    saw_rate_limited = saw_rate_limited or bool(exc.rate_limited)
+                    continue
+                if document is None:
+                    self._record_source_result("atom", failure=True)
+                    continue
+                saw_document = True
+                sha = self._parse_atom_head_sha(document)
+                if sha:
+                    self._record_source_result("atom", success=True)
+                    self._remember_default_branch(repo, candidate_branch)
+                    return sha, candidate_branch, "ok"
+                self._record_source_result("atom", failure=True)
+        if saw_rate_limited:
+            return None, None, "rate_limited"
+        if saw_document:
+            return None, None, "invalid"
+        return None, None, "not_found"
+
+    @staticmethod
+    def _parse_atom_head_sha(document: str) -> str | None:
+        try:
+            root = ET.fromstring(document)
+        except ET.ParseError:
+            return None
+        for element in root.iter():
+            if _local_name(element.tag) != "entry":
+                continue
+            for child in element.iter():
+                if _local_name(child.tag) != "id":
+                    continue
+                match = _COMMIT_SHA_SEARCH_RE.search(child.text or "")
+                if match:
+                    return match.group(1).lower()
+            for child in element.iter():
+                if _local_name(child.tag) != "link":
+                    continue
+                href = str(child.attrib.get("href") or "")
+                match = _COMMIT_SHA_SEARCH_RE.search(href)
+                if match:
+                    return match.group(1).lower()
+            return None
+        return None
+
+    async def _fetch_rest_commit(
+        self, repo: str, branch: str | None
+    ) -> tuple[str | None, str, str | None]:
+        allowed, budget_reason = self._rest_budget_allows()
+        if not allowed:
+            return None, budget_reason or "rest_rate_budget", None
+        if branch:
+            url = (
+                f"https://api.github.com/repos/{repo}/commits/"
+                f"{quote(branch, safe='')}"
+            )
+        else:
+            url = f"https://api.github.com/repos/{repo}/commits?per_page=1"
+        try:
+            payload = await self.fetch_json(url, force_refresh=True)
+        except RegistryError as exc:
+            if str(exc) == "REGISTRY_HTTP_404":
+                return None, "not_found", None
+            if exc.rate_limited:
+                return None, RATE_LIMITED, None
+            if "RATE_BUDGET" in str(exc):
+                return None, "rest_rate_budget", None
+            return None, str(exc), None
+        sha = None
+        if isinstance(payload, dict):
+            sha = _clean_commit_sha(payload.get("sha"))
+        elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
+            sha = _clean_commit_sha(payload[0].get("sha"))
+        if sha is None:
+            return None, "invalid", None
+        cached = self._cache.get(url)
+        etag = cached[1] if cached and len(cached) > 1 else None
+        return sha, "ok", etag
+
+    async def _fetch_graphql_commits(
+        self, pending: list[tuple[str, dict[str, Any]]]
+    ) -> dict[str, CommitCacheEntry]:
+        if not self.token or not pending:
+            return {}
+        aliases: list[str] = []
+        variables: dict[str, str] = {}
+        variable_names: list[str] = []
+        for index, (repo, _meta) in enumerate(pending):
+            owner, name = repo.split("/", 1)
+            owner_key = f"owner{index}"
+            name_key = f"name{index}"
+            variables[owner_key] = owner
+            variables[name_key] = name
+            variable_names.extend((owner_key, name_key))
+            aliases.append(
+                f"repo{index}: repository(owner: $owner{index}, name: $name{index}) "
+                "{ defaultBranchRef { name target { ... on Commit { oid committedDate } } } "
+                "latestRelease { tagName publishedAt } }"
+            )
+        query = (
+            "query CommitHeads("
+            + ", ".join(f"${key}: String!" for key in variable_names)
+            + ") { "
+            + " ".join(aliases)
+            + " rateLimit { limit cost remaining resetAt } }"
+        )
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}",
+        }
+        client = await self._client()
+        self._record_source_result("graphql", request=True)
+        try:
+            async with client.post(
+                GITHUB_GRAPHQL_URL,
+                headers=headers,
+                json={"query": query, "variables": variables},
+                proxy=self.proxy,
+                allow_redirects=False,
+            ) as response:
+                if response.status >= 400:
+                    self._record_source_result(
+                        "graphql",
+                        failure=True,
+                        limited=response.status in {403, 429},
+                    )
+                    return {}
+                try:
+                    payload = await response.json(content_type=None)
+                except (aiohttp.ClientError, ValueError):
+                    self._record_source_result("graphql", failure=True)
+                    return {}
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            self._record_source_result("graphql", failure=True)
+            return {}
+        if not isinstance(payload, dict):
+            self._record_source_result("graphql", failure=True)
+            return {}
+        rate_limit = payload.get("rateLimit")
+        if isinstance(rate_limit, dict):
+            reset_at = rate_limit.get("resetAt")
+            remaining = _header_int(rate_limit.get("remaining"))
+            self._record_source_result(
+                "graphql",
+                success=True,
+                limited=remaining == 0,
+                limit=_header_int(rate_limit.get("limit")),
+                remaining=remaining,
+                reset_at=str(reset_at) if reset_at else None,
+            )
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            self._record_source_result("graphql", failure=True)
+            return {}
+        resolved: dict[str, CommitCacheEntry] = {}
+        errors = payload.get("errors")
+        if errors:
+            self._record_source_result("graphql", failure=True)
+        for index, (repo, _meta) in enumerate(pending):
+            item = data.get(f"repo{index}")
+            if not isinstance(item, dict):
+                continue
+            default_branch = item.get("defaultBranchRef")
+            if not isinstance(default_branch, dict):
+                continue
+            target = default_branch.get("target")
+            if not isinstance(target, dict):
+                continue
+            sha = _clean_commit_sha(target.get("oid"))
+            if not sha:
+                continue
+            release = item.get("latestRelease")
+            release_tag = None
+            release_published_at = None
+            if isinstance(release, dict):
+                release_tag = str(release.get("tagName") or "") or None
+                release_published_at = (
+                    str(release.get("publishedAt") or "") or None
+                )
+            resolved[repo] = self._store_commit_success(
+                repo,
+                head_sha=sha,
+                branch=str(default_branch.get("name") or "") or None,
+                source="graphql",
+                release_tag=release_tag,
+                release_published_at=release_published_at,
+            )
+        if resolved and not isinstance(rate_limit, dict):
+            self._record_source_result("graphql", success=True)
+        return resolved
+
+    async def _github_latest_check_uncached(
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        *,
+        force_refresh: bool = False,
+    ) -> Candidate:
+        """页面检查专用快路径：只读权威 metadata，不补 release/tag 证据。
+
+        正常热路径 raw metadata 命中时为 0 个 REST 请求；raw 未命中时只请求
+        一次 contents metadata（GitHub 会自动使用默认分支），不再级联 repo、
+        release、tags 三个 API。
+        """
+        repo = self.repository_from_url(source_url)
+        if repo is None:
+            raise RegistryError("SOURCE_REQUIRED")
+        raw_branch, raw_target, raw_error = await self._raw_metadata_version(
+            repo, plugin_id, force_refresh=force_refresh
+        )
+        if raw_target is not None and raw_branch is not None:
+            return self._metadata_check_candidate(
+                plugin_id,
+                current_version,
+                source_url,
+                repo,
+                raw_target,
+                raw_branch,
+                evidence_api="github_check_raw_metadata",
+            )
+        if raw_error is not None and str(raw_error) in _METADATA_FALLBACK_ERRORS:
+            raise raw_error.with_context(repo=repo)
+        metadata_url = (
+            f"https://api.github.com/repos/{repo}/contents/metadata.yaml"
+        )
+        try:
+            metadata_payload = await self.fetch_json(
+                metadata_url, force_refresh=force_refresh
+            )
+        except RegistryError as exc:
+            raise exc.with_context(repo=repo)
+        target = self._github_metadata_version(metadata_payload, plugin_id)
+        branch = self.remembered_default_branch(repo) or ""
+        return self._metadata_check_candidate(
+            plugin_id,
+            current_version,
+            source_url,
+            repo,
+            target,
+            branch,
+            evidence_api="github_check_api_metadata",
+        )
+
+    def _metadata_check_candidate(
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        repo: str,
+        target: str,
+        default_branch: str,
+        *,
+        evidence_api: str,
+    ) -> Candidate:
+        branch = str(default_branch or "").strip()
+        archive_url = (
+            self._archive_fallback_url(repo, branch) if branch else None
+        )
+        return Candidate(
+            plugin_id,
+            current_version,
+            target,
+            source_url,
+            "github",
+            archive_url=archive_url,
+            default_branch=branch or None,
+            evidence={
+                "api": evidence_api,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "version_source": "metadata.yaml",
+                "quota_free_version_check": evidence_api
+                == "github_check_raw_metadata",
+            },
+        )
+
+    async def _github_latest_uncached(
+        self,
+        plugin_id: str,
+        current_version: str,
+        source_url: str,
+        *,
+        force_refresh: bool = False,
+    ) -> Candidate:
+        repo = self.repository_from_url(source_url)
+        if repo is None:
+            raise RegistryError("SOURCE_REQUIRED")
         raw_branch, raw_target, raw_error = await self._raw_metadata_version(
             repo, plugin_id, force_refresh=force_refresh
         )
@@ -812,13 +1750,17 @@ class CandidateRegistry:
         wanted = self._parse_version(target)
         tag_name = commit = archive_url = ""
         published_at: str | None = None
-        try:
-            release = await self.fetch_json(
-                f"https://api.github.com/repos/{repo}/releases/latest",
-                force_refresh=force_refresh,
-            )
-        except RegistryError:
+        budget_allowed, _budget_reason = self._rest_budget_allows()
+        if not budget_allowed:
             release = None
+        else:
+            try:
+                release = await self.fetch_json(
+                    f"https://api.github.com/repos/{repo}/releases/latest",
+                    force_refresh=force_refresh,
+                )
+            except RegistryError:
+                release = None
         if isinstance(release, dict) and self._parse_version(
             release.get("tag_name")
         ) == wanted:

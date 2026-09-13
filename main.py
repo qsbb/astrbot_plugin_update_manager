@@ -77,7 +77,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.2"
+__version__ = "0.19.3"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -155,6 +155,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         plugin_root = Path(
             str(self._get("plugin_root", "")) or Path(__file__).resolve().parent.parent
         )
+        self.plugin_root = plugin_root
         self.catalog = PluginCatalog(self.adapter)
         self.planner = UpdatePlanner(
             ttl_seconds=int(self._get("plan_ttl_seconds", 900))
@@ -851,7 +852,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         )
         rows: list[dict[str, Any]] = []
         state_items: dict[str, Any] = {}
-        for item in payload.get("recommendations", []) or []:
+        items = payload.get("items") or payload.get("recommendations") or []
+        for item in items:
             if not isinstance(item, dict):
                 continue
             plugin_id = str(item.get("plugin_id") or "")
@@ -861,6 +863,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 "update_available": bool(item.get("update_available")),
                 "version_status": str(item.get("version_status") or "unknown"),
                 "latest_version": str(item.get("latest_version") or ""),
+                "local_commit": item.get("local_commit"),
+                "remote_commit": item.get("remote_commit"),
+                "commit_status": str(item.get("commit_status") or "unknown"),
+                "commit_source": str(item.get("commit_source") or "none"),
+                "commit_reason": str(item.get("commit_reason") or "unknown"),
+                "check_reason": str(item.get("check_reason") or "unknown"),
             }
             rows.append(
                 {
@@ -870,6 +878,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                     "latest_version": str(item.get("latest_version") or ""),
                     "update_available": bool(item.get("update_available")),
                     "version_status": str(item.get("version_status") or "unknown"),
+                    "local_commit": item.get("local_commit"),
+                    "remote_commit": item.get("remote_commit"),
+                    "commit_status": str(item.get("commit_status") or "unknown"),
+                    "commit_source": str(item.get("commit_source") or "none"),
+                    "commit_reason": str(item.get("commit_reason") or "unknown"),
+                    "check_reason": str(item.get("check_reason") or "unknown"),
                 }
             )
         checked_at = utc_now().isoformat()
@@ -1185,6 +1199,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 astrbot_version=self._astrbot_version(),
                 rule_revision=rule.revision,
             )
+            self._remember_committed_plan_items(plan, run)
             self.transaction.cleanup(
                 keep_success=max(1, int(self._get("backup_keep_success", 3))),
                 failed_days=max(0, int(self._get("backup_failed_days", 7))),
@@ -1288,6 +1303,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             return
         try:
             result = await self.coordinator.manual_rollback(tx_id)
+            plugin_id = str(result.get("plugin_id") or "")
+            if plugin_id:
+                self._forget_installed_commit(plugin_id)
             yield event.plain_result(
                 f"人工回滚 {result.get('original_tx_id', tx_id)}: {result['state']}"
             )
@@ -1418,13 +1436,14 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             prerelease=rule.prerelease,
             minimum_release_age_hours=rule.minimum_release_age_hours,
         )
-        await self.coordinator.execute(
+        run = await self.coordinator.execute(
             plan,
             astrbot_version=self._astrbot_version(),
             rule_revision=rule.revision,
             on_failure=FailurePolicy(rule.on_failure),
             trigger="schedule",
         )
+        self._remember_committed_plan_items(plan, run)
         self.transaction.cleanup(
             keep_success=max(1, int(self._get("backup_keep_success", 3))),
             failed_days=max(0, int(self._get("backup_failed_days", 7))),

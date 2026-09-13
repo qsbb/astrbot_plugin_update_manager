@@ -767,7 +767,7 @@ def test_manager_page_has_resilient_accessible_loading_and_bounded_logs():
         assert f'event.key === "{key}"' in js
     assert "matchingEvents.slice(-500)" in js
     assert "window.setTimeout(renderDiagnostics, 200)" in js
-    assert "if (membersChanged || eventsChanged) renderDiagnostics();" in js
+    assert "if (result.changed || previousCatchUp !== state.diagnosticCatchUp) renderDiagnostics();" in js
     assert 'data-retry-section="${escapeHtml(name)}"' in js
     assert 'event.target.closest("[data-retry-section]")' in js
     assert "async function refreshPage(button)" in js
@@ -989,3 +989,72 @@ def test_manager_page_style_does_not_duplicate_series_ui_controls():
     assert ":where(body[data-series-ui] .modal-card)" in shared
     assert ".diagnostic-log-list" in css
     assert ".diagnostic-log-detail" in css
+
+def test_manager_overview_is_compact_and_consumes_commit_fields():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
+    # 任务A：Hero≈110px；4 KPI + 模块状态表 + 更新队列全部在总览首屏。
+    assert "min-height:110px" in css
+    assert ".overview-grid" in css
+    for element_id in (
+        "summary",
+        "overview-module-rows",
+        "overview-module-count",
+        "overview-queue-list",
+        "overview-queue-summary",
+        "overview-apply-all",
+        "overview-check-only",
+        "overview-budget",
+    ):
+        assert f'id="{element_id}"' in html
+    assert 'id="tab-overview" class="active" role="tab"' in html
+    for label in ("可信模块", "运行正常", "需关注", "有更新"):
+        assert label in js
+    # 最新提交：防御性消费 Godel 新增字段。
+    for field in ("local_commit", "remote_commit", "commit_status", "commit_source"):
+        assert field in js
+    assert 'status === "different"' in js
+    assert 't("overviewCommitUnknown")' in js
+    assert "overview-commit empty" in js
+    assert "function overviewBudgetText(rate)" in js
+    assert "1次/仓 · 条件请求" in js
+    assert "overview-queue-item" in js
+    assert "content-visibility:auto" in css
+    # 静态资源 N+1，不改版本号。
+    assert "?v=0.19.3-1" in html
+
+
+def test_log_views_are_problem_first_with_cursor_catchup_and_export():
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    webui_html = (PLUGIN_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+    webui_js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    webui_css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+    # 管理页：待处理问题聚合 + 事件流控制条 + 事件 JSON 导出。
+    for element_id in (
+        "diagnostic-problem-count",
+        "diagnostic-cursor-state",
+        "diagnostic-autoscroll",
+        "diagnostic-export",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "function diagnosticMemberHasMore(member)" in js
+    assert "member?.has_more ?? member?.truncated" in js
+    assert "pass >= 4" in js
+    assert "function exportDiagnostics()" in js
+    assert "diagnosticShowing" in js
+    # 独立 WebUI：问题优先、暂停/自动滚动、导出、按 plugin_id:seq 去重、has_more 追平。
+    for element_id in ("log-pause", "log-autoscroll", "log-export", "log-cursor", "log-summary"):
+        assert f'id="{element_id}"' in webui_js
+    assert "function logMemberHasMore(member)" in webui_js
+    assert "member?.has_more ?? member?.truncated" in webui_js
+    assert "state.logBusy" in webui_js
+    assert "seen.has(key)" in webui_js
+    assert "state.logs.length > 3000" in webui_js
+    assert "pass >= 4" in webui_js
+    assert "function exportDiagnosticLogs()" in webui_js
+    assert "level-chip.level-error" in webui_css
+    assert "level-chip.level-critical" in webui_css
+    assert "max-height:62vh" in webui_css
+    assert "?v=0.19.3-1" in webui_html

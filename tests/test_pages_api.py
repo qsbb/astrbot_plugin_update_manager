@@ -6,10 +6,22 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from astrbot_plugin_update_manager.core.adapters.registry import CandidateRegistry
+
 from test_plugin_entry import context, import_main
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _offline_commit_checks(monkeypatch):
+    async def unavailable(_repos, *, force_refresh=False):
+        return {}
+
+    monkeypatch.setattr(CandidateRegistry, "commit_statuses", unavailable)
 
 
 def unwrap(response):
@@ -2625,3 +2637,195 @@ async def _catalog_result():
             source_url=None,
         ),
     )
+
+
+COMMIT_SHA = "a" * 40
+OTHER_COMMIT_SHA = "b" * 40
+
+
+def test_catalog_check_adds_commit_fields_without_replacing_version_fields(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    item = _github_catalog_item("third_party")
+    item.root_dir_name = "third_party"
+    plugin.catalog.scan = lambda: asyncio.sleep(0, result=(item,))
+    capabilities = SimpleNamespace(
+        turn_on_plugin=True, turn_off_plugin=True, update_plugin=True
+    )
+    monkeypatch.setattr(plugin.adapter, "probe_capabilities", lambda: capabilities)
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        return SimpleNamespace(
+            target_version="1.1.0",
+            archive_url="https://zip",
+            default_branch="main",
+        )
+
+    seen_targets = {}
+
+    async def commit_statuses(targets, *, force_refresh=False):
+        seen_targets.update(targets)
+        return {
+            "owner/third_party": {
+                "local_commit": COMMIT_SHA,
+                "remote_commit": COMMIT_SHA,
+                "commit_status": "latest",
+                "commit_source": "atom",
+                "commit_reason": "atom",
+                "commit_checked_at": "2026-01-01T00:00:00+00:00",
+                "commit_stale": False,
+            }
+        }
+
+    async def request():
+        return {}
+
+    monkeypatch.setattr(plugin, "_request_json", request)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(plugin.registry, "commit_statuses", commit_statuses)
+
+    payload = unwrap(asyncio.run(plugin._pages_check_catalog()))
+    row = payload["items"][0]
+
+    assert row["latest_version"] == "1.1.0"
+    assert row["commit_status"] == "latest"
+    assert row["local_commit"] == COMMIT_SHA
+    assert row["remote_commit"] == COMMIT_SHA
+    assert row["commit_source"] == "atom"
+    assert seen_targets["owner/third_party"]["fetch_remote"] is True
+
+
+def test_recommendation_check_adds_commit_fields(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_voice_hub"
+    snapshot = SimpleNamespace(
+        name=plugin_id,
+        root_dir_name=plugin_id,
+        version="1.0.0",
+        loaded=True,
+        activated=True,
+    )
+
+    async def snapshots():
+        return (snapshot,)
+
+    async def latest(plugin_id, current_version, source_url, *, force_refresh=False):
+        return SimpleNamespace(
+            target_version="1.1.0",
+            archive_url="https://zip",
+            default_branch="main",
+        )
+
+    async def commit_statuses(targets, *, force_refresh=False):
+        repo = f"qsbb/{plugin_id}"
+        assert repo in targets
+        return {
+            repo: {
+                "local_commit": COMMIT_SHA,
+                "remote_commit": OTHER_COMMIT_SHA,
+                "commit_status": "different",
+                "commit_source": "graphql",
+                "commit_reason": "graphql",
+                "commit_checked_at": "2026-01-01T00:00:00+00:00",
+                "commit_stale": False,
+            }
+        }
+
+    plugin.adapter.snapshot_plugins = snapshots
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(plugin.registry, "commit_statuses", commit_statuses)
+    payload = unwrap(asyncio.run(plugin._pages_check_recommendations()))
+    row = next(item for item in payload["items"] if item["plugin_id"] == plugin_id)
+
+    assert row["version_status"] == "update_available"
+    assert row["commit_status"] == "different"
+    assert row["commit_source"] == "graphql"
+
+
+def test_installed_commit_local_identity_prefers_git_then_persisted(
+    monkeypatch, tmp_path
+):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    plugin._remember_installed_commit(
+        "demo", COMMIT_SHA, source_url="https://github.com/acme/demo"
+    )
+    assert plugin._persisted_installed_commit("demo") == COMMIT_SHA
+    assert plugin._local_commit_identity("demo", None) == (COMMIT_SHA, "persisted")
+
+    plugin.plugin_root = tmp_path
+    (tmp_path / "demo").mkdir()
+    monkeypatch.setattr(
+        plugin.registry, "read_local_git_commit", lambda _directory: OTHER_COMMIT_SHA
+    )
+    assert plugin._local_commit_identity("demo", "demo") == (
+        OTHER_COMMIT_SHA,
+        "git",
+    )
+    assert plugin.store.read("installed-commits.json")["items"]["demo"][
+        "commit"
+    ] == COMMIT_SHA
+
+
+def test_update_persists_candidate_commit(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_voice_hub"
+
+    async def get_plugin(_plugin_id):
+        return SimpleNamespace(version="1.0.0", loaded=True)
+
+    async def latest(_plugin_id, _version, _source_url, *, force_refresh=False):
+        return SimpleNamespace(
+            target_version="1.1.0",
+            archive_url="https://zip",
+            commit=COMMIT_SHA,
+        )
+
+    async def update(_plugin_id, *, source_kind, source_url, archive_url=None):
+        return SimpleNamespace(version="1.1.0", loaded=True, activated=True)
+
+    monkeypatch.setattr(plugin.adapter, "get_plugin", get_plugin)
+    monkeypatch.setattr(plugin.adapter, "update_plugin", update)
+    monkeypatch.setattr(plugin.registry, "github_latest", latest)
+    monkeypatch.setattr(plugin, "_local_commit_identity", lambda *_args: (None, "none"))
+
+    result = asyncio.run(plugin._apply_recommended_plugin(plugin_id, "update"))
+
+    assert result["success"] is True
+    assert plugin._persisted_installed_commit(plugin_id) == COMMIT_SHA
+
+
+def test_install_persists_remote_head_when_git_is_unavailable(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    plugin_id = "astrbot_plugin_voice_hub"
+
+    async def install(_plugin_id, *, repo_url):
+        return SimpleNamespace(
+            version="1.0.0",
+            loaded=True,
+            activated=True,
+            root_dir_name="installed_voice",
+        )
+
+    async def commit_statuses(targets, *, force_refresh=False):
+        assert targets == {"qsbb/astrbot_plugin_voice_hub": {"fetch_remote": True}}
+        return {
+            "qsbb/astrbot_plugin_voice_hub": {
+                "remote_commit": COMMIT_SHA,
+                "commit_status": "unknown",
+            }
+        }
+
+    monkeypatch.setattr(plugin.adapter, "install_plugin", install)
+    monkeypatch.setattr(plugin.registry, "commit_statuses", commit_statuses)
+
+    result = asyncio.run(plugin._apply_recommended_plugin(plugin_id, "install"))
+
+    assert result["success"] is True
+    assert plugin._persisted_installed_commit(plugin_id) == COMMIT_SHA

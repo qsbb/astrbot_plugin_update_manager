@@ -112,3 +112,44 @@ body[data-series-ui] .content .table-wrap {
 
 /* 输入区预留统一高度：开关与文本框同排时卡片高度一致 */
 .form-input { min-height: 42px; }
+
+/* ===== 方案1：问题优先日志（问题卡片 + 事件流控制条） ===== */
+.diagnostic-summary { border-top:3px solid var(--orange); }
+.diagnostic-summary .workspace-head { padding-bottom:4px; }
+.problem-list { display:grid; gap:8px; padding:0 18px 16px; }
+.problem-item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:5px 10px; align-items:baseline; padding:11px 12px; border:1px solid var(--line); border-left:3px solid var(--orange); border-radius:8px; background:#fff; text-align:left; color:var(--ink); }
+.problem-item.level-error { border-left-color:var(--red); }
+.problem-item:hover { border-color:var(--blue); background:var(--blue-soft); }
+.problem-item b { min-width:0; }
+.problem-item code { padding:1px 6px; border-radius:6px; background:#f1f3f9; color:var(--muted); }
+.problem-item small { justify-self:end; color:var(--muted); }
+.problem-impact, .problem-suggestion { grid-column:1/-1; font-size:12px; line-height:1.5; }
+.problem-impact { color:var(--muted); }
+.problem-suggestion { color:#8a5a00; }
+.diagnostic-actions { flex-wrap:wrap; justify-content:flex-end; }
+.diagnostic-actions .pill { align-self:center; }
+.diagnostic-log-list { display:grid; gap:0; max-height:62vh; overflow:auto; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.diagnostic-event-head { grid-template-columns:64px 72px 76px minmax(0,1fr) auto; gap:8px; padding:11px 4px; }
+.diagnostic-event-head:hover { background:#f8fafc; }
+.diagnostic-event-head time { color:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.event-module { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.level-chip { display:inline-flex; align-items:center; justify-content:center; width:max-content; min-width:64px; padding:2px 7px; border:1px solid transparent; border-radius:999px; font-size:10px; font-weight:800; letter-spacing:.02em; }
+.level-chip.level-info { color:#075985; background:#e0f2fe; border-color:#bae6fd; }
+.level-chip.level-debug { color:#475569; background:#f1f5f9; border-color:#e2e8f0; }
+.level-chip.level-warning { color:#92400e; background:#fef3c7; border-color:#fcd34d; }
+.level-chip.level-error { color:#991b1b; background:#fee2e2; border-color:#fca5a5; }
+.level-chip.level-critical { color:#fff; background:#991b1b; border-color:#7f1d1d; }
+.event-message { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-event .diagnostic-event-detail { padding:0 4px 12px; }
+@media(max-width:720px){
+  .diagnostic-event-head { grid-template-columns:auto auto 1fr; gap:5px 8px; }
+  .diagnostic-event-head time { grid-column:1; }
+  .diagnostic-event-head .event-module { grid-column:2; }
+  .diagnostic-event-head .level-chip { grid-column:3; justify-self:end; }
+  .diagnostic-event-head .event-message { grid-column:1/-1; white-space:normal; }
+  .diagnostic-event-head .event-chevron { grid-column:1/-1; justify-self:start; }
+  .diagnostic-actions button, .diagnostic-actions .switch { flex:1 1 120px; }
+  .diagnostic-filters { align-items:stretch; }
+  .diagnostic-filters .search { min-width:100%; }
+  .diagnostic-log-list { max-height:58vh; }
+}

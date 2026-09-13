@@ -59,6 +59,38 @@ const messages = {
   }
 };
 
+// 方案1（紧凑总览 / 问题优先）新增文案；Object.assign 只追加新 key。
+Object.assign(messages["zh-CN"], {
+  overviewTrusted: "可信模块", overviewNormal: "运行正常", overviewAttention: "需关注", overviewUpdates: "有更新",
+  overviewModulesTitle: "模块状态", overviewModulesHint: "版本、运行状态与本地/远端提交",
+  overviewModule: "模块", overviewVersion: "版本", overviewStatus: "状态", overviewLatestCommit: "最新提交", overviewDetail: "详情",
+  overviewQueueTitle: "更新队列", overviewQueueCount: "{count} 个待更新", overviewQueueEmpty: "当前没有待更新模块",
+  overviewApplyAll: "一键全部更新", overviewCheckOnly: "只检查不更新",
+  overviewBudget: "1次/仓 · 条件请求 · 已用 {used}/{limit} · 重置 {minutes} 分钟",
+  overviewStatusNormal: "正常", overviewStatusUpdate: "有更新", overviewStatusNotInstalled: "未安装", overviewStatusDisabled: "已停用", overviewStatusCheckFailed: "检查失败", overviewStatusLocalNewer: "本地较新", overviewStatusUnknown: "未知",
+  overviewCommitUnknown: "未知", overviewCommitLocal: "本地", overviewCommitRemote: "远端",
+  diagnosticProblemsTitle: "待处理问题", diagnosticProblemsHint: "按错误类型聚合，点击可定位事件流",
+  diagnosticProblemGroups: "{count} 组", diagnosticProblemsNone: "当前缓冲区没有错误或警告。", diagnosticProblemsEmpty: "还没有读取到诊断事件。",
+  diagnosticEventStream: "事件流", diagnosticCursor: "增量游标", diagnosticCursorPaused: "已暂停", diagnosticCursorCatchingUp: "追平中",
+  autoScrollLogs: "自动滚动", exportLogs: "导出", diagnosticShowing: "显示最近 {shown} 条 · 缓存 {total}", diagnosticCatchingUp: "正在追平积压",
+  diagnosticExportDone: "诊断事件已导出", diagnosticExportEmpty: "暂无可导出事件", details: "详情"
+});
+Object.assign(messages["en-US"], {
+  overviewTrusted: "Trusted modules", overviewNormal: "Healthy", overviewAttention: "Attention", overviewUpdates: "Updates",
+  overviewModulesTitle: "Module status", overviewModulesHint: "Version, runtime status, and local/remote commit",
+  overviewModule: "Module", overviewVersion: "Version", overviewStatus: "Status", overviewLatestCommit: "Latest commit", overviewDetail: "Details",
+  overviewQueueTitle: "Update queue", overviewQueueCount: "{count} pending", overviewQueueEmpty: "No pending updates",
+  overviewApplyAll: "Update all", overviewCheckOnly: "Check only",
+  overviewBudget: "1/repo · conditional requests · used {used}/{limit} · reset in {minutes} min",
+  overviewStatusNormal: "Healthy", overviewStatusUpdate: "Update available", overviewStatusNotInstalled: "Not installed", overviewStatusDisabled: "Disabled", overviewStatusCheckFailed: "Check failed", overviewStatusLocalNewer: "Local is newer", overviewStatusUnknown: "Unknown",
+  overviewCommitUnknown: "Unknown", overviewCommitLocal: "local", overviewCommitRemote: "remote",
+  diagnosticProblemsTitle: "Open issues", diagnosticProblemsHint: "Grouped by error type; click to filter the event stream",
+  diagnosticProblemGroups: "{count} groups", diagnosticProblemsNone: "No warnings or errors in the current buffer.", diagnosticProblemsEmpty: "No diagnostic events loaded yet.",
+  diagnosticEventStream: "Event stream", diagnosticCursor: "Incremental cursor", diagnosticCursorPaused: "Paused", diagnosticCursorCatchingUp: "Catching up",
+  autoScrollLogs: "Auto-scroll", exportLogs: "Export", diagnosticShowing: "Showing latest {shown} · cached {total}", diagnosticCatchingUp: "Catching up on backlog",
+  diagnosticExportDone: "Diagnostic events exported", diagnosticExportEmpty: "No events to export", details: "Details"
+});
+
 const notify = (message, error = false) => {
   if (window.SeriesUI?.toast) {
     window.SeriesUI.toast(message, error ? "error" : "info");
@@ -131,6 +163,11 @@ const state = {
   diagnosticExpanded: new Set(),
   diagnosticTimer: null,
   diagnosticSearchTimer: null,
+  diagnosticAutoScroll: true,
+  diagnosticCatchUp: false,
+  overviewData: null,
+  overviewModules: [],
+  recommendationsRateLimit: null,
   webUi: null
 };
 const t = (key) => messages[state.locale][key] || key;
@@ -357,21 +394,164 @@ function applyI18n() {
   document.getElementById("locale").value = state.locale;
 }
 
+function overviewStatus(item) {
+  if (!item || !item.installed) return { key: "overviewStatusNotInstalled", cls: "off" };
+  if (item.update_available) return { key: "overviewStatusUpdate", cls: "warn" };
+  if (item.version_status === "check_failed") return { key: "overviewStatusCheckFailed", cls: "danger" };
+  if (item.version_status === "local_newer") return { key: "overviewStatusLocalNewer", cls: "warn" };
+  if (item.loaded && item.activated) return { key: "overviewStatusNormal", cls: "ok" };
+  if (item.installed && !item.activated) return { key: "overviewStatusDisabled", cls: "off" };
+  return { key: "overviewStatusUnknown", cls: "" };
+}
+
+function shortCommit(value) {
+  const text = String(value || "").trim();
+  return text.length > 7 ? text.slice(0, 7) : text;
+}
+
+function overviewCommitCell(item) {
+  const local = shortCommit(item?.local_commit || item?.localCommit);
+  const remote = shortCommit(item?.remote_commit || item?.remoteCommit);
+  const status = String(item?.commit_status || item?.commitStatus || "").toLowerCase();
+  const source = item?.commit_source || item?.commitSource || "";
+  let text = "—";
+  if (status === "different" && (local || remote)) {
+    text = `${t("overviewCommitLocal")} ${local || "—"} / ${t("overviewCommitRemote")} ${remote || "—"}`;
+  } else if (local || remote) {
+    if (!status || status === "unknown") text = t("overviewCommitUnknown");
+    else if (["same", "equal", "up_to_date", "unchanged"].includes(status)) text = local || remote;
+    else if (["local_ahead", "ahead", "local_newer"].includes(status)) text = `${local || "—"} ↑`;
+    else if (["remote_ahead", "behind", "remote_newer"].includes(status)) text = `${remote || "—"} ↑`;
+    else text = local || remote;
+  } else if (status === "unknown") {
+    text = t("overviewCommitUnknown");
+  }
+  if (!text) return `<span class="overview-commit empty">—</span>`;
+  const sourceHint = source ? ` title="${escapeHtml(source)}"` : "";
+  return `<span class="overview-commit"${sourceHint}>${escapeHtml(text)}</span>`;
+}
+
+function normalizeOverviewModules(data) {
+  const raw = data?.modules || data?.plugins || data?.items;
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw).map(([plugin_id, value]) => ({ plugin_id, ...(value && typeof value === "object" ? value : {}) }));
+  }
+  return [];
+}
+
+function overviewItems() {
+  const modules = Array.isArray(state.overviewModules) ? state.overviewModules : [];
+  const extras = new Map(modules.map((item) => [item.plugin_id, item]));
+  const catalog = new Map((Array.isArray(state.catalogItems) ? state.catalogItems : []).map((item) => [item.plugin_id, item]));
+  const items = Array.isArray(state.recommendationItems) ? state.recommendationItems : [];
+  const merged = items.map((item) => ({ ...(catalog.get(item.plugin_id) || {}), ...(extras.get(item.plugin_id) || {}), ...item }));
+  return merged.length ? merged : Array.from(extras.values());
+}
+
+function overviewBudgetText(rate) {
+  const direct = rate?.budget_line || rate?.budgetLine || state.overviewData?.check_budget?.line;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const budgetLimit = Number(rate?.budget ?? rate?.limit);
+  const limit = Number.isFinite(budgetLimit) && budgetLimit > 0 ? budgetLimit : 60;
+  const explicitUsed = Number(rate?.used);
+  const remaining = Number(rate?.remaining);
+  const used = Number.isFinite(explicitUsed) ? Math.max(0, explicitUsed) : Number.isFinite(remaining) ? Math.max(0, limit - remaining) : null;
+  let minutes = null;
+  const retry = Number(rate?.retry_after_seconds);
+  if (Number.isFinite(retry)) minutes = Math.max(0, Math.ceil(retry / 60));
+  else if (rate?.reset_at) {
+    const reset = Date.parse(rate.reset_at);
+    if (Number.isFinite(reset)) minutes = Math.max(0, Math.ceil((reset - Date.now()) / 60000));
+  }
+  return t("overviewBudget")
+    .replace("{used}", used === null ? "—" : String(used))
+    .replace("{limit}", String(limit))
+    .replace("{minutes}", minutes === null ? "—" : String(minutes));
+}
+
+function renderOverviewKpis(items) {
+  const node = document.getElementById("summary");
+  if (!node) return;
+  const normal = items.filter((item) => item.installed && item.loaded && item.activated).length;
+  const attention = items.filter((item) => !(item.installed && item.loaded && item.activated)).length;
+  const updates = items.filter((item) => item.update_available).length;
+  const metrics = [
+    [t("overviewTrusted"), items.length], [t("overviewNormal"), normal],
+    [t("overviewAttention"), attention], [t("overviewUpdates"), updates]
+  ];
+  node.innerHTML = metrics.map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+}
+
+function renderOverviewModules(items) {
+  const rows = document.getElementById("overview-module-rows");
+  if (!rows) return;
+  const count = document.getElementById("overview-module-count");
+  if (count) count.textContent = items.length ? `${items.length} 个模块` : "";
+  if (!items.length) {
+    rows.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(t("loading"))}</td></tr>`;
+    return;
+  }
+  rows.innerHTML = items.map((item) => {
+    const status = overviewStatus(item);
+    const name = item.name || item.display_name || item.plugin_id;
+    const key = item.key || "";
+    return `<tr class="overview-module-row"><td data-label="${escapeHtml(t("overviewModule"))}"><span class="overview-module-name"><strong>${escapeHtml(key || name)}</strong><small>${escapeHtml(name)}</small></span></td><td data-label="${escapeHtml(t("overviewVersion"))}"><code>${escapeHtml(item.version ? `v${item.version}` : "—")}</code></td><td data-label="${escapeHtml(t("overviewStatus"))}"><span class="pill ${status.cls}">${escapeHtml(t(status.key))}</span></td><td data-label="${escapeHtml(t("overviewLatestCommit"))}">${overviewCommitCell(item)}</td><td class="overview-row-action"><button type="button" class="btn" data-overview-detail="${escapeHtml(item.plugin_id)}">${escapeHtml(t("overviewDetail"))}</button></td></tr>`;
+  }).join("");
+}
+
+function renderOverviewQueue(items) {
+  const list = document.getElementById("overview-queue-list");
+  if (!list) return;
+  const pending = items.filter((item) => item.update_available);
+  const summary = document.getElementById("overview-queue-summary");
+  if (summary) summary.textContent = pending.length ? t("overviewQueueCount").replace("{count}", String(pending.length)) : t("overviewQueueEmpty");
+  list.innerHTML = pending.length
+    ? pending.slice(0, 12).map((item) => `<button type="button" class="overview-queue-item" data-overview-detail="${escapeHtml(item.plugin_id)}"><span>${escapeHtml(item.key || item.name || item.plugin_id)}</span><code>${escapeHtml(item.latest_version || item.version || "")}</code></button>`).join("")
+    : `<p class="empty-cell">${escapeHtml(t("overviewQueueEmpty"))}</p>`;
+  const budget = document.getElementById("overview-budget");
+  if (budget) budget.textContent = overviewBudgetText(state.recommendationsRateLimit);
+}
+
+function renderOverview() {
+  const items = overviewItems();
+  renderOverviewKpis(items);
+  renderOverviewModules(items);
+  renderOverviewQueue(items);
+}
+
+function showOverviewModule(pluginId) {
+  if (!pluginId) return;
+  const tab = document.getElementById("tab-modules");
+  if (tab && !tab.classList.contains("active")) activateTab(tab);
+  const scrollToRow = () => {
+    const row = document.getElementById(`recommendation-${pluginId}`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("overview-highlight");
+    window.setTimeout(() => row.classList.remove("overview-highlight"), 1800);
+  };
+  if (document.getElementById(`recommendation-${pluginId}`)) {
+    requestAnimationFrame(scrollToRow);
+  } else {
+    loadModules().then(() => requestAnimationFrame(scrollToRow)).catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true));
+  }
+}
+
 async function loadOverview() {
   const data = await apiGet("overview");
-  const plugin = data.plugin || {};
-  const rule = data.rule || {};
-  document.getElementById("summary").innerHTML = [
-    [t("enabled"), plugin.enabled ? t("available") : t("unavailable")],
-    [t("automatic"), plugin.auto_update_enabled ? t("available") : t("unavailable")],
-    [t("busy"), plugin.busy ? t("running") : t("idle")],
-    [t("nextRun"), rule.next_run || "—"]
-  ].map(([label, value]) => `<article class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
-  document.getElementById("capabilities").innerHTML = (data.runtime?.capabilities || []).map((item) => {
-    const label = item.label?.[state.locale] || item.code;
-    const comment = item.comment?.[state.locale] || "";
-    return `<div><span class="capability-copy"><strong>${escapeHtml(label)}</strong><code>${escapeHtml(item.code)}</code><small>${escapeHtml(comment)}</small></span><span class="pill ${item.available ? "ok" : "off"}">${item.available ? t("available") : t("unavailable")}</span></div>`;
-  }).join("");
+  state.overviewData = data;
+  state.overviewModules = normalizeOverviewModules(data);
+  state.recommendationsRateLimit = state.recommendationsRateLimit || data.rate_limit || null;
+  renderOverview();
+  const capabilities = document.getElementById("capabilities");
+  if (capabilities) {
+    capabilities.innerHTML = (data.runtime?.capabilities || []).map((item) => {
+      const label = item.label?.[state.locale] || item.code;
+      const comment = item.comment?.[state.locale] || "";
+      return `<div><span class="capability-copy"><strong>${escapeHtml(label)}</strong><code>${escapeHtml(item.code)}</code><small>${escapeHtml(comment)}</small></span><span class="pill ${item.available ? "ok" : "off"}">${item.available ? t("available") : t("unavailable")}</span></div>`;
+    }).join("");
+  }
 }
 
 function makeField(key, field, value) {
@@ -444,8 +624,15 @@ function renderWebUiAddress(data) {
   state.webUi = data || null;
   const node = document.getElementById("webui-address");
   if (!node) return;
+  const statusNode = document.getElementById("webui-status");
+  const setStatus = (text, cls) => {
+    if (!statusNode) return;
+    statusNode.textContent = text;
+    statusNode.className = `webui-status ${cls}`;
+  };
   if (!data?.url) {
     node.textContent = t("webuiAddressUnavailable");
+    setStatus(t("webuiAddressUnavailable"), "off");
     setWebUiManualUrl("");
     return;
   }
@@ -457,6 +644,7 @@ function renderWebUiAddress(data) {
   const publicHint = data.public_url_configured === false ? ` · ${t("webuiPublicUrlHint")}` : "";
   node.textContent = `${t("webuiAddressLabel")}: ${data.url} · ${t("portLabel")}: ${data.port} · ${stateText}${publicHint}`;
   node.title = data.url;
+  setStatus(stateText, data.ready ? "ready" : "off");
   setWebUiManualUrl(data.url);
 }
 
@@ -1113,6 +1301,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
     : await apiGet("recommendations");
   const items = data.items || [];
   state.recommendationItems = items;
+  state.recommendationsRateLimit = data.rate_limit || null;
   renderSelfUpdateNotice(data.self_update);
   renderRateLimitNotice(data.rate_limit);
   const list = document.getElementById("recommendations-list");
@@ -1125,8 +1314,9 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `${actionButton(item, "update", "update", actions.update)}${forceUpdateButton(item, actions.force_update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key" title="技术名：${escapeHtml(item.key)}">${escapeHtml((item.name || "·").trim().slice(0, 1))}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item" id="recommendation-${escapeHtml(item.plugin_id)}" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key" title="技术名：${escapeHtml(item.key)}">${escapeHtml((item.name || "·").trim().slice(0, 1))}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
+  renderOverview();
 }
 
 function setVersionCheckBusy(labelKey) {
@@ -1385,40 +1575,52 @@ function renderDiagnosticProblems() {
   const node = document.getElementById("diagnostic-problems");
   if (!node) return;
   const problems = diagnosticProblems();
+  const countNode = document.getElementById("diagnostic-problem-count");
+  if (countNode) countNode.textContent = t("diagnosticProblemGroups").replace("{count}", String(problems.length));
   if (!problems.length) {
-    node.innerHTML = `<p class="diagnostic-problems-empty">${state.diagnosticEvents.length ? "当前缓冲区没有错误或警告。" : "还没有读取到诊断事件。"}</p>`;
+    node.innerHTML = `<p class="diagnostic-problems-empty">${escapeHtml(state.diagnosticEvents.length ? t("diagnosticProblemsNone") : t("diagnosticProblemsEmpty"))}</p>`;
     return;
   }
-  node.innerHTML = `<div class="diagnostic-problems-head"><strong>待处理问题</strong><span>${problems.length} 组 · 点击一组可按模块与错误码筛选下方事件流</span></div>`
-    + problems.map((item) => `<button type="button" class="diagnostic-problem level-${item.level === "ERROR" ? "error" : "warning"}" data-problem-plugin="${escapeHtml(item.pluginId)}" data-problem-code="${escapeHtml(item.code)}">`
-      + `<span class="diagnostic-level">${escapeHtml(item.level)}</span>`
+  node.innerHTML = problems.map((item) => {
+    const level = String(item.level || "WARNING").toUpperCase();
+    const levelClass = level === "ERROR" || level === "CRITICAL" ? "error" : "warning";
+    return `<button type="button" class="diagnostic-problem level-${levelClass}" data-problem-plugin="${escapeHtml(item.pluginId)}" data-problem-code="${escapeHtml(item.code)}">`
+      + `<span class="diagnostic-level diagnostic-level-${levelClass}">${escapeHtml(level)}</span>`
       + `<strong>${escapeHtml(item.pluginName)}</strong>`
       + `<code>${escapeHtml(item.code)}</code>`
       + `<small>${item.count} 次 · ${escapeHtml(diagnosticTime(item.last))}</small>`
-      + `<span class="diagnostic-problem-impact">影响范围：${escapeHtml(item.pluginName)}（当前缓冲区 ${item.count} 条）</span>`
-      + `<span class="diagnostic-problem-suggestion">建议动作：${escapeHtml(diagnosticSuggestion(item.code))}</span>`
-      + `</button>`).join("");
+      + `<span class="diagnostic-problem-impact">影响：${escapeHtml(item.pluginName)} · 当前缓冲区 ${item.count} 条</span>`
+      + `<span class="diagnostic-problem-suggestion">建议：${escapeHtml(diagnosticSuggestion(item.code))}</span>`
+      + `</button>`;
+  }).join("");
 }
 
 function renderDiagnostics() {
   syncDiagnosticPluginFilter();
   renderDiagnosticProblems();
   const memberNode = document.getElementById("diagnostic-members");
-  memberNode.innerHTML = state.diagnosticMembers.map((member) => (
-    `<span class="diagnostic-member ${diagnosticStatusClass(member.status)}" title="${escapeHtml(member.reason || "")}"><strong>${escapeHtml(member.plugin_name)}</strong>${escapeHtml(t(diagnosticStatusKey(member.status)))}</span>`
-  )).join("");
+  if (memberNode) {
+    memberNode.innerHTML = state.diagnosticMembers.map((member) => (
+      `<span class="diagnostic-member ${diagnosticStatusClass(member.status)}" title="${escapeHtml(member.reason || "")}"><strong>${escapeHtml(member.plugin_name)}</strong>${escapeHtml(t(diagnosticStatusKey(member.status)))}</span>`
+    )).join("");
+  }
   const list = document.getElementById("diagnostic-log-list");
-  const shouldStick = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  if (!list) return;
+  const shouldStick = state.diagnosticAutoScroll && list.scrollHeight - list.scrollTop - list.clientHeight < 48;
   const matchingEvents = filteredDiagnosticEvents();
   const events = matchingEvents.slice(-500);
   list.innerHTML = events.length ? events.map((event) => {
     const eventKey = `${event.plugin_id}:${event.seq}`;
     const open = state.diagnosticExpanded.has(eventKey) ? " open" : "";
-    return `<details class="diagnostic-event level-${escapeHtml(event.level.toLowerCase())}" data-diagnostic-key="${escapeHtml(eventKey)}"${open}>`
+    const level = String(event.level || "INFO").toLowerCase();
+    return `<details class="diagnostic-event level-${escapeHtml(level)}" data-diagnostic-key="${escapeHtml(eventKey)}"${open}>`
       + `<summary class="diagnostic-event-summary">`
-      + `<span class="diagnostic-meta"><span class="diagnostic-plugin">${escapeHtml(event.plugin_name)}</span><time>${escapeHtml(diagnosticTime(event.timestamp))}</time><span class="diagnostic-level">${escapeHtml(event.level)}</span><code>${escapeHtml(event.code || "event")}</code></span>`
+      + `<time>${escapeHtml(diagnosticTime(event.timestamp))}</time>`
+      + `<span class="diagnostic-plugin">${escapeHtml(event.plugin_name)}</span>`
+      + `<span class="diagnostic-level diagnostic-level-${escapeHtml(level)}">${escapeHtml(event.level)}</span>`
       + `<span class="diagnostic-event-summary-text">${escapeHtml(event.summary || "—")}</span>`
-      + `</summary><div class="diagnostic-event-body">${diagnosticDetails(event.details)}</div></details>`;
+      + `<span class="diagnostic-detail-toggle">${escapeHtml(t("details"))}</span>`
+      + `</summary><div class="diagnostic-event-body"><div class="diagnostic-event-code"><code>${escapeHtml(event.code || "event")}</code><span>#${escapeHtml(event.seq)}</span></div>${diagnosticDetails(event.details)}</div></details>`;
   }).join("") : `<p class="diagnostic-empty">${escapeHtml(t("diagnosticEmpty"))}</p>`;
   list.querySelectorAll("details.diagnostic-event").forEach((node) => {
     node.addEventListener("toggle", () => {
@@ -1430,11 +1632,86 @@ function renderDiagnostics() {
   });
   if (shouldStick) list.scrollTop = list.scrollHeight;
   const hasGap = state.diagnosticMembers.some((member) => member.gap);
-  const summary = t("diagnosticCount")
-    .replace("{shown}", String(events.length))
-    .replace("{total}", String(state.diagnosticEvents.length));
-  document.getElementById("diagnostic-summary").textContent = [summary, state.diagnosticPaused ? t("diagnosticPaused") : "", hasGap ? t("diagnosticGap") : ""].filter(Boolean).join(" · ");
-  document.getElementById("diagnostic-pause").textContent = t(state.diagnosticPaused ? "resumeLogs" : "pauseLogs");
+  const summary = document.getElementById("diagnostic-summary");
+  if (summary) {
+    summary.textContent = [
+      t("diagnosticShowing").replace("{shown}", String(events.length)).replace("{total}", String(state.diagnosticEvents.length)),
+      state.diagnosticPaused ? t("diagnosticPaused") : "",
+      state.diagnosticCatchUp ? t("diagnosticCatchingUp") : "",
+      hasGap ? t("diagnosticGap") : ""
+    ].filter(Boolean).join(" · ");
+  }
+  const cursor = document.getElementById("diagnostic-cursor-state");
+  if (cursor) {
+    cursor.textContent = state.diagnosticPaused ? t("diagnosticCursorPaused") : state.diagnosticCatchUp ? t("diagnosticCursorCatchingUp") : t("diagnosticCursor");
+    cursor.classList.toggle("paused", state.diagnosticPaused);
+    cursor.classList.toggle("busy", state.diagnosticCatchUp);
+  }
+  const pause = document.getElementById("diagnostic-pause");
+  if (pause) pause.textContent = t(state.diagnosticPaused ? "resumeLogs" : "pauseLogs");
+  const autoScroll = document.getElementById("diagnostic-autoscroll");
+  if (autoScroll) {
+    autoScroll.textContent = `${t("autoScrollLogs")}${state.diagnosticAutoScroll ? " ✓" : ""}`;
+    autoScroll.setAttribute("aria-pressed", String(state.diagnosticAutoScroll));
+  }
+}
+
+function diagnosticMemberHasMore(member) {
+  return Boolean(member?.has_more ?? member?.truncated ?? member?.payload_has_more);
+}
+
+function applyDiagnosticPage(data, generation, wasReset) {
+  if (generation !== state.diagnosticGeneration) return { applied: false, hasMore: false, changed: false };
+  const nextMembers = data.members || [];
+  const membersChanged = JSON.stringify(state.diagnosticMembers) !== JSON.stringify(nextMembers);
+  state.diagnosticMembers = nextMembers;
+  const activePluginIds = new Set(nextMembers.map((member) => member.plugin_id));
+  const removedPluginIds = new Set(
+    state.diagnosticEvents
+      .map((event) => event.plugin_id)
+      .filter((pluginId) => !activePluginIds.has(pluginId))
+  );
+  const resetPluginIds = new Set(
+    nextMembers.filter((member) => member.reset).map((member) => member.plugin_id)
+  );
+  let eventsChanged = wasReset || resetPluginIds.size > 0 || removedPluginIds.size > 0;
+  if (resetPluginIds.size || removedPluginIds.size) {
+    state.diagnosticEvents = state.diagnosticEvents.filter(
+      (event) => !resetPluginIds.has(event.plugin_id) && !removedPluginIds.has(event.plugin_id)
+    );
+  }
+  Object.keys(state.diagnosticCursors).forEach((pluginId) => {
+    if (!activePluginIds.has(pluginId)) delete state.diagnosticCursors[pluginId];
+  });
+  Object.keys(state.diagnosticStreams).forEach((pluginId) => {
+    if (!activePluginIds.has(pluginId)) delete state.diagnosticStreams[pluginId];
+  });
+  state.diagnosticMembers.forEach((member) => {
+    if (member.status === "ready") {
+      state.diagnosticCursors[member.plugin_id] = member.next_seq || 0;
+      if (member.stream_id) {
+        state.diagnosticStreams[member.plugin_id] = member.stream_id;
+      } else {
+        delete state.diagnosticStreams[member.plugin_id];
+      }
+    }
+  });
+  const seen = new Set(state.diagnosticEvents.map((event) => `${event.plugin_id}:${event.seq}`));
+  (data.events || []).forEach((event) => {
+    const key = `${event.plugin_id}:${event.seq}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      state.diagnosticEvents.push(event);
+      eventsChanged = true;
+    }
+  });
+  state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
+  if (state.diagnosticEvents.length > 10000) {
+    state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
+    eventsChanged = true;
+  }
+  const hasMore = nextMembers.some((member) => member.status === "ready" && diagnosticMemberHasMore(member));
+  return { applied: true, hasMore, changed: membersChanged || eventsChanged };
 }
 
 async function loadDiagnostics(reset = false) {
@@ -1455,64 +1732,28 @@ async function loadDiagnostics(reset = false) {
     state.diagnosticExpanded.clear();
   }
   try {
-    const data = await apiPost("diagnostics/logs", {
-      cursors: state.diagnosticCursors,
-      streams: state.diagnosticStreams,
-      limit: 1000
-    });
-    if (generation !== state.diagnosticGeneration) return;
-    const nextMembers = data.members || [];
-    const membersChanged = JSON.stringify(state.diagnosticMembers) !== JSON.stringify(nextMembers);
-    state.diagnosticMembers = nextMembers;
-    const activePluginIds = new Set(nextMembers.map((member) => member.plugin_id));
-    const removedPluginIds = new Set(
-      state.diagnosticEvents
-        .map((event) => event.plugin_id)
-        .filter((pluginId) => !activePluginIds.has(pluginId))
-    );
-    const resetPluginIds = new Set(
-      state.diagnosticMembers.filter((member) => member.reset).map((member) => member.plugin_id)
-    );
-    let eventsChanged = reset || resetPluginIds.size > 0 || removedPluginIds.size > 0;
-    if (resetPluginIds.size || removedPluginIds.size) {
-      state.diagnosticEvents = state.diagnosticEvents.filter(
-        (event) => !resetPluginIds.has(event.plugin_id) && !removedPluginIds.has(event.plugin_id)
-      );
+    let pass = 0;
+    while (true) {
+      const data = await apiPost("diagnostics/logs", {
+        cursors: state.diagnosticCursors,
+        streams: state.diagnosticStreams,
+        limit: 1000
+      });
+      if (generation !== state.diagnosticGeneration) return;
+      const previousCatchUp = state.diagnosticCatchUp;
+      const result = applyDiagnosticPage(data, generation, reset && pass === 0);
+      if (!result.applied) return;
+      state.diagnosticLoaded = true;
+      state.diagnosticCatchUp = result.hasMore;
+      if (result.changed || previousCatchUp !== state.diagnosticCatchUp) renderDiagnostics();
+      if (!result.hasMore || pass >= 4) break;
+      pass += 1;
     }
-    Object.keys(state.diagnosticCursors).forEach((pluginId) => {
-      if (!activePluginIds.has(pluginId)) delete state.diagnosticCursors[pluginId];
-    });
-    Object.keys(state.diagnosticStreams).forEach((pluginId) => {
-      if (!activePluginIds.has(pluginId)) delete state.diagnosticStreams[pluginId];
-    });
-    state.diagnosticMembers.forEach((member) => {
-      if (member.status === "ready") {
-        state.diagnosticCursors[member.plugin_id] = member.next_seq || 0;
-        if (member.stream_id) {
-          state.diagnosticStreams[member.plugin_id] = member.stream_id;
-        } else {
-          delete state.diagnosticStreams[member.plugin_id];
-        }
-      }
-    });
-    const seen = new Set(state.diagnosticEvents.map((event) => `${event.plugin_id}:${event.seq}`));
-    (data.events || []).forEach((event) => {
-      const key = `${event.plugin_id}:${event.seq}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        state.diagnosticEvents.push(event);
-        eventsChanged = true;
-      }
-    });
-    state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
-    if (state.diagnosticEvents.length > 10000) {
-      state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
-      eventsChanged = true;
-    }
-    state.diagnosticLoaded = true;
-    if (membersChanged || eventsChanged) renderDiagnostics();
   } finally {
+    const wasCatchingUp = state.diagnosticCatchUp;
+    state.diagnosticCatchUp = false;
     state.diagnosticBusy = false;
+    if (wasCatchingUp) renderDiagnostics();
     if (state.diagnosticRefreshPending) {
       state.diagnosticRefreshPending = false;
       await loadDiagnostics(true);
@@ -1544,10 +1785,38 @@ async function clearDiagnostics() {
   state.diagnosticCursors = {};
   state.diagnosticStreams = {};
   state.diagnosticExpanded.clear();
+  state.diagnosticCatchUp = false;
   state.diagnosticLoaded = true;
   renderDiagnostics();
   await loadDiagnostics(true);
   notify(t("diagnosticsCleared"));
+}
+
+function exportDiagnostics() {
+  const events = filteredDiagnosticEvents();
+  const payload = {
+    generated_at: new Date().toISOString(),
+    contract: "series.diagnostics.aggregate@1.0",
+    filters: {
+      plugin_id: document.getElementById("diagnostic-plugin-filter")?.value || "",
+      level: document.getElementById("diagnostic-level-filter")?.value || "",
+      query: document.getElementById("diagnostic-search")?.value || ""
+    },
+    cached: state.diagnosticEvents.length,
+    count: events.length,
+    members: state.diagnosticMembers,
+    events
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  notify(events.length ? t("diagnosticExportDone") : t("diagnosticExportEmpty"), !events.length);
 }
 
 
@@ -1762,6 +2031,19 @@ function bindEvents() {
     if (state.diagnosticPaused) stopDiagnosticPolling();
     else startDiagnosticPolling();
     renderDiagnostics();
+  });
+  document.getElementById("diagnostic-autoscroll")?.addEventListener("click", () => {
+    state.diagnosticAutoScroll = !state.diagnosticAutoScroll;
+    renderDiagnostics();
+  });
+  document.getElementById("diagnostic-export")?.addEventListener("click", exportDiagnostics);
+  document.getElementById("overview-apply-all")?.addEventListener("click", () => document.getElementById("apply-all-recommendations")?.click());
+  document.getElementById("overview-check-only")?.addEventListener("click", () => document.getElementById("check-latest")?.click());
+  document.getElementById("overview")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-overview-detail]");
+    if (!button) return;
+    event.preventDefault();
+    showOverviewModule(button.dataset.overviewDetail);
   });
   document.getElementById("diagnostic-refresh").addEventListener("click", () => {
     loadDiagnostics(true).catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true));

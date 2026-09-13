@@ -22,6 +22,12 @@ let state = {
   logLevel: "",
   logAuto: false,
   logTimer: null,
+  logPaused: false,
+  logAutoScroll: true,
+  logBusy: false,
+  logCatchUp: false,
+  logPendingScroll: false,
+  logRefreshPending: false,
   updatesCheck: null,
   transactions: null,
   rulesData: null,
@@ -253,7 +259,7 @@ function logDetailRows(details) {
   return `<dl class="log-detail-list">${Object.entries(details).map(([key, value]) => `<div><dt>${esc(key)}</dt><dd>${esc(typeof value === "object" ? JSON.stringify(value) : value)}</dd></div>`).join("")}</dl>`;
 }
 function diagnosticEvents() {
-  const levels = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3 };
+  const levels = { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 };
   const now = Date.now();
   const query = state.logQuery.trim().toLowerCase();
   return (state.logs || []).filter(item => {
@@ -266,16 +272,16 @@ function diagnosticEvents() {
     }
     if (query) return `${item.plugin_name || ""} ${item.plugin_id || ""} ${item.code || ""} ${item.summary || ""} ${JSON.stringify(item.details || {})}`.toLowerCase().includes(query);
     return true;
-  }).slice(-400).reverse();
+  }).slice(-500).reverse();
 }
 function diagnosticProblems() {
   const groups = {};
-  (state.logs || []).filter(item => item.level === "ERROR" || item.level === "WARNING").forEach(item => {
+  (state.logs || []).filter(item => ["ERROR", "WARNING", "CRITICAL"].includes(String(item.level || "").toUpperCase())).forEach(item => {
     const key = `${item.plugin_id}:${item.code || "UNKNOWN"}`;
     const current = groups[key] || { plugin_id: item.plugin_id, plugin_name: item.plugin_name || item.plugin_id, code: item.code || "UNKNOWN", level: item.level, count: 0, last: item.timestamp };
     current.count += 1;
     if (String(item.timestamp || "") > String(current.last || "")) current.last = item.timestamp;
-    if (item.level === "ERROR") current.level = "ERROR";
+    if (String(item.level || "").toUpperCase() !== "WARNING") current.level = "ERROR";
     groups[key] = current;
   });
   return Object.values(groups).sort((a, b) => (b.level === "ERROR") - (a.level === "ERROR") || b.count - a.count);
@@ -305,12 +311,16 @@ function diagnosticsView() {
   const eventCards = events.length ? events.map(item => {
     const key = `${item.plugin_id}:${item.seq}`;
     const expanded = state.logExpanded.has(key);
+    const level = String(item.level || "INFO").toLowerCase();
     const context = expanded ? (state.logs || []).filter(row => row.plugin_id === item.plugin_id && Math.abs(Number(row.seq || 0) - Number(item.seq || 0)) <= 3 && row.seq !== item.seq).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).map(row => `<button class="log-context-item" data-log-seq="${esc(row.seq)}"><code>${esc(row.seq)}</code> ${esc(row.summary || "")}</button>`).join("") : "";
-    return `<article class="diagnostic-event ${expanded ? "expanded" : ""} ${state.logNewKeys.has(key) ? "new-event" : ""}" data-log-event="${esc(key)}"><button class="diagnostic-event-head" data-log-toggle="${esc(key)}"><time title="${esc(item.timestamp || "")}">${esc(relativeTime(item.timestamp))}</time><span class="event-module">${esc(item.plugin_name || item.plugin_id)}</span><span class="pill ${item.level === "ERROR" ? "managed" : item.level === "WARNING" ? "warn" : ""}">${esc(item.level)}</span><b>${esc(item.summary || "未命名事件")}</b><span class="event-chevron">${expanded ? "收起" : "详情"}</span></button>${expanded ? `<div class="diagnostic-event-detail"><div class="event-meta"><span>代码 <code>${esc(item.code || "-")}</code></span><span>序号 <code>${esc(item.seq)}</code></span></div>${logDetailRows(item.details)}${context ? `<div class="log-context"><strong>同模块上下文</strong>${context}</div>` : ""}</div>` : ""}</article>`;
+    return `<article class="diagnostic-event level-${esc(level)} ${expanded ? "expanded" : ""} ${state.logNewKeys.has(key) ? "new-event" : ""}" data-log-event="${esc(key)}"><button class="diagnostic-event-head" data-log-toggle="${esc(key)}"><time title="${esc(item.timestamp || "")}">${esc(relativeTime(item.timestamp))}</time><span class="event-module">${esc(item.plugin_name || item.plugin_id)}</span><span class="level-chip level-${esc(level)}">${esc(item.level)}</span><b class="event-message">${esc(item.summary || "未命名事件")}</b><span class="event-chevron">${expanded ? "收起" : "详情"}</span></button>${expanded ? `<div class="diagnostic-event-detail"><div class="event-meta"><span>代码 <code>${esc(item.code || "-")}</code></span><span>序号 <code>${esc(item.seq)}</code></span></div>${logDetailRows(item.details)}${context ? `<div class="log-context"><strong>同模块上下文</strong>${context}</div>` : ""}</div>` : ""}</article>`;
   }).join("") : `<div class="empty-cell">暂无匹配日志，请调整过滤条件或点击「加载日志」。</div>`;
   const selectedModules = modules.map(([id, name]) => `<button class="filter-chip ${state.logModules.includes(id) ? "active" : ""}" data-log-module="${esc(id)}">${esc(name)}</button>`).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行诊断</h1><p>先看问题聚合，再展开事件详情和上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${state.session?.role === "owner" || state.session?.role === "admin" ? "" : "disabled"}>清空日志</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>当前问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span>${events.length} 条匹配 · ${members}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list">${eventCards}</div></section>`;
+  const cursorLabel = state.logPaused ? "已暂停" : state.logCatchUp ? "追平中" : "增量游标";
+  const canClear = state.session?.role === "owner" || state.session?.role === "admin";
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行日志</h1><p>先看问题聚合，再展开事件流与上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><span class="pill" id="log-cursor">${cursorLabel}</span><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="log-pause">${state.logPaused ? "继续" : "暂停"}</button><button class="btn" id="log-autoscroll" aria-pressed="${state.logAutoScroll}">自动滚动${state.logAutoScroll ? " ✓" : ""}</button><button class="btn" id="log-export">导出</button><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${canClear ? "" : "disabled"}>清空</button></div></div><section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>待处理问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span id="log-summary">显示最近 ${events.length} 条 · 缓存 ${state.logs.length}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list" id="diagnostic-log-list">${eventCards}</div></section>`;
 }
+
 function updatesView() {
   const checkedAt = state.modules.find(item => item.versions_checked_at)?.versions_checked_at || "";
   const rows = state.modules.map(item => {
@@ -666,7 +676,7 @@ function bindDashboard() {
   bindSettingsTabs();
   document.getElementById("logout")?.addEventListener("click", logout); document.getElementById("rail-logout")?.addEventListener("click", logout); document.getElementById("mobile-logout")?.addEventListener("click", logout);
   document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("reload")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
-  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl()); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
+  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl()); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
   document.getElementById("rules-reload")?.addEventListener("click", () => loadRules()); document.getElementById("save-rule")?.addEventListener("click", () => saveRule()); document.getElementById("mirrors-reload")?.addEventListener("click", () => loadMirrors()); document.getElementById("save-mirror")?.addEventListener("click", () => saveMirror()); document.getElementById("benchmark-mirrors")?.addEventListener("click", () => benchmarkMirrors()); document.getElementById("check-recommendations")?.addEventListener("click", () => checkRecommendations()); document.getElementById("apply-recommendations")?.addEventListener("click", () => applyAllRecommendations()); document.getElementById("admins-reload")?.addEventListener("click", () => loadAdmins()); document.getElementById("admin-create")?.addEventListener("click", () => createAdmin()); document.querySelectorAll("[data-admin-update]").forEach(node => node.addEventListener("click", () => updateAdmin(node.dataset.adminUpdate)));
   document.querySelectorAll("[data-log-module]").forEach(node => node.addEventListener("click", () => { const id = node.dataset.logModule; state.logModules = state.logModules.includes(id) ? state.logModules.filter(item => item !== id) : [...state.logModules, id]; dashboard(); })); document.querySelectorAll("[data-log-toggle]").forEach(node => node.addEventListener("click", () => { const key = node.dataset.logToggle; if (state.logExpanded.has(key)) state.logExpanded.delete(key); else state.logExpanded.add(key); dashboard(); })); document.querySelectorAll("[data-log-problem]").forEach(node => node.addEventListener("click", () => { state.logModules = [node.dataset.logProblem]; state.logThreshold = node.querySelector(".managed") ? "ERROR" : "WARNING"; state.logQuery = node.dataset.logCode || ""; dashboard(); })); const logSearch = document.getElementById("log-search"); logSearch?.addEventListener("input", () => { state.logQuery = logSearch.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("log-search"); next?.focus(); next?.setSelectionRange(state.logQuery.length, state.logQuery.length); }); });
   const bindRouteModels = () => document.querySelectorAll("[data-route-model]").forEach(node => node.addEventListener("change", () => { if (node.value !== "__custom__") return; const input = document.createElement("input"); input.className = "route-model"; input.dataset.routeModel = node.dataset.routeModel; input.type = "text"; input.placeholder = "模型名（可自定义）"; input.disabled = node.disabled; node.replaceWith(input); input.focus(); }));
@@ -694,29 +704,130 @@ function bindDashboard() {
   document.querySelectorAll("[data-install]").forEach(node => node.addEventListener("click", () => installModule(node.dataset.install)));
 }
 async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { notify(error.message, true); } }
-function logCursors() { const cursors = {}; const streams = {}; (state.logMembers || []).forEach(item => { cursors[item.plugin_id] = item.reset ? 0 : (item.next_seq || 0); streams[item.plugin_id] = item.stream_id || ""; }); return { cursors, streams }; }
+function logCursors() {
+  const cursors = {};
+  const streams = {};
+  (state.logMembers || []).forEach(item => {
+    const next = Number(item.next_seq);
+    cursors[item.plugin_id] = Number.isFinite(next) && next >= 0 ? next : 0;
+    streams[item.plugin_id] = item.stream_id || "";
+  });
+  return { cursors, streams };
+}
+function logMemberHasMore(member) {
+  return Boolean(member?.has_more ?? member?.truncated ?? member?.payload_has_more);
+}
+function applyDiagnosticPage(result, wasReset) {
+  const members = result.members || [];
+  state.logMembers = members;
+  const activeIds = new Set(members.map(item => item.plugin_id));
+  const resetIds = new Set(members.filter(item => item.reset).map(item => item.plugin_id));
+  if (state.logs.some(item => !activeIds.has(item.plugin_id)) || resetIds.size) {
+    state.logs = state.logs.filter(item => activeIds.has(item.plugin_id) && !resetIds.has(item.plugin_id));
+  }
+  const seen = new Set(state.logs.map(item => `${item.plugin_id}:${item.seq}`));
+  const fresh = (result.events || []).filter(item => {
+    const key = `${item.plugin_id}:${item.seq}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  state.logNewKeys = new Set(fresh.map(item => `${item.plugin_id}:${item.seq}`));
+  if (fresh.length) state.logPendingScroll = true;
+  state.logs = [...state.logs, ...fresh];
+  if (state.logs.length > 3000) state.logs = state.logs.slice(-3000);
+  return members.some(item => item.status === "ready" && logMemberHasMore(item));
+}
 async function loadDiagnosticLogs(reset = false) {
+  if (state.logBusy) {
+    if (reset) state.logRefreshPending = true;
+    return;
+  }
+  state.logBusy = true;
+  if (reset) {
+    state.logs = [];
+    state.logMembers = [];
+    state.logExpanded.clear();
+    state.logNewKeys = new Set();
+    state.logPendingScroll = false;
+  }
   try {
-    if (reset) { state.logs = []; state.logMembers = []; }
-    const { cursors, streams } = logCursors();
-    const result = await post("diagnostics/logs", { cursors, streams, limit: 500 });
-    state.logMembers = result.members || [];
-    const incoming = result.events || [];
-    state.logNewKeys = new Set(incoming.map(item => `${item.plugin_id}:${item.seq}`));
-    state.logs = [...state.logs, ...incoming];
-    if (state.logs.length > 3000) state.logs = state.logs.slice(-3000);
-    dashboard();
-  } catch (error) { notify(error.message, true); }
+    let pass = 0;
+    while (true) {
+      const { cursors, streams } = logCursors();
+      const result = await post("diagnostics/logs", { cursors, streams, limit: 500 });
+      const hasMore = applyDiagnosticPage(result, reset && pass === 0);
+      state.logCatchUp = hasMore;
+      dashboard();
+      if (!hasMore || pass >= 4) break;
+      pass += 1;
+    }
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    const wasCatchingUp = state.logCatchUp;
+    const shouldScroll = state.logAutoScroll && state.logPendingScroll;
+    state.logCatchUp = false;
+    state.logBusy = false;
+    state.logPendingScroll = false;
+    if (wasCatchingUp) dashboard();
+    if (shouldScroll) requestAnimationFrame(() => { const list = document.getElementById("diagnostic-log-list"); if (list) list.scrollTop = 0; });
+    if (state.logRefreshPending) {
+      state.logRefreshPending = false;
+      await loadDiagnosticLogs(true);
+    }
+  }
 }
 async function clearDiagnosticLogs() {
   if (!(await confirmDialog("清空所有模块的诊断日志？该操作不可恢复。"))) return;
-  try { await post("diagnostics/clear", { confirm: true }); state.logs = []; state.logMembers = []; notify("诊断日志已清空"); await loadDiagnostics(); } catch (error) { notify(error.message, true); }
+  try {
+    await post("diagnostics/clear", { confirm: true });
+    state.logs = [];
+    state.logMembers = [];
+    state.logExpanded.clear();
+    state.logNewKeys = new Set();
+    state.logCatchUp = false;
+    notify("诊断日志已清空");
+    await loadDiagnostics();
+  } catch (error) { notify(error.message, true); }
 }
 function toggleLogAuto() {
   state.logAuto = !state.logAuto;
   if (state.logTimer) { clearInterval(state.logTimer); state.logTimer = null; }
-  if (state.logAuto) state.logTimer = setInterval(() => { if (state.view === "diagnostics") loadDiagnosticLogs(); }, 5000);
+  if (state.logAuto) state.logTimer = setInterval(() => { if (!state.logPaused && state.view === "diagnostics") loadDiagnosticLogs(); }, 5000);
   dashboard();
+}
+function toggleLogPause() {
+  state.logPaused = !state.logPaused;
+  if (!state.logPaused && state.logAuto) loadDiagnosticLogs();
+  dashboard();
+}
+function toggleLogAutoScroll() {
+  state.logAutoScroll = !state.logAutoScroll;
+  if (state.logAutoScroll) { const list = document.getElementById("diagnostic-log-list"); if (list) list.scrollTop = 0; }
+  dashboard();
+}
+function exportDiagnosticLogs() {
+  const events = diagnosticEvents().slice().reverse();
+  const payload = {
+    generated_at: new Date().toISOString(),
+    contract: "series.diagnostics.aggregate@1.0",
+    filters: { modules: state.logModules, level: state.logThreshold, range: state.logRange, query: state.logQuery },
+    cached: state.logs.length,
+    count: events.length,
+    members: state.logMembers,
+    events
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  notify(events.length ? "诊断事件已导出" : "暂无可导出事件", !events.length);
 }
 async function checkUpdates() {
   try { notify("正在检查更新…"); state.updatesCheck = await post("updates/check", {}); notify("检查完成"); await loadDashboard(); if (state.view === "updates") await loadTransactions(); } catch (error) { notify(error.message, true); }

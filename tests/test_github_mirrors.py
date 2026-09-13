@@ -11,8 +11,10 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT.parent))
 
 from astrbot_plugin_update_manager.core.adapters.registry import (  # noqa: E402
+    GITHUB_API_HOST,
     GITHUB_RAW_HOST,
     CandidateRegistry,
+    RateLimitWindow,
     RegistryError,
 )
 from astrbot_plugin_update_manager.core.mirrors import (  # noqa: E402
@@ -312,3 +314,307 @@ def test_conf_schema_declares_mirror_knobs_with_full_triplet():
         assert field["type"] == kind
         assert field["default"] == default
         assert field["description"]
+
+
+# ----------------------------------------------------------- commit head 检查
+
+COMMIT_SHA = "a" * 40
+OTHER_COMMIT_SHA = "b" * 40
+
+
+def atom_body(sha):
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        "<entry>"
+        f"<id>tag:github.com,2008:Grit::Commit/{sha}</id>"
+        "<title>head</title>"
+        "</entry>"
+        "</feed>"
+    )
+
+
+class CommitClient:
+    def __init__(self, get_responses=(), post_responses=()):
+        self.get_responses = list(get_responses)
+        self.post_responses = list(post_responses)
+        self.gets = []
+        self.posts = []
+
+    def get(self, url, **kwargs):
+        self.gets.append((url, kwargs))
+        return self.get_responses.pop(0)
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return self.post_responses.pop(0)
+
+
+def test_commit_statuses_prefers_atom_and_reuses_per_repo_ttl():
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+    client = CommitClient([Response(200, body=atom_body(COMMIT_SHA))])
+    bind(registry, client)
+    targets = {
+        "acme/demo": {"branch": "main", "local_commit": COMMIT_SHA},
+    }
+
+    first = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+    second = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+
+    assert first["acme/demo"]["commit_status"] == "latest"
+    assert first["acme/demo"]["commit_source"] == "atom"
+    assert second["acme/demo"]["commit_reason"] == "ttl"
+    assert len(client.gets) == 1
+    assert client.posts == []
+
+
+def test_commit_statuses_atom_uses_mirror_then_direct_fallback():
+    registry = CandidateRegistry(
+        cache_ttl_seconds=0, mirror="https://gh-proxy.com"
+    )
+    client = CommitClient(
+        [
+            Response(404),
+            Response(200, body=atom_body(COMMIT_SHA)),
+        ]
+    )
+    bind(registry, client)
+
+    result = asyncio.run(
+        registry.commit_statuses(
+            {"acme/demo": {"branch": "main", "local_commit": COMMIT_SHA}},
+            force_refresh=True,
+        )
+    )
+
+    assert result["acme/demo"]["commit_status"] == "latest"
+    assert client.gets[0][0] == (
+        f"https://gh-proxy.com/https://github.com/acme/demo/commits/main.atom"
+    )
+    assert client.gets[1][0] == "https://github.com/acme/demo/commits/main.atom"
+
+
+def test_commit_statuses_falls_back_to_rest_when_atom_is_unusable():
+    """Atom 非官方契约：损坏或格式漂移时必须自动回退 REST，且不误报状态。"""
+    broken_documents = (
+        "<feed><entry><id>broken",  # XML 损坏 / 截断
+        (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            "<entry><id>tag:github.com,2008:SomeFutureShape</id></entry>"
+            "</feed>"
+        ),  # 合法 XML 但改为不再携带 commit sha
+    )
+    for document in broken_documents:
+        registry = CandidateRegistry(cache_ttl_seconds=0)
+        client = CommitClient(
+            [
+                Response(200, body=document),
+                Response(200, payload={"sha": COMMIT_SHA}),
+            ]
+        )
+        bind(registry, client)
+
+        result = asyncio.run(
+            registry.commit_statuses(
+                {"acme/demo": {"branch": "main", "local_commit": COMMIT_SHA}},
+                force_refresh=True,
+            )
+        )
+
+        entry = result["acme/demo"]
+        assert entry["commit_status"] == "latest"
+        assert entry["commit_source"] == "rest"
+        assert entry["remote_commit_source"] == "rest"
+        assert client.gets[0][0] == (
+            "https://github.com/acme/demo/commits/main.atom"
+        )
+        assert client.gets[1][0] == (
+            "https://api.github.com/repos/acme/demo/commits/main"
+        )
+
+
+def test_commit_statuses_rest_fallback_reuses_etag(monkeypatch):
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+    monkeypatch.setattr(registry, "_commit_ttl_seconds", lambda: 0.0)
+    client = CommitClient(
+        [
+            Response(404),
+            Response(
+                200,
+                payload={"sha": COMMIT_SHA},
+                headers={"ETag": '"commit-1"'},
+            ),
+            Response(404),
+            Response(304),
+        ]
+    )
+    bind(registry, client)
+    targets = {
+        "acme/demo": {"branch": "main", "local_commit": COMMIT_SHA},
+    }
+
+    first = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+    second = asyncio.run(registry.commit_statuses(targets, force_refresh=False))
+
+    assert first["acme/demo"]["commit_source"] == "rest"
+    assert second["acme/demo"]["commit_status"] == "latest"
+    assert client.gets[3][1]["headers"]["If-None-Match"] == '"commit-1"'
+
+
+def test_commit_statuses_graphql_batches_repository_heads():
+    registry = CandidateRegistry(github_token="ghp_example")
+    client = CommitClient(
+        post_responses=[
+            Response(
+                200,
+                payload={
+                    "data": {
+                        "repo0": {
+                            "defaultBranchRef": {
+                                "name": "main",
+                                "target": {"oid": COMMIT_SHA},
+                            },
+                            "latestRelease": {
+                                "tagName": "v1.0.0",
+                                "publishedAt": "2026-01-01T00:00:00Z",
+                            },
+                        },
+                        "repo1": {
+                            "defaultBranchRef": {
+                                "name": "main",
+                                "target": {"oid": OTHER_COMMIT_SHA},
+                            },
+                            "latestRelease": None,
+                        },
+                    },
+                    "rateLimit": {
+                        "limit": 5000,
+                        "cost": 2,
+                        "remaining": 4998,
+                        "resetAt": "2026-01-01T01:00:00Z",
+                    },
+                },
+            )
+        ]
+    )
+    bind(registry, client)
+    targets = {
+        "acme/one": {"branch": "main", "local_commit": COMMIT_SHA},
+        "acme/two": {"branch": "main", "local_commit": OTHER_COMMIT_SHA},
+    }
+
+    result = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+
+    assert len(client.posts) == 1
+    assert client.posts[0][1]["headers"]["Authorization"] == "Bearer ghp_example"
+    assert client.gets == []
+    assert result["acme/one"]["commit_status"] == "latest"
+    assert result["acme/two"]["commit_status"] == "latest"
+    assert result["acme/one"]["commit_source"] == "graphql"
+    assert result["acme/one"]["commit_release_tag"] == "v1.0.0"
+    status = registry.rate_limit_status()
+    assert status["sources"]["graphql"]["remaining"] == 4998
+
+
+def test_commit_statuses_stops_rest_fallback_at_low_budget():
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+    registry._rate_limits[GITHUB_API_HOST] = RateLimitWindow(
+        limit=60, remaining=5
+    )
+    client = CommitClient([Response(404)])
+    bind(registry, client)
+
+    result = asyncio.run(
+        registry.commit_statuses(
+            {"acme/demo": {"branch": "main", "local_commit": COMMIT_SHA}},
+            force_refresh=True,
+        )
+    )
+
+    assert result["acme/demo"]["commit_status"] == "unknown"
+    assert result["acme/demo"]["commit_reason"] == "rest_rate_budget"
+    assert all(GITHUB_API_HOST not in url for url, _ in client.gets)
+
+
+def test_commit_statuses_caches_404_and_failure_backoff():
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+    negative_client = CommitClient([Response(404), Response(404)])
+    bind(registry, negative_client)
+    targets = {
+        "acme/missing": {"branch": "main", "local_commit": COMMIT_SHA},
+    }
+
+    asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+    cached = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+
+    assert cached["acme/missing"]["commit_reason"] == "negative_cache"
+    assert len(negative_client.gets) == 2
+
+    backoff_registry = CandidateRegistry(cache_ttl_seconds=0)
+    backoff_client = CommitClient([Response(404), Response(401)])
+    bind(backoff_registry, backoff_client)
+    backoff_targets = {
+        "acme/backoff": {"branch": "main", "local_commit": COMMIT_SHA},
+    }
+
+    asyncio.run(backoff_registry.commit_statuses(backoff_targets, force_refresh=True))
+    delayed = asyncio.run(
+        backoff_registry.commit_statuses(backoff_targets, force_refresh=True)
+    )
+
+    assert delayed["acme/backoff"]["commit_reason"] == "backoff"
+    assert delayed["acme/backoff"]["commit_backoff_seconds"] > 0
+    assert len(backoff_client.gets) == 2
+
+
+def test_commit_statuses_without_local_commit_is_unknown_without_network():
+    registry = CandidateRegistry()
+    result = asyncio.run(
+        registry.commit_statuses(
+            {"acme/demo": {"branch": "main"}}, force_refresh=True
+        )
+    )
+
+    assert result["acme/demo"]["commit_status"] == "unknown"
+    assert result["acme/demo"]["commit_source"] == "none"
+    assert result["acme/demo"]["commit_reason"] == "local_commit_missing"
+
+
+def test_commit_statuses_force_refresh_obeys_manual_cooldown(monkeypatch):
+    registry = CandidateRegistry(cache_ttl_seconds=0)
+    monkeypatch.setattr(registry, "_commit_ttl_seconds", lambda: 0.0)
+    client = CommitClient([Response(200, body=atom_body(COMMIT_SHA))])
+    bind(registry, client)
+    targets = {
+        "acme/demo": {"branch": "main", "local_commit": COMMIT_SHA},
+    }
+
+    asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+    cached = asyncio.run(registry.commit_statuses(targets, force_refresh=True))
+
+    assert cached["acme/demo"]["commit_reason"] == "manual_cooldown"
+    assert cached["acme/demo"]["commit_stale"] is True
+    assert len(client.gets) == 1
+
+
+def test_commit_statuses_falls_back_to_atom_when_graphql_fails():
+    registry = CandidateRegistry(github_token="ghp_example")
+    client = CommitClient(
+        get_responses=[Response(200, body=atom_body(COMMIT_SHA))],
+        post_responses=[Response(500, payload={})],
+    )
+    bind(registry, client)
+
+    result = asyncio.run(
+        registry.commit_statuses(
+            {"acme/demo": {"branch": "main", "local_commit": COMMIT_SHA}},
+            force_refresh=True,
+        )
+    )
+
+    assert len(client.posts) == 1
+    assert len(client.gets) == 1
+    assert "Authorization" not in client.gets[0][1]["headers"]
+    assert result["acme/demo"]["commit_status"] == "latest"
+    assert result["acme/demo"]["commit_source"] == "atom"
