@@ -355,7 +355,7 @@ astrbot_plugin_xxx/
   source /data/dsh/home/dsh/venv/bin/activate
   python -m pytest tests/ -x -q
   ```
-- 全系列当前本地基线 3,142 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
+- 全系列当前本地基线 3,146 passed、11 skipped（子测试另计）；8 个在维仓库完整测试必须保持全绿，环境依赖项应显式 skip 而不能长期记为已知失败。
 - UI 结构断言：用 `test_pages_ui.py` 对前端源码做关键控件/接口存在性断言，防止界面回退。
 
 ---
