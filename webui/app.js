@@ -70,6 +70,131 @@ const notify = (message, error = false) => {
   }
 };
 
+// 界面一律显示中文功能名；原始 key 只在 title 提示与技术详情中出现。
+const FIELD_LABELS = {
+  auto_update_enabled: "启用自动更新", log_level: "日志级别",
+  webui_host: "WebUI 监听地址", webui_port: "WebUI 端口", webui_public_url: "WebUI 对外地址",
+  enabled: "启用此规则", local_time: "执行时间", timezone: "时区",
+  jitter_minutes: "随机延迟（分钟）", misfire_grace_minutes: "错过执行的宽限（分钟）",
+  policy: "更新策略", minimum_release_age_hours: "最小发布年龄（小时）",
+  on_failure: "失败处理", prerelease: "允许预发布版本",
+  username: "用户名", password: "初始密码", role: "角色",
+  chunking_enabled: "智能分段", chunking_delay_mode: "分段等待方式",
+  chunking_min_length: "分段最小长度", chunking_max_segments: "最多分段数",
+  silence_enabled: "沉默判断", silence_strategy: "沉默判断策略",
+  interrupt_enabled: "插话中断", interrupt_mode: "插话处理模式", interrupt_scope: "插话作用域",
+  interrupt_merge_strategy: "插话合并策略", plain_text_mode: "纯文本模式",
+  image_intent_mode: "图片意图识别", group_context_enabled: "群聊上下文",
+  private_context_bridge_enabled: "私聊上下文承接",
+  dynamic_context_enabled: "动态上下文续接", recent_activity_context_enabled: "跨会话活动承接",
+  context_budget_enforce: "上下文预算强制执行",
+  mood_enabled: "情绪追踪", mood_private_enabled: "私聊情绪追踪",
+  emotion_routing_enabled: "自动情绪路由", ai_style_director_enabled: "AI 风格导演",
+  segment_enabled: "长段落兜底分段", api_server_enabled: "启用外部语音接口",
+  file_fallback_enabled: "失败时回退为文件", replace_url_in_tts: "朗读时替换网址",
+  proactive_enabled: "允许主动发送", proactive_paused: "暂停主动发送",
+  official_weather_warnings_enabled: "官方天气预警", opportunity_cache_enabled: "后台刷新候选",
+};
+
+const TYPE_LABELS = { bool: "开关", int: "整数", float: "小数", str: "文本", string: "文本", value: "值" };
+
+function typeLabel(type) { return TYPE_LABELS[String(type || "").toLowerCase()] || "配置项"; }
+
+// 词根表：用于把未登记的 snake_case 配置键翻译成中文功能名。
+const KEY_TOKENS = {
+  context: "上下文", budget: "预算", soft: "软", hard: "硬", limit: "上限",
+  max: "最大", min: "最小", turns: "轮数", chars: "字数", length: "长度",
+  private: "私聊", group: "群聊", bridge: "承接", dynamic: "动态",
+  recent: "近期", activity: "活动", retention: "保留", minutes: "分钟", seconds: "秒",
+  days: "天数", hours: "小时", count: "数量", size: "大小", mode: "模式",
+  strategy: "策略", scope: "作用域", list: "名单", users: "用户", user: "用户",
+  interval: "间隔", threshold: "阈值", timeout: "超时", ratio: "比例",
+  enabled: "开关", enable: "开关", disabled: "关闭", merge: "合并",
+  image: "图片", intent: "意图", plain: "纯文本", text: "文本", emotion: "情绪",
+  routing: "路由", director: "导演", style: "风格", segment: "分段", voice: "音色",
+  api: "接口", server: "服务", token: "令牌", url: "地址", port: "端口",
+  weather: "天气", warning: "预警", earthquake: "地震", proactive: "主动",
+  quiet: "安静", daily: "每日", policy: "策略", failure: "失败", prerelease: "预发布",
+  minimum: "最小", release: "发布", age: "年龄", jitter: "随机延迟", misfire: "错过执行",
+  grace: "宽限", webui: "WebUI", host: "监听地址", public: "对外", level: "级别",
+};
+
+// 每个字段一句“干什么用/什么效果”，避免只有名字看不懂。
+const FIELD_HINTS = {
+  chunking_enabled: "把长回复按语义拆成多条发送，避免一次性刷屏。",
+  chunking_delay_mode: "决定分段之间按固定间隔还是按语音时长等待。",
+  chunking_min_length: "短于该长度的回复不再拆分。",
+  chunking_max_segments: "单条回复最多拆成几段，防止过于零碎。",
+  silence_enabled: "按策略判断这条消息是否需要沉默不回复。",
+  silence_strategy: "沉默判断方式：指令注入 / 独立预判 / 两者结合。",
+  interrupt_enabled: "用户插话时把新消息并入本轮，而不是重新开一轮。",
+  interrupt_mode: "运行中插话的任务归属判定方式。",
+  interrupt_scope: "群聊里哪类新消息算打断（本群 / 同一发送者 / @Bot）。",
+  interrupt_merge_strategy: "多条插话如何合并为一次补充说明。",
+  context_budget_enforce: "开启后超出预算会真正裁剪上下文，关闭只统计不裁剪。",
+  context_budget_soft_limit: "软上限：接近时只提醒，不裁剪。",
+  context_budget_hard_limit: "硬上限：超过后强制裁剪上下文。",
+  plain_text_mode: "去掉 Markdown 等格式，只发纯文本。",
+  image_intent_mode: "识别图片意图，决定是否要看图后回复。",
+  group_context_enabled: "把群聊最近消息作为上下文参考。",
+  private_context_bridge_enabled: "私聊中断后自动接续上一轮话题。",
+  private_context_bridge_max_turns: "最多回看多少轮私聊内容用于承接。",
+  private_context_bridge_short_max_chars: "短消息承接时最多拼接多少字。",
+  dynamic_context_enabled: "按当前话题动态挑选要注入的上下文。",
+  dynamic_context_max_turns: "动态上下文最多参考的轮数。",
+  dynamic_context_max_chars: "动态上下文最多注入的字数。",
+  recent_activity_context_enabled: "跨会话参考最近活动记录，衔接更自然。",
+  recent_activity_retention_minutes: "活动记录保留多久后失效。",
+  mood_enabled: "记录用户情绪，并影响回复语气。",
+  mood_private_enabled: "私聊场景同样启用情绪追踪。",
+  emotion_routing_enabled: "按情绪自动挑选音色与说话风格。",
+  ai_style_director_enabled: "用 AI 生成用户看不到的说话方式指令。",
+  segment_enabled: "单段语音过长时按句界兜底拆分。",
+  api_server_enabled: "开放外部语音接口，供其它程序调用。",
+  file_fallback_enabled: "合成失败时改用语音文件发送，避免整条丢失。",
+  replace_url_in_tts: "朗读时把网址念成「这个网址」。",
+  proactive_enabled: "允许主动发送环境关心消息。",
+  proactive_paused: "临时暂停主动发送，候选与记录继续累积。",
+  official_weather_warnings_enabled: "额外查询中央气象台官方预警。",
+  opportunity_cache_enabled: "后台刷新环境关心候选，发送更及时。",
+  auto_update_enabled: "到期自动检查并更新系列插件。",
+  log_level: "核自身日志的详细程度。",
+  webui_host: "独立 WebUI 的监听地址（重启生效）。",
+  webui_port: "独立 WebUI 的监听端口（重启生效）。",
+  webui_public_url: "对外展示的 WebUI 地址（重启生效）。",
+  enabled: "关闭后这条规则不会执行。",
+  local_time: "每天在这个时间点运行。",
+  timezone: "按哪个时区计算运行时间。",
+  jitter_minutes: "在运行时间前后随机浮动，避免所有任务同一秒发起。",
+  misfire_grace_minutes: "错过运行时间后，多久内仍补跑一次。",
+  policy: "允许更新到哪个版本范围。",
+  minimum_release_age_hours: "只更新发布超过该时长、已稳定的版本。",
+  on_failure: "更新失败时回滚并继续，还是回滚后停止。",
+  prerelease: "是否允许更新到预发布版本。",
+  username: "登录用的管理员账户名。",
+  password: "初始密码，至少 8 位。",
+  role: "所有者可管理全部，管理员可操作，只读仅查看。",
+};
+
+function fieldHint(key, def) {
+  return (def && (def.hint || def.description)) || FIELD_HINTS[key] || "";
+}
+
+function humanizeKey(key) {
+  const parts = String(key || "").split("_").filter(Boolean);
+  if (!parts.length) return "";
+  const words = parts.map((part) => KEY_TOKENS[part] || "");
+  if (words.some((word) => !word)) return "";
+  return words.join("");
+}
+
+function fieldLabel(key, def) {
+  const explicit = def && (def.label || def.title || def.description);
+  if (explicit) return explicit;
+  if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+  return humanizeKey(key) || "配置项";
+}
+
 function parse(value) { return typeof value === "string" ? JSON.parse(value) : value; }
 function esc(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 async function get(name) { const response = await fetch(`${API_PREFIX}/${name}`, { credentials: "same-origin" }); const data = parse(await response.json()); if (!response.ok || data?.success === false) throw new Error(data.error || "请求失败"); return data; }
@@ -235,9 +360,13 @@ function settingsView() {
     else if (def.type === "int" || def.type === "float") input = `<input type="number" step="${def.type === "float" ? "any" : "1"}" ${def.minimum != null ? `min="${esc(def.minimum)}"` : ""} ${def.maximum != null ? `max="${esc(def.maximum)}"` : ""} data-setting-key="${esc(key)}" data-setting-type="${esc(def.type)}" value="${esc(def.write_only ? "" : (value ?? ""))}" placeholder="${def.write_only ? (value?.configured ? "已配置；留空保持不变" : "未配置") : ""}" ${disabled ? "disabled" : ""} />`;
     else if (Array.isArray(def.options)) input = `<select data-setting-key="${esc(key)}" data-setting-type="string" ${disabled ? "disabled" : ""}>${def.options.map(option => `<option value="${esc(option)}" ${String(value) === String(option) ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>`;
     else input = `<input type="${def.write_only ? "password" : "text"}" data-setting-key="${esc(key)}" data-setting-type="string" value="${esc(def.write_only ? "" : (value ?? ""))}" placeholder="${def.write_only ? (value?.configured ? "已配置；留空保持不变" : "未配置") : ""}" ${disabled ? "disabled" : ""} />`;
-    return `<div class="form-row"><label><code>${esc(key)}</code><small>${esc(def.type || "value")}${def.read_only ? " · 重启/部署层字段" : ""}${def.write_only ? " · 写入后不回显" : ""}</small></label><div class="form-input">${input}</div><div class="form-meta"><span class="form-hint">${esc(String(def.description || "").slice(0, 80))}</span></div></div>`;
+    const label = fieldLabel(key, def);
+    const meta = [typeLabel(def.type), def.read_only ? "重启/部署层字段" : "", def.write_only ? "写入后不回显" : ""].filter(Boolean).join(" · ");
+    const hint = fieldHint(key, def);
+    const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
+    return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生 Provider</span></div></div><div class="route-note">Provider 和模型来自 AstrBot 当前已加载配置；没有可枚举模型的 provider 保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label><code>auto_update_enabled</code><small>bool · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label><code>log_level</code><small>str · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_host</code><small>str · WebUI 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_port</code><small>int · WebUI 端口（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>webui_public_url</code><small>str · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>series.model_router@1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>Provider</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生 Provider。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 回退 AstrBot 原生模型服务</span></div></div><div class="route-note">模型服务商与模型来自 AstrBot 当前已加载配置；无法枚举模型的服务商保留手动输入。</div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>TTS 音色</th></tr></thead><tbody>${routeRows}</tbody></table></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section>`;
 }
 const FEATURE_DOMAINS = [
   {
@@ -344,7 +473,7 @@ function controlView() {
     const features = domain.features.map(feature => `<span class="pill">${esc(feature)}</span>`).join("");
     return `<article class="workspace feature-domain" data-feature-domain="${esc(domain.id)}"><div class="feature-domain-head"><span class="feature-domain-icon">${esc(domain.icon)}</span><div><h2>${esc(domain.title)}</h2><p>${esc(domain.description)}</p></div><span class="pill ${statusClass}">${esc(status)}</span></div><div class="feature-domain-tags">${features}</div><div class="feature-domain-foot"><small>${member?.reason ? `状态：${esc(controlReasonLabel(member.reason))}` : "功能按领域统一归口，不展示模块身份细节。"}</small><div class="actions">${buttons}</div></div></article>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>功能按使用场景分类统一管理；关闭接管后各模块恢复独立配置。高级更新与生命周期操作仍在对应功能域内。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前接管模式</h2><span>revision ${esc(control.revision)}</span></div></div><div class="control-mode-summary"><div><span>运行模式</span><strong>${control.mode === "managed" ? "统一接管" : "独立配置"}</strong></div><div><span>功能域</span><strong>${FEATURE_DOMAINS.length}</strong></div><div><span>已接管</span><strong>${[...members.values()].filter(item => item.status === "managed").length}</strong></div><div><span>待检查</span><strong>${[...members.values()].filter(item => !["managed", "native"].includes(item.status)).length}</strong></div></div></section><section class="feature-domain-grid">${cards}</section>${controlDetail()}`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>功能按使用场景分类统一管理；关闭接管后各模块恢复独立配置。高级更新与生命周期操作仍在对应功能域内。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前接管模式</h2><span>版本号 ${esc(control.revision)}</span></div></div><div class="control-mode-summary"><div><span>运行模式</span><strong>${control.mode === "managed" ? "统一接管" : "独立配置"}</strong></div><div><span>功能域</span><strong>${FEATURE_DOMAINS.length}</strong></div><div><span>已接管</span><strong>${[...members.values()].filter(item => item.status === "managed").length}</strong></div><div><span>待检查</span><strong>${[...members.values()].filter(item => !["managed", "native"].includes(item.status)).length}</strong></div></div></section><section class="feature-domain-grid">${cards}</section>${controlDetail()}`;
 }
 function controlDetail() {
   if (!state.selectedControlPlugin) return "";
@@ -361,7 +490,7 @@ function controlDetail() {
   else body = controlFieldsTab(schema, snapshot);
   const domain = FEATURE_DOMAINS.find(item => item.actions.some(action => action.kind === "plugin" && action.plugin_id === pluginId));
   const title = domain?.title || "功能控制";
-  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(title)}</h2><span>revision ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回功能域</button></div>${strip}<div class="control-body">${body}</div></section>`;
+  return `<section class="workspace"><div class="workspace-head"><div class="section-title"><h2>${esc(title)}</h2><span>版本号 ${esc(schema?.revision ?? "—")}</span></div><button class="btn" id="close-control-detail">返回功能域</button></div>${strip}<div class="control-body">${body}</div></section>`;
 }
 function controlFieldsTab(schema, snapshot) {
   const fields = schema?.schema?.fields || {};
@@ -375,25 +504,28 @@ function controlFieldsTab(schema, snapshot) {
     const source = managed ? `<span class="pill managed">核覆盖</span>` : `<span class="pill native">插件</span>`;
     let input = "";
     if (def.secret) input = `<input type="password" data-control-field="${esc(name)}" placeholder="${current ? "已配置（不回显）" : "未配置"}" ${canWrite ? "" : "disabled"}>`;
-    else if (def.type === "bool") input = `<label class="switch"><input type="checkbox" data-control-field="${esc(name)}" ${current === true ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>${esc(def.description || "")}</span></label>`;
+    else if (def.type === "bool") input = `<label class="switch"><input type="checkbox" data-control-field="${esc(name)}" ${current === true ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用</span></label>`;
     else if (def.type === "int" || def.type === "float") input = `<input type="number" step="${def.type === "float" ? "any" : "1"}" min="${esc(def.minimum ?? "")}" max="${esc(def.maximum ?? "")}" value="${esc(current === null ? "" : current)}" data-control-field="${esc(name)}" ${canWrite ? "" : "disabled"}>`;
     else input = `<input type="text" value="${esc(current === null ? "" : current)}" data-control-field="${esc(name)}" ${canWrite ? "" : "disabled"}>`;
     const note = def.control === "read_only" ? `<span class="pill">只读</span>` : "";
-    return `<div class="form-row"><label><code>${esc(name)}</code><small>${esc(def.type || "")}${def.description ? " · " + esc(def.description) : ""}</small></label><div class="form-input">${input}</div><div class="form-meta">${source}${note}</div></div>`;
+    const ctrlLabel = fieldLabel(name, def);
+    const ctrlHint = fieldHint(name, def);
+    const ctrlHintHtml = `<small class="field-hint row-hint">${ctrlHint && ctrlHint !== ctrlLabel ? esc(ctrlHint) : ""}</small>`;
+    return `<div class="form-row" title="技术名：${esc(name)}"><label><strong>${esc(ctrlLabel)}</strong><small>${esc(typeLabel(def.type))}</small></label><div class="form-input">${input}</div><div class="form-meta">${source}${note}</div>${ctrlHintHtml}</div>`;
   }).join("") || `<p class="empty-cell">该插件未声明可管理字段。</p>`;
   const hint = !managed
     ? "统一接管未启用：字段以插件 native 配置为准，开启统一接管后才能在此修改。"
     : canWrite
-      ? "修改后点击「应用修改」：先校验再写入覆盖层，带 revision 乐观锁。"
+      ? "修改后点击「应用修改」：先校验再写入覆盖层，带并发保护。"
       : "当前角色为 viewer，仅可查看字段。";
   return `<div class="form-hint">${hint}</div><div class="form-grid">${rowsHtml}</div><div class="form-actions"><button class="btn primary" id="control-apply" ${canWrite ? "" : "disabled"}>应用修改</button><button class="btn" id="control-reset" ${canWrite ? "" : "disabled"}>重置全部覆盖</button><button class="btn" id="control-refresh-fields">刷新字段</button></div>`;
 }
 function controlPanelsTab() {
   const pluginId = state.selectedControlPlugin;
   if (state.takeoverDisabled) return `<p class="empty-cell">统一接管未启用：managed 面板已关闭，请使用该插件的独立 Page。</p><p class="form-hint">开启“统一接管”后，核会重新加载该模块面板。</p>`;
-  if (!state.panelsList) return `<p class="empty-cell">尚未加载面板。${`<button class="btn primary" id="panel-load">加载该插件面板</button>`}</p><p class="form-hint">面板来自插件的 series.webui@2.0 契约，未实现契约的插件此区为空。</p>`;
+  if (!state.panelsList) return `<p class="empty-cell">尚未加载面板。${`<button class="btn primary" id="panel-load">加载该插件面板</button>`}</p><p class="form-hint">面板来自插件提供的面板接口；未实现该接口的插件此区为空。</p>`;
   const panels = state.panelsList.panels || [];
-  if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未实现 series.webui@2.0 契约）。</p>`;
+  if (!panels.length) return `<p class="empty-cell">该插件未提供管理面板（未提供面板接口）。</p>`;
   const buttons = panels.map(panel => `<button class="btn ${state.selectedPanel === panel.id ? "primary" : ""}" data-panel-select="${esc(panel.id)}">${esc(panel.title)}</button>`).join("");
   const unsupported = state.panelsList?.unsupported_capabilities || [];
   const capabilityHint = unsupported.length
@@ -455,7 +587,7 @@ function rulesView() {
   const failures = [["rollback_continue", "失败回滚后继续"], ["rollback_stop", "失败回滚并停止"]];
   const pluginRows = (data.catalog || []).map(item => `<label class="filter-chip ${selected.has(item.plugin_id) ? "active" : ""}"><input type="checkbox" data-rule-plugin="${esc(item.plugin_id)}" ${selected.has(item.plugin_id) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${esc(item.display_name || item.plugin_id)} <small>v${esc(item.version || "?")}</small></label>`).join("");
   const globalState = data.global?.effective ? "规则与总开关均已启用" : "当前不会自动执行，请检查总开关、自动更新与规则开关";
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生命周期</div><h1>每日规则</h1><p>统一管理更新窗口、版本策略、失败处理与目标模块；保存携带 revision，避免两台页面互相覆盖。</p></div><div class="actions"><button class="btn" id="rules-reload">重读</button><button class="btn primary" id="save-rule" ${canWrite ? "" : "disabled"}>保存规则</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>执行窗口</h2><span>${esc(globalState)}</span></div></div><div class="form-grid"><div class="form-row"><label><code>enabled</code><small>每日规则自身开关</small></label><div class="form-input"><label class="switch"><input id="rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用此规则</span></label></div><div class="form-meta"><span class="pill">revision ${esc(rule.revision ?? 0)}</span></div></div><div class="form-row"><label><code>local_time</code><small>每天执行时间</small></label><div class="form-input"><input id="rule-time" type="time" value="${esc(rule.local_time || "04:00")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>timezone</code><small>IANA 时区</small></label><div class="form-input"><input id="rule-timezone" value="${esc(rule.timezone || "Asia/Shanghai")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>jitter_minutes</code><small>随机抖动，避免同时请求</small></label><div class="form-input"><input id="rule-jitter" type="number" min="0" max="120" value="${esc(rule.jitter_minutes ?? 0)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>misfire_grace_minutes</code><small>错过后的补执行窗口</small></label><div class="form-input"><input id="rule-misfire" type="number" min="0" max="1440" value="${esc(rule.misfire_grace_minutes ?? 60)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>版本与失败策略</h2><span>${data.next_run ? `下次执行：${esc(data.next_run)}` : "当前无计划"}</span></div></div><div class="form-grid"><div class="form-row"><label><code>policy</code><small>允许升级的最大范围</small></label><div class="form-input"><select id="rule-policy" ${canWrite ? "" : "disabled"}>${policies.map(([value, label]) => `<option value="${value}" ${rule.policy === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>minimum_release_age_hours</code><small>发布冷却时间</small></label><div class="form-input"><input id="rule-age" type="number" min="0" max="8760" value="${esc(rule.minimum_release_age_hours ?? 24)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>on_failure</code><small>失败回滚策略</small></label><div class="form-input"><select id="rule-failure" ${canWrite ? "" : "disabled"}>${failures.map(([value, label]) => `<option value="${value}" ${rule.on_failure === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label><code>prerelease</code><small>是否接受预发布版本</small></label><div class="form-input"><label class="switch"><input id="rule-prerelease" type="checkbox" ${rule.prerelease ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>允许 prerelease</span></label></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>目标模块</h2><span>${selected.size} 个已选择；核自身始终排除</span></div></div><div class="log-module-filters">${pluginRows || `<span class="empty-cell">当前没有可选择的已加载模块。</span>`}</div><p class="form-hint">${esc(data.policy_note || "规则保存后会立即重建调度。")}</p></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生命周期</div><h1>每日规则</h1><p>统一管理更新窗口、版本策略、失败处理与目标模块；保存带并发保护，避免两台页面互相覆盖。</p></div><div class="actions"><button class="btn" id="rules-reload">重读</button><button class="btn primary" id="save-rule" ${canWrite ? "" : "disabled"}>保存规则</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>执行窗口</h2><span>${esc(globalState)}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：enabled"><strong>启用此规则</strong><small>每日规则自身开关</small></label><div class="form-input"><label class="switch"><input id="rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用此规则</span></label></div><div class="form-meta"><span class="pill">revision ${esc(rule.revision ?? 0)}</span></div></div><div class="form-row"><label title="技术名：local_time"><strong>执行时间</strong><small>每天执行时间</small></label><div class="form-input"><input id="rule-time" type="time" value="${esc(rule.local_time || "04:00")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：timezone"><strong>时区</strong><small>IANA 时区</small></label><div class="form-input"><input id="rule-timezone" value="${esc(rule.timezone || "Asia/Shanghai")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：jitter_minutes"><strong>随机延迟（分钟）</strong><small>随机抖动，避免同时请求</small></label><div class="form-input"><input id="rule-jitter" type="number" min="0" max="120" value="${esc(rule.jitter_minutes ?? 0)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：misfire_grace_minutes"><strong>错过执行的宽限（分钟）</strong><small>错过后的补执行窗口</small></label><div class="form-input"><input id="rule-misfire" type="number" min="0" max="1440" value="${esc(rule.misfire_grace_minutes ?? 60)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>版本与失败策略</h2><span>${data.next_run ? `下次执行：${esc(data.next_run)}` : "当前无计划"}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：policy"><strong>更新策略</strong><small>允许升级的最大范围</small></label><div class="form-input"><select id="rule-policy" ${canWrite ? "" : "disabled"}>${policies.map(([value, label]) => `<option value="${value}" ${rule.policy === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：minimum_release_age_hours"><strong>最小发布年龄（小时）</strong><small>发布冷却时间</small></label><div class="form-input"><input id="rule-age" type="number" min="0" max="8760" value="${esc(rule.minimum_release_age_hours ?? 24)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：on_failure"><strong>失败处理</strong><small>失败回滚策略</small></label><div class="form-input"><select id="rule-failure" ${canWrite ? "" : "disabled"}>${failures.map(([value, label]) => `<option value="${value}" ${rule.on_failure === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：prerelease"><strong>允许预发布版本</strong><small>是否接受预发布版本</small></label><div class="form-input"><label class="switch"><input id="rule-prerelease" type="checkbox" ${rule.prerelease ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>允许 prerelease</span></label></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>目标模块</h2><span>${selected.size} 个已选择；核自身始终排除</span></div></div><div class="log-module-filters">${pluginRows || `<span class="empty-cell">当前没有可选择的已加载模块。</span>`}</div><p class="form-hint">${esc(data.policy_note || "规则保存后会立即重建调度。")}</p></section>`;
 }
 function mirrorsView() {
   const data = state.mirrorsData;
@@ -485,8 +617,8 @@ function securityView() {
   const data = state.adminsData;
   const canManage = state.session?.role === "owner";
   const admins = data?.admins || [];
-  const rows = admins.map(item => `<article class="account-card" data-admin-card="${esc(item.id)}"><header class="account-card-head"><div><b>${esc(item.username)}</b><small>${esc(item.id)}</small></div><span class="pill ${item.enabled ? "native" : "warn"}">${item.enabled ? "启用" : "禁用"}</span></header><div class="account-card-grid"><label class="account-card-field"><span>角色</span><select data-admin-role="${esc(item.id)}" ${canManage ? "" : "disabled"}>${["owner", "admin", "viewer"].map(role => `<option value="${role}" ${item.role === role ? "selected" : ""}>${role}</option>`).join("")}</select></label><label class="account-card-field"><span>状态</span><span class="switch"><input type="checkbox" data-admin-enabled="${esc(item.id)}" ${item.enabled ? "checked" : ""} ${canManage ? "" : "disabled"} /><span>${item.enabled ? "启用" : "禁用"}</span></span></label><label class="account-card-field"><span>重置密码</span><input type="password" data-admin-password="${esc(item.id)}" placeholder="留空不改密码" ${canManage ? "" : "disabled"} /></label></div><div class="account-card-actions"><button class="btn primary" data-admin-update="${esc(item.id)}" ${canManage ? "" : "disabled"}>保存这个账户</button></div></article>`).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；密码只保存 PBKDF2 派生值，浏览器不持久化令牌。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前会话</h2><span>服务端 Cookie · 8 小时空闲 / 24 小时绝对过期</span></div></div><div class="detail-grid account-grid"><div><span>用户名</span><strong>${esc(state.session?.username || "管理员")}</strong></div><div><span>角色</span><strong>${esc(state.session?.role || "admin")}</strong></div><div><span>会话状态</span><strong>已认证</strong></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>管理员账户</h2><span>${canManage ? `${admins.length} 个账户` : "仅 owner 可管理账户"}</span></div></div><div class="account-card-list">${rows || `<p class="empty-cell">加载中或暂无账户。</p>`}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>新建管理员</h2><span>至少 8 位密码；用户名不可包含空格</span></div></div><div class="form-grid"><div class="form-row"><label><code>username</code><small>登录名</small></label><div class="form-input"><input id="admin-new-username" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>password</code><small>初始密码</small></label><div class="form-input"><input id="admin-new-password" type="password" minlength="8" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label><code>role</code><small>最小权限优先</small></label><div class="form-input"><select id="admin-new-role" ${canManage ? "" : "disabled"}><option value="viewer">viewer</option><option value="admin">admin</option><option value="owner">owner</option></select></div><div class="form-meta"><button class="btn primary" id="admin-create" ${canManage ? "" : "disabled"}>创建</button></div></div></div></section>`;
+  const rows = admins.map(item => `<article class="account-card" data-admin-card="${esc(item.id)}"><header class="account-card-head"><div><b>${esc(item.username)}</b><small>${esc(item.id)}</small></div><span class="pill ${item.enabled ? "native" : "warn"}">${item.enabled ? "启用" : "禁用"}</span></header><div class="account-card-grid"><label class="account-card-field"><span>角色</span><select data-admin-role="${esc(item.id)}" ${canManage ? "" : "disabled"}>${[["owner", "所有者"], ["admin", "管理员"], ["viewer", "只读"]].map(([role, label]) => `<option value="${role}" ${item.role === role ? "selected" : ""}>${label}</option>`).join("")}</select></label><label class="account-card-field"><span>状态</span><span class="switch"><input type="checkbox" data-admin-enabled="${esc(item.id)}" ${item.enabled ? "checked" : ""} ${canManage ? "" : "disabled"} /><span>${item.enabled ? "启用" : "禁用"}</span></span></label><label class="account-card-field"><span>重置密码</span><input type="password" data-admin-password="${esc(item.id)}" placeholder="留空不改密码" ${canManage ? "" : "disabled"} /></label></div><div class="account-card-actions"><button class="btn primary" data-admin-update="${esc(item.id)}" ${canManage ? "" : "disabled"}>保存这个账户</button></div></article>`).join("");
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；密码只保存 PBKDF2 派生值，浏览器不持久化令牌。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>当前会话</h2><span>服务端 Cookie · 8 小时空闲 / 24 小时绝对过期</span></div></div><div class="detail-grid account-grid"><div><span>用户名</span><strong>${esc(state.session?.username || "管理员")}</strong></div><div><span>角色</span><strong>${esc(state.session?.role || "admin")}</strong></div><div><span>会话状态</span><strong>已认证</strong></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>管理员账户</h2><span>${canManage ? `${admins.length} 个账户` : "仅 owner 可管理账户"}</span></div></div><div class="account-card-list">${rows || `<p class="empty-cell">加载中或暂无账户。</p>`}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>新建管理员</h2><span>至少 8 位密码；用户名不可包含空格</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：username"><strong>用户名</strong><small>登录名</small></label><div class="form-input"><input id="admin-new-username" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：password"><strong>初始密码</strong><small>至少 8 位</small></label><div class="form-input"><input id="admin-new-password" type="password" minlength="8" ${canManage ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：role"><strong>角色</strong><small>最小权限优先</small></label><div class="form-input"><select id="admin-new-role" ${canManage ? "" : "disabled"}><option value="viewer">只读</option><option value="admin">管理员</option><option value="owner">所有者</option></select></div><div class="form-meta"><button class="btn primary" id="admin-create" ${canManage ? "" : "disabled"}>创建</button></div></div></div></section>`;
 }
 function viewContent() { if (state.view === "diagnostics") return diagnosticsView(); if (state.view === "updates") return updatesView(); if (state.view === "settings") return settingsView(); if (state.view === "control") return controlView(); if (state.view === "security") return securityView(); if (state.view === "rules") return rulesView(); if (state.view === "mirrors") return mirrorsView(); if (state.view === "recommendations") return recommendationsView(); return modulesView(); }
 function rail() {

@@ -8,7 +8,7 @@ import re
 import shutil
 from pathlib import Path
 
-UI_VERSION = "1.0.0"
+UI_VERSION = "1.0.1"
 ASSETS = ("series-ui.css", "series-ui.js")
 TARGETS = {
     "astrbot_plugin_active_learner": ("pages/manager",),

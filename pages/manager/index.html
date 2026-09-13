@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="title">凝心溯溪-核 · 模块运营中心</title>
-  <link rel="stylesheet" href="./style.css?v=0.19.1-2" />
-    <link rel="stylesheet" href="./series-ui.css?v=0.19.1-2" />
+  <link rel="stylesheet" href="./style.css?v=0.19.1-4" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.19.1-4" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -92,8 +92,8 @@
           <label class="switch"><input id="rule-enabled" type="checkbox" /><span data-i18n="ruleEnabled">启用每日规则</span></label>
           <label><span data-i18n="ruleTime">运行时间</span><input id="rule-time" type="time" required /></label>
           <label><span data-i18n="ruleTimezone">时区</span><input id="rule-timezone" type="text" required /></label>
-          <label><span data-i18n="rulePolicy">更新策略</span><select id="rule-policy"><option value="check_only" data-i18n="policyCheckOnly">仅检查（check_only）</option><option value="patch" data-i18n="policyPatch">仅补丁版本（patch）</option><option value="minor" data-i18n="policyMinor">允许次版本（minor）</option><option value="stable" data-i18n="policyStable">最新稳定版（stable）</option></select><small id="check-only-note" data-i18n="checkOnlyNote">check_only 仅检查并记录，绝不会更新插件。</small></label>
-          <label><span data-i18n="failurePolicy">失败策略</span><select id="rule-failure"><option value="rollback_continue" data-i18n="failureRollbackContinue">回滚后继续（rollback_continue）</option><option value="rollback_stop" data-i18n="failureRollbackStop">回滚并停止（rollback_stop）</option></select></label>
+          <label><span data-i18n="rulePolicy">更新策略</span><select id="rule-policy"><option value="check_only" data-i18n="policyCheckOnly">仅检查（不更新）</option><option value="patch" data-i18n="policyPatch">仅补丁版本</option><option value="minor" data-i18n="policyMinor">允许次版本</option><option value="stable" data-i18n="policyStable">最新稳定版</option></select><small id="check-only-note" data-i18n="checkOnlyNote">该策略只做检查与记录，绝不会更新插件。</small></label>
+          <label><span data-i18n="failurePolicy">失败策略</span><select id="rule-failure"><option value="rollback_continue" data-i18n="failureRollbackContinue">回滚后继续</option><option value="rollback_stop" data-i18n="failureRollbackStop">回滚并停止</option></select></label>
           <label><span data-i18n="jitter">抖动（分钟）</span><input id="rule-jitter" type="number" min="0" max="120" required /></label>
           <label><span data-i18n="minimumAge">最小发布年龄（小时）</span><input id="rule-minimum-age" type="number" min="0" max="8760" required /></label>
           <label class="switch"><input id="rule-prerelease" type="checkbox" /><span data-i18n="prerelease">允许预发行版本</span></label>
@@ -108,7 +108,7 @@
         <form id="webui-admin-create-form" class="admin-form">
           <label><span data-i18n="adminUsername">用户名</span><input id="webui-admin-username" autocomplete="off" required /></label>
           <label><span data-i18n="adminPassword">初始密码</span><input id="webui-admin-password" type="password" autocomplete="new-password" minlength="8" required /></label>
-          <label><span data-i18n="adminRole">角色</span><select id="webui-admin-role"><option value="admin">admin</option><option value="owner">owner</option><option value="viewer">viewer</option></select></label>
+          <label><span data-i18n="adminRole">角色</span><select id="webui-admin-role"><option value="admin">管理员</option><option value="owner">所有者</option><option value="viewer">只读</option></select></label>
           <button type="submit" data-i18n="createAdmin">创建管理员</button>
         </form>
         <div id="webui-admin-list" class="admin-list"><p data-i18n="loading">加载中…</p></div>
@@ -154,7 +154,7 @@
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js?v=0.19.1-2"></script>
-  <script type="module" src="./app.js?v=0.19.1-2"></script>
+  <script src="./series-ui.js?v=0.19.1-4"></script>
+  <script type="module" src="./app.js?v=0.19.1-4"></script>
 </body>
 </html>

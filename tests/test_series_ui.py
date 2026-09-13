@@ -63,14 +63,11 @@ def test_series_ui_modal_layers_keep_card_interactive():
     css = (root / "ui" / "series-ui.css").read_text(encoding="utf-8")
     js = (root / "ui" / "series-ui.js").read_text(encoding="utf-8")
 
-    backdrop_rule = css[
-        css.index("body[data-series-ui] .modal-backdrop") :
-        css.index("body[data-series-ui] .modal-card {")
-    ]
-    card_rule = css[
-        css.index("body[data-series-ui] .modal-card {") :
-        css.index("body[data-series-ui] .modal-header,")
-    ]
+    # 通用控件规则已用 :where() 降权，这里的定位文本同步跟随新写法。
+    backdrop_start = css.index(".modal-backdrop")
+    backdrop_rule = css[backdrop_start : css.index(".modal-card", backdrop_start)]
+    card_start = css.index(".modal-card", backdrop_start)
+    card_rule = css[card_start : css.index(".modal-header", card_start)]
 
     assert "position: absolute" in backdrop_rule
     assert "z-index: 0" in backdrop_rule

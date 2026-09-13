@@ -1125,7 +1125,7 @@ async function loadRecommendations(check = false, forceRefresh = true) {
       ? `${actionButton(item, "update", "update", actions.update)}${forceUpdateButton(item, actions.force_update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key">${escapeHtml(item.key)}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key" title="技术名：${escapeHtml(item.key)}">${escapeHtml((item.name || "·").trim().slice(0, 1))}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
 }
 
@@ -1312,6 +1312,11 @@ function diagnosticValue(value) {
 function diagnosticDetails(details) {
   const data = details && typeof details === "object" ? details : {};
   const logDetail = typeof data.log_detail === "string" ? data.log_detail : "";
+  const detailLabels = {
+    plugin_id: "模块", event: "事件", stage: "阶段", reason: "原因", code: "错误码",
+    revision: "版本号", elapsed_ms: "耗时（毫秒）", count: "次数", timestamp: "时间",
+    source: "来源", target: "目标", operation: "操作", version: "版本", error: "错误",
+  };
   const entries = Object.entries(data).filter(([key]) => key !== "log_detail");
   if (!logDetail && !entries.length) {
     return `<p class="diagnostic-detail-empty">${escapeHtml(t("diagnosticNoDetails"))}</p>`;
@@ -1319,7 +1324,7 @@ function diagnosticDetails(details) {
   return `<div class="diagnostic-details">`
     + (logDetail ? `<pre class="diagnostic-log-detail">${escapeHtml(logDetail)}</pre>` : "")
     + (entries.length ? `<div class="diagnostic-detail-fields">${entries.map(([key, value]) => (
-      `<span><code>${escapeHtml(key)}</code><pre>${escapeHtml(diagnosticValue(value))}</pre></span>`
+      `<span><code title="技术名：${escapeHtml(key)}">${escapeHtml(detailLabels[key] || "其它字段")}</code><pre>${escapeHtml(diagnosticValue(value))}</pre></span>`
     )).join("")}</div>` : "")
     + `</div>`;
 }

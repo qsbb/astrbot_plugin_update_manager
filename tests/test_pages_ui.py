@@ -555,7 +555,8 @@ def test_daily_rule_card_has_all_controls_and_check_only_warning():
         "rule-next-run",
     ):
         assert f'id="{element_id}"' in html
-    assert "check_only 仅检查并记录，绝不会更新插件" in html
+    assert "该策略只做检查与记录，绝不会更新插件" in html
+    assert "仅检查（不更新）" in html
     assert "check_only checks and records only; it never updates plugins" in js
     assert "expected_revision: state.rule?.rule?.revision" in js
     assert 'document.getElementById("rule-form").addEventListener' in js
@@ -984,7 +985,7 @@ def test_manager_page_style_does_not_duplicate_series_ui_controls():
     assert "button,select,input" not in css
     assert "dialog::backdrop" not in css
     assert "#toast" not in css
-    assert "body[data-series-ui] .card," in shared
-    assert "body[data-series-ui] .modal-card {" in shared
+    assert ":where(body[data-series-ui] .card)" in shared
+    assert ":where(body[data-series-ui] .modal-card)" in shared
     assert ".diagnostic-log-list" in css
     assert ".diagnostic-log-detail" in css
