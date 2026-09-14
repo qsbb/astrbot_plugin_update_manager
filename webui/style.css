@@ -205,6 +205,24 @@ body[data-series-ui] .content .table-wrap {
 .cap-switch { flex:0 0 auto; gap:8px; color:#5b6478; font-size:11.5px; font-weight:600; }
 .cap-switch .cap-switch-text { max-width:7.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cap-switch.busy { opacity:.6; }
+/* 能力详情内的模块视图页签（本能力字段 / 全部字段 / 插件面板 / 生命周期） */
+.cap-provider-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 10px; }
+.cap-provider-tab { min-height:0; padding:5px 10px; border:1px solid var(--line); border-radius:9px; background:#fff; color:#5b6478; font-size:12px; }
+.cap-provider-tab:hover { transform:none; border-color:#cfcaff; background:#f7f5ff; color:#4c3fd6; box-shadow:none; }
+.cap-provider-tab.active { border-color:#cfcaff; background:#efeaff; color:#4c3fd6; font-weight:700; }
+/* 全局设置：模型路由职责卡片 */
+.route-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:0 20px 18px; }
+.route-card { display:grid; gap:8px; padding:12px 13px; border:1px solid var(--line); border-radius:12px; background:var(--si-surface, #fff); }
+.route-card-quiet { border-style:dashed; background:#fbfcff; }
+.route-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.route-card-head b { font-size:13px; }
+.route-card > small { color:#8b95ab; font-size:11.5px; line-height:1.5; }
+.route-inputs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.route-inputs .route-voice { grid-column:1 / -1; }
+.route-effective { font-size:11.5px; color:#5b6478; }
+.route-effective b { color:#2f3550; font-weight:600; }
+@media (max-width:900px) { .route-cards { grid-template-columns:1fr; padding:0 14px 14px; } }
+@media (max-width:620px) { .route-inputs { grid-template-columns:1fr; } }
 .cap-badge { padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; white-space:nowrap; }
 .cap-badge.ok { background:#e8f7ee; color:#1a7f4b; }
 .cap-badge.mixed { background:#e8f0ff; color:#2559c9; }

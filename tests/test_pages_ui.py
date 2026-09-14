@@ -94,10 +94,17 @@ def test_standalone_webui_control_console_takes_over_series_plugins():
     """系列接管管理台：字段接管表单、插件面板、生命周期三区齐全。"""
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
-    # 三个子区与切换
-    assert '["fields", "字段接管"], ["panels", "插件面板"], ["lifecycle", "生命周期"]' in js
-    assert "data-control-tab" in js
-    assert "state.controlTab" in js
+    # 模块级视图内嵌进能力详情：本能力字段 / 全部字段 / 插件面板 / 生命周期
+    assert '[["fields", "本能力字段"], ["all", "全部字段"], ["panels", "插件面板"], ["lifecycle", "生命周期"]]' in js
+    assert "data-cap-tab" in js
+    assert "function capabilityProviderHead(" in js
+    assert "function capabilityPanelsTab(" in js
+    assert "function capabilityLifecycleTab(" in js
+    assert "async function openModuleInControl(" in js
+    # 独立的模块详情页已删除（不再有两个页面来回跳）
+    assert "function controlDetail()" not in js
+    assert "data-control-tab" not in js
+    assert "close-control-detail" not in js
     # 字段接管：可编辑表单 + validate/apply + 重置 + revision 乐观锁
     assert "function controlFieldsTab" in js
     assert "function collectControlPatch" in js
@@ -109,8 +116,8 @@ def test_standalone_webui_control_console_takes_over_series_plugins():
     assert "expected_revision" in js
     assert 'data-control-field' in js
     # 插件面板：series.webui 契约分发 + 通用渲染 + 动作
-    assert "async function loadPanelsList" in js
-    assert "async function loadPanelData" in js
+    assert "async function loadCapPanels(" in js
+    assert "async function loadCapPanelData(" in js
     assert "async function runPanelAction" in js
     assert "/panels" in js
     assert "/actions/" in js
@@ -868,9 +875,14 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
 def test_webui_control_plugin_loads_panels_independently():
     """插件面板不应因缺少 series.control 而不可达。"""
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
-    assert "Promise.allSettled" in js
-    assert "state.panelsList = panelsResult.value" in js
-    assert "loadPanelData(state.panelsList.panels[0].id)" in js
+    assert "function capPanelStore(" in js
+    assert "async function loadCapPanels(" in js
+    assert "const first = (store.list?.panels || [])[0]" in js
+    assert "await loadCapPanelData(pluginId, first.id)" in js
+    assert "data-cap-panels-load" in js
+    # 没有字段契约时，插件面板与生命周期仍可达（按页签独立加载）
+    assert 'if (tab === "panels") return shell(capabilityPanelsTab(provider.plugin_id));' in js
+    assert 'if (tab === "lifecycle") return shell(capabilityLifecycleTab(provider.plugin_id));' in js
     assert "contract_details?.webui_panels" in js
 
 
@@ -1013,6 +1025,42 @@ def test_series_boolean_switches_use_shared_toggle_not_local_checkbox():
     assert ".form-actions .switch input{width:16px;height:16px}" not in webui_css
 
 
+def test_field_labels_cover_series_plugins_and_never_fall_back_to_placeholder():
+    """字段中文名兜底：7 仓 75 个字段都有名字，且不再回退成"配置项"。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    assert "const PLUGIN_FIELD_TEXT = {" in js
+    for plugin_id in (
+        "astrbot_plugin_active_learner",
+        "astrbot_plugin_conversation_flow",
+        "astrbot_plugin_identity_guardian",
+        "astrbot_plugin_relationship",
+        "astrbot_plugin_environment_awareness",
+        "astrbot_plugin_voice_hub",
+        "astrbot_plugin_embodiment_bridge",
+    ):
+        assert f'"{plugin_id}": {{' in js, plugin_id
+    assert js.count('": [') >= 75
+    assert "function pluginFieldText(pluginId, key)" in js
+    assert "fieldLabel(name, def, pluginId)" in js
+    assert "return humanizeKey(key) || key;" in js
+    assert 'return humanizeKey(key) || "配置项"' not in js
+    # 来源标签只在核覆盖时出现，避免每行重复"插件"
+    assert 'const source = isManaged ? `<span class="pill managed">核覆盖</span>` : "";' in js
+
+
+def test_settings_route_uses_responsibility_cards_and_safe_fallback():
+    """全局设置：模型路由改为职责卡片 + 一键回退 / 导出；当前生效来自解析快照。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+    assert "const routeCards = labels.map(" in js
+    assert 'class="route-cards"' in js
+    assert "当前生效：" in js
+    assert "async function resetAllRoutes(" in js
+    assert "function exportRoutes(" in js
+    assert 'id="route-reset-all"' in js and 'id="route-export"' in js
+    assert ".route-cards" in css and ".route-card" in css and ".route-effective" in css
+
+
 def test_control_center_mobile_nav_can_reach_every_view():
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
@@ -1045,7 +1093,7 @@ def test_control_center_mobile_nav_can_reach_every_view():
     assert 'if (state.view === "control") await loadControl();' not in js
 
     nav_block = js[js.index('class="mobile-nav"') : js.index("</nav>", js.index('class="mobile-nav"'))]
-    assert '["modules", "control", "diagnostics"]' in nav_block
+    assert '["control", "diagnostics", "updates"]' in nav_block
     assert 'id="mobile-more"' in nav_block
     assert 'NAV_ITEMS.filter(([view])' in js
     assert 'data-view="${view}"' in js
@@ -1055,6 +1103,11 @@ def test_control_center_mobile_nav_can_reach_every_view():
     assert "overflow-x:auto" in mobile_css
     assert "flex:0 0 auto" in mobile_css
     assert ".suite-tabs" in css
+    # 总览并入「诊断与日志」套件，一级入口从 5 项减到 4 项
+    assert 'suite: ["diagnostics", "modules"]' in js
+    assert 'tabLabel: "模块总览"' in js
+    assert 'modules: { icon: "▦", label: "模块总览"' in js
+    assert 'const id = VIEWS[view] ? view : "control";' in js
 
 def test_manager_page_does_not_duplicate_dark_legacy_theme():
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
@@ -1126,7 +1179,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.6-1" in html
+    assert "?v=0.19.7-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1161,4 +1214,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.6-1" in webui_html
+    assert "?v=0.19.7-1" in webui_html
