@@ -67,6 +67,72 @@ def test_unknown_plugin_fails_closed(tmp_path):
     asyncio.run(run())
 
 
+class FakePluginNative(FakePlugin):
+    """支持一键固化/读取原生值的最小桩。"""
+
+    def __init__(self):
+        self.config = {"enabled": False}
+        self.calls = []
+
+    def series_control_schema(self):
+        return {"fields": {"enabled": {"type": "bool", "default": True, "control": "overrideable", "secret": False}}}
+
+    def series_control_snapshot(self):
+        return {"fields": {"enabled": {"native_configured": True, "managed_configured": True,
+                                       "effective_source": "managed", "effective_value": True,
+                                       "native_value": False}}}
+
+    def series_control_native_write(self, patch, *, expected_revision=None):
+        self.calls.append(("write_native", dict(patch)))
+        self.config.update(patch)
+        return {"status": "ok", "reason": "APPLIED", "written": list(patch), "skipped": [], "backup_id": "20260916-120000"}
+
+    def reset_series_control_override(self, fields=None, *, expected_revision=None):
+        self.calls.append(("reset", list(fields or [])))
+        return {"status": "ok"}
+
+
+class FakeAdapterNative:
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    async def get_plugin_instance(self, plugin_id):
+        return self.plugin if plugin_id == "astrbot_plugin_active_learner" else None
+
+
+def test_freeze_writes_native_and_clears_overlay(tmp_path):
+    plugin = FakePluginNative()
+    gateway = SeriesControlGateway(FakeAdapterNative(plugin), AtomicJsonStore(tmp_path))
+
+    async def run():
+        await gateway.set_mode("managed", "owner")
+        member = gateway._member("astrbot_plugin_active_learner")
+        member["overrides"]["enabled"] = True
+        member["revision"] = 1
+        result = await gateway.freeze("astrbot_plugin_active_learner", reset_overlay=True, role="owner")
+        assert result["status"] == "frozen"
+        assert result["written"] == ["enabled"]
+        assert result["backup_id"] == "20260916-120000"
+        assert plugin.config["enabled"] is True
+        assert ("write_native", {"enabled": True}) in plugin.calls
+        assert not gateway._member("astrbot_plugin_active_learner")["overrides"]
+
+    asyncio.run(run())
+
+
+def test_native_snapshot_and_import_native_expose_native_values(tmp_path):
+    plugin = FakePluginNative()
+    gateway = SeriesControlGateway(FakeAdapterNative(plugin), AtomicJsonStore(tmp_path))
+
+    async def run():
+        await gateway.set_mode("managed", "owner")
+        native = await gateway.native_snapshot("astrbot_plugin_active_learner")
+        assert native["supported"] is True
+        assert native["fields"]["enabled"]["native_value"] is False
+
+    asyncio.run(run())
+
+
 class FakePluginModeBroken(FakePlugin):
     """模拟线上 序(identity_guardian) 0.8.5 的缺陷：set_mode 转发到不存在的方法。"""
 

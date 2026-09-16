@@ -243,6 +243,157 @@ class SeriesControlGateway:
         self._save()
         return {"success": True, "plugin_id": canonical, "revision": member["revision"], "status": "applied"}
 
+    async def native_snapshot(self, plugin_id: str) -> dict[str, Any]:
+        """读取插件「原生配置现值」（供核一键读取当前配置）。"""
+        canonical, instance = await self._instance(plugin_id)
+        snapshot = await self._call(instance, "series_control_snapshot")
+        if not isinstance(snapshot, Mapping):
+            raise ValueError("SNAPSHOT_INVALID")
+        public = _public_snapshot(snapshot)
+        raw = public.get("fields") if isinstance(public, Mapping) else None
+        fields: dict[str, Any] = {}
+        supported = False
+        if isinstance(raw, Mapping):
+            for name, item in raw.items():
+                if not isinstance(item, Mapping):
+                    continue
+                has_native = "native_value" in item
+                supported = supported or has_native
+                fields[str(name)] = {
+                    "native_value": item.get("native_value") if has_native else None,
+                    "effective_value": item.get("effective_value"),
+                    "managed_configured": bool(item.get("managed_configured")),
+                    "secret": bool(item.get("secret")),
+                }
+        return {
+            "success": True,
+            "plugin_id": canonical,
+            "supported": supported,
+            "fields": fields,
+            "note": "" if supported else "该模块未提供原生值读取（需要升级插件）",
+        }
+
+    async def freeze(self, plugin_id: str, *, reset_overlay: bool = True, role: str = "") -> dict[str, Any]:
+        """一键固化：把当前生效值写入插件自身配置，核掉线后行为不变。"""
+        if not self.managed:
+            raise PermissionError("TAKEOVER_DISABLED")
+        if CONTROL_ROLES.get(role, -1) < CONTROL_ROLES["admin"]:
+            raise PermissionError("ROLE_REQUIRED")
+        canonical, instance = await self._instance(plugin_id)
+        member = self._member(canonical)
+        schema = await self._call(instance, "series_control_schema")
+        snapshot = await self._call(instance, "series_control_snapshot")
+        defs = schema.get("fields") if isinstance(schema, Mapping) else None
+        values = snapshot.get("fields") if isinstance(snapshot, Mapping) else None
+        patch: dict[str, Any] = {}
+        skipped: list[dict[str, str]] = []
+        if isinstance(values, Mapping):
+            for name, item in values.items():
+                if not isinstance(item, Mapping):
+                    continue
+                definition = defs.get(name) if isinstance(defs, Mapping) else None
+                definition = definition if isinstance(definition, Mapping) else {}
+                if definition.get("control") == "read_only":
+                    skipped.append({"field": str(name), "reason": "read_only"})
+                    continue
+                if _secret_field(str(name), definition):
+                    skipped.append({"field": str(name), "reason": "secret"})
+                    continue
+                if not item.get("managed_configured"):
+                    continue  # 原生值已等于生效值
+                patch[str(name)] = item.get("effective_value")
+        if not patch:
+            return {
+                "success": True,
+                "plugin_id": canonical,
+                "status": "noop",
+                "written": [],
+                "skipped": skipped,
+                "cleared": [],
+                "backup_id": "",
+                "message": "没有需要固化的覆盖字段（原生配置已是最新）",
+            }
+        writer = getattr(instance, "series_control_native_write", None)
+        if not callable(writer):
+            raise LookupError("NATIVE_WRITE_UNSUPPORTED")
+        result = writer(dict(patch), expected_revision=int(member["revision"]))
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, Mapping) and (
+            result.get("success") is False or result.get("status") in {"error", "failed"}
+        ):
+            raise RuntimeError(str(result.get("reason") or "NATIVE_WRITE_FAILED"))
+        written = list(result.get("written") or patch.keys()) if isinstance(result, Mapping) else list(patch)
+        cleared: list[str] = []
+        if reset_overlay:
+            resetter = getattr(instance, "reset_series_control_override", None)
+            if callable(resetter):
+                try:
+                    reset_result = resetter(written, expected_revision=None)
+                    if inspect.isawaitable(reset_result):
+                        await reset_result
+                except Exception:
+                    pass
+            for field in written:
+                member["overrides"].pop(field, None)
+                member["policy"][field] = "inherit"
+                cleared.append(field)
+        member["revision"] += 1
+        self._state["revision"] += 1
+        member["native_frozen_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._save()
+        return {
+            "success": True,
+            "plugin_id": canonical,
+            "status": "frozen",
+            "written": written,
+            "skipped": skipped,
+            "cleared": cleared,
+            "backup_id": str(result.get("backup_id") or "") if isinstance(result, Mapping) else "",
+            "revision": member["revision"],
+        }
+
+    async def import_native(self, plugin_id: str, fields: list[str] | None = None, *, role: str = "") -> dict[str, Any]:
+        """一键读取：把插件原生值导入核覆盖层（核与插件现状对齐）。"""
+        if not self.managed:
+            raise PermissionError("TAKEOVER_DISABLED")
+        if CONTROL_ROLES.get(role, -1) < CONTROL_ROLES["admin"]:
+            raise PermissionError("ROLE_REQUIRED")
+        canonical, instance = await self._instance(plugin_id)
+        member = self._member(canonical)
+        snapshot = await self._call(instance, "series_control_snapshot")
+        values = snapshot.get("fields") if isinstance(snapshot, Mapping) else None
+        wanted = set(fields) if fields else None
+        patch: dict[str, Any] = {}
+        skipped: list[dict[str, str]] = []
+        if isinstance(values, Mapping):
+            for name, item in values.items():
+                if wanted is not None and str(name) not in wanted:
+                    continue
+                if not isinstance(item, Mapping):
+                    continue
+                if "native_value" not in item:
+                    skipped.append({"field": str(name), "reason": "unsupported"})
+                    continue
+                if bool(item.get("secret")):
+                    skipped.append({"field": str(name), "reason": "secret"})
+                    continue
+                native = item.get("native_value")
+                if native == item.get("effective_value"):
+                    continue
+                patch[str(name)] = native
+        if not patch:
+            return {"success": True, "plugin_id": canonical, "status": "noop", "imported": [], "skipped": skipped}
+        await self.apply(canonical, patch, int(member["revision"]), "owner" if role == "owner" else "admin")
+        return {
+            "success": True,
+            "plugin_id": canonical,
+            "status": "imported",
+            "imported": sorted(patch.keys()),
+            "skipped": skipped,
+            "revision": self._member(canonical)["revision"],
+        }
+
     async def reset(self, plugin_id: str, fields: list[str] | None, role: str) -> dict[str, Any]:
         if not self.managed:
             raise PermissionError("TAKEOVER_DISABLED")

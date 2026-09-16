@@ -637,7 +637,7 @@ function controlView() {
   const legend = `<span class="status-legend"><span><i class="status-dot ok"></i>正常</span><span><i class="status-dot mixed"></i>部分独立</span><span><i class="status-dot warn"></i>不可用</span><span><i class="status-dot native"></i>独立配置</span></span>`;
   const modeLine = `<div class="control-mode-line"><span class="pill ${control.mode === "managed" ? "" : "native"}">${modeLabel}</span><span>${catalog.domains.length} 个功能域</span><span>${capabilities.length} 项能力</span>${attention ? `<span class="pending">待处理 ${attention}</span>` : ""}${legend}<span class="muted">版本号 ${esc(control.revision)}</span></div>`;
   const detail = state.selectedCapability ? capabilityDetail() : "";
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>按功能分类管理：左边选功能域，右边点能力卡片直接调整；模块身份只在模块详情与排障中出现。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}</div></div>${modeLine}${detail || masterDetail()}`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 统一接管</div><h1>系列接管</h1><p>按功能分类管理：左边选功能域，右边点能力卡片直接调整；模块身份只在模块详情与排障中出现。</p></div><div class="actions"><button class="btn" id="refresh-control">刷新</button>${state.session?.role === "owner" ? `<button class="btn primary" id="toggle-control">${control.mode === "managed" ? "关闭统一接管" : "启用统一接管"}</button>` : ""}${state.session?.role === "owner" || state.session?.role === "admin" ? `<button class="btn danger" id="freeze-all" title="把所有模块的当前生效配置写入它们自己的配置（先自动备份）">一键固化全部</button>` : ""}</div></div>${modeLine}${detail || masterDetail()}`;
 }
 function masterDetail() {
   const catalog = controlCatalog();
@@ -718,7 +718,11 @@ function capabilityProviderHead(provider) {
   const tab = capTabFor(pluginId);
   const tabs = [["fields", "本能力字段"], ["all", "全部字段"], ["panels", "插件面板"], ["lifecycle", "生命周期"]];
   const strip = `<div class="cap-provider-tabs" role="tablist" aria-label="${esc(memberDisplayName(pluginId))}视图">${tabs.map(([id, label]) => `<button type="button" role="tab" aria-selected="${tab === id ? "true" : "false"}" class="cap-provider-tab ${tab === id ? "active" : ""}" data-cap-tab="${esc(pluginId)}|${id}">${label}</button>`).join("")}</div>`;
-  return `<div class="capability-provider-head"><strong>${esc(memberDisplayName(pluginId))}</strong>${provider.hint ? `<small>${esc(provider.hint)}</small>` : ""}</div>${strip}`;
+  const canOperate = state.session?.role === "owner" || state.session?.role === "admin";
+  const ops = canOperate
+    ? `<span class="cap-provider-ops"><button class="btn" data-native-read="${esc(pluginId)}" title="读取插件自身配置并与核接管值对比">读取当前配置</button><button class="btn" data-native-freeze="${esc(pluginId)}" title="把当前生效配置写入插件自身配置，核掉线也保持一致">固化到插件</button></span>`
+    : "";
+  return `<div class="capability-provider-head"><strong>${esc(memberDisplayName(pluginId))}</strong>${provider.hint ? `<small>${esc(provider.hint)}</small>` : ""}${ops}</div>${strip}`;
 }
 function capabilityDetail() {
   const capability = capabilityById(state.selectedCapability);
@@ -1016,6 +1020,9 @@ function bindDashboard() {
   document.querySelectorAll("[data-panel-stream-start]").forEach(node => node.addEventListener("click", () => streamPanel(node.dataset.panelStreamStart, capPanelStore(node.dataset.panelStreamStart).selected)));
   document.querySelectorAll("[data-lifecycle]").forEach(node => node.addEventListener("click", () => runLifecycle(node.dataset.lifecycle, node.dataset.lifecyclePlugin)));
   document.querySelectorAll("[data-control-open]").forEach(node => node.addEventListener("click", () => openModuleInControl(node.dataset.controlOpen)));
+  document.querySelectorAll("[data-native-read]").forEach(node => node.addEventListener("click", () => importNativeConfig(node.dataset.nativeRead)));
+  document.querySelectorAll("[data-native-freeze]").forEach(node => node.addEventListener("click", () => freezeNativeConfig(node.dataset.nativeFreeze)));
+  document.getElementById("freeze-all")?.addEventListener("click", freezeAllNative);
   document.querySelectorAll("[data-install]").forEach(node => node.addEventListener("click", () => installModule(node.dataset.install)));
 }
 async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { notify(error.message, true); } }
@@ -1369,6 +1376,36 @@ async function applyCapabilitySwitch(input) {
   } finally {
     row?.classList.remove("busy");
   }
+}
+async function importNativeConfig(pluginId) {
+  try {
+    const native = await get(`series/${encodeURIComponent(pluginId)}/control/native`);
+    if (!native?.supported) { notify(native?.note || "该模块暂不支持读取原生配置（需要升级插件）", true); return; }
+    const diff = Object.entries(native.fields || {}).filter(([, value]) => !value.secret && value.native_value !== value.effective_value);
+    if (!diff.length) { notify("核接管值与插件现状一致，无需导入"); return; }
+    const preview = diff.slice(0, 8).map(([key, value]) => `· ${key}：插件 ${JSON.stringify(value.native_value)} → 核 ${JSON.stringify(value.effective_value)}`).join("\n");
+    if (!(await confirmDialog(`把插件当前配置导入核接管层？共 ${diff.length} 项：\n${preview}${diff.length > 8 ? "\n…" : ""}`))) return;
+    const result = await post(`series/${encodeURIComponent(pluginId)}/control/import-native`, {});
+    notify(result.status === "noop" ? "已是最新，无需导入" : `已导入 ${result.imported?.length || 0} 项`);
+    await loadControl();
+  } catch (error) { notify(error.message, true); }
+}
+async function freezeNativeConfig(pluginId) {
+  if (!(await confirmDialog("把当前生效配置写入插件自身的配置文件？\n\n固化后：核掉线/关闭统一接管都不影响功能；会先自动备份插件配置，并清空该项的核覆盖层。"))) return;
+  try {
+    const result = await post(`series/${encodeURIComponent(pluginId)}/control/freeze`, { reset_overlay: true });
+    if (result.status === "noop") { notify(result.message || "无需固化（原生配置已是最新）"); return; }
+    notify(`已固化 ${result.written?.length || 0} 项${result.backup_id ? ` · 备份 ${result.backup_id}` : ""}`);
+    await loadControl();
+  } catch (error) { notify(error.message, true); }
+}
+async function freezeAllNative() {
+  if (!(await confirmDialog("把当前生效配置写入所有模块的自身配置文件？\n\n每个模块会先自动备份；固化后核掉线也不影响功能。"))) return;
+  try {
+    const result = await post("series/control/freeze-all", { reset_overlay: true });
+    notify(`已固化 ${result.frozen || 0}/${result.total || 0} 个模块`);
+    await loadControl();
+  } catch (error) { notify(error.message, true); }
 }
 async function openModuleInControl(pluginId) {
   const capability = catalogCapabilities().find(cap => (cap.providers || []).some(provider => provider.plugin_id === pluginId));

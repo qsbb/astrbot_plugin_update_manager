@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from .transaction import TransactionError
-from .trusted import TRUSTED_BY_ID
+from .trusted import TRUSTED_BY_ID, TRUSTED_SERIES
 
 from .webui_artifacts import ArtifactStore
 from .webui_auth import WebUIAuth, WebUIAuthError
@@ -158,6 +158,10 @@ class WebUIServer:
             app.router.add_post("/api/series/{plugin_id}/control/validate", self._series_validate)
             app.router.add_post("/api/series/{plugin_id}/control/apply", self._series_apply)
             app.router.add_post("/api/series/{plugin_id}/control/reset", self._series_reset)
+            app.router.add_get("/api/series/{plugin_id}/control/native", self._series_native)
+            app.router.add_post("/api/series/{plugin_id}/control/freeze", self._series_freeze)
+            app.router.add_post("/api/series/{plugin_id}/control/import-native", self._series_import_native)
+            app.router.add_post("/api/series/control/freeze-all", self._series_freeze_all)
             app.router.add_get("/api/series/{plugin_id}/control/diagnostics", self._series_diagnostics)
             app.router.add_get("/api/series/{plugin_id}/panels", self._panels_list)
             app.router.add_get("/api/series/{plugin_id}/panels/{panel}", self._panels_data)
@@ -331,7 +335,7 @@ class WebUIServer:
             return self._json({"success": False, "error": "SERIES_CONTROL_UNAVAILABLE"}, 503)
         try:
             function = getattr(self.series_control, method)
-            value = function(*args, role=role) if method in {"apply", "reset", "set_mode"} else function(*args)
+            value = function(*args, role=role) if method in {"apply", "reset", "set_mode", "freeze", "import_native"} else function(*args)
             if inspect.isawaitable(value):
                 value = await value
             return self._json(value if isinstance(value, dict) else {"success": True, "data": value})
@@ -379,6 +383,51 @@ class WebUIServer:
         except (TypeError, ValueError):
             return self._json({"success": False, "error": "INVALID_REVISION"}, 400)
         return await self._series_call(request, "validate", request.match_info["plugin_id"], body["patch"], revision)
+
+    async def _series_native(self, request: web.Request) -> web.Response:
+        return await self._series_call(request, "native_snapshot", request.match_info["plugin_id"])
+
+    async def _series_freeze(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        reset_overlay = True
+        if isinstance(body, dict) and "reset_overlay" in body:
+            reset_overlay = bool(body.get("reset_overlay"))
+        return await self._series_call(
+            request, "freeze", request.match_info["plugin_id"], reset_overlay=reset_overlay
+        )
+
+    async def _series_import_native(self, request: web.Request) -> web.Response:
+        body = await self._body(request)
+        fields = None
+        if isinstance(body, dict) and isinstance(body.get("fields"), list):
+            fields = [str(item) for item in body["fields"]]
+        return await self._series_call(
+            request, "import_native", request.match_info["plugin_id"], fields
+        )
+
+    async def _series_freeze_all(self, request: web.Request) -> web.Response:
+        role = self._series_role(request)
+        if role is None:
+            return self._json({"success": False, "error": "AUTH_REQUIRED"}, 401)
+        if self.series_control is None:
+            return self._json({"success": False, "error": "SERIES_CONTROL_UNAVAILABLE"}, 503)
+        body = await self._body(request)
+        reset_overlay = True
+        if isinstance(body, dict) and "reset_overlay" in body:
+            reset_overlay = bool(body.get("reset_overlay"))
+        results: list[dict[str, Any]] = []
+        for trusted in TRUSTED_SERIES:
+            try:
+                value = await self.series_control.freeze(
+                    trusted.plugin_id, reset_overlay=reset_overlay, role=role
+                )
+                results.append(value if isinstance(value, dict) else {"success": True})
+            except Exception as exc:  # 单个模块失败不影响其它模块
+                results.append(
+                    {"success": False, "plugin_id": trusted.plugin_id, "error": str(exc)}
+                )
+        frozen = sum(1 for item in results if item.get("status") == "frozen")
+        return self._json({"success": True, "frozen": frozen, "total": len(results), "results": results})
 
     async def _series_apply(self, request: web.Request) -> web.Response:
         body = await self._body(request)
