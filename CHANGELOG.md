@@ -1,4 +1,11 @@
 ## [Unreleased]
+## 0.19.8 - 2026-09-16
+
+### 变更
+
+- 「智能分段」能力补齐可接管字段：`chunking_long_paragraph_threshold`、`chunking_newline_mode`、`chunking_short_line_chars`、`chunking_llm_assist`；「说话节奏与分段」补 `chunking_delay_per_char_ms` —— 接管页「本能力字段」可直接改分段全部关键参数。
+- 字段中文名与说明同步（含 15 字阈值、LLM 辅助、每字延迟）；修复插件面板动作按钮缺少 `data-panel-plugin` 导致点击无响应（分段预览的「预览分段」发不出请求）。
+- 配合「言」0.12.8 的分段预览面板：核 WebUI → 系列接管 → 智能分段 → 插件面板 → 分段预览。
 ## 0.19.7 - 2026-09-14
 
 ### 变更

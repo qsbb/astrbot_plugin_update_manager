@@ -115,6 +115,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                     "chunking_long_paragraph_threshold",
                     "chunking_newline_mode",
                     "chunking_short_line_chars",
+                    "chunking_llm_assist",
                 ],
                 "switch_field": "chunking_enabled",
                 "switch_label": "智能分段",
@@ -495,7 +496,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
             },
             {
                 "plugin_id": _CF,
-                "fields": ["chunking_delay_mode"],
+                "fields": ["chunking_delay_mode", "chunking_delay_per_char_ms"],
                 "hint": "按字数延迟、最小/最大间隔在「言 → 设置中心 → 分段延迟」。",
             },
         ],
