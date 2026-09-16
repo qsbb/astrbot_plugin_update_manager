@@ -223,7 +223,10 @@ const PLUGIN_FIELD_TEXT = {
   "astrbot_plugin_conversation_flow": {
     "chunking_enabled": ["启用智能分段", "开启后会向 LLM 注入分段引导指令，让模型主动用双空行分段；并在结果装饰阶段按双空行优先 + 句末标点保底切分。"],
     "chunking_delay_mode": ["分段延迟模式", "fixed=每段固定延迟；per_char=按下一段有效字数乘以每字延迟，并受最小/最大值限制。推荐 per_char。"],
-    "chunking_min_length": ["触发分段的最小回复长度", "常规回复短于此长度（字符数）保持单条发送；但若无双空行、存在全角/半角强语气句界且前后都是完整自然句，可放宽一次拆分，避免长短句黏在一起。默认 60。"],
+    "chunking_min_length": ["触发分段的最小长度", "常规回复短于此长度（字符数）保持单条发送；但若无双空行、存在全角/半角强语气句界且前后都是完整自然句，可放宽一次拆分，避免长短句黏在一起。默认 60。"],
+    "chunking_long_paragraph_threshold": ["段落进一步拆分阈值", "段落超过该长度才继续按句切开（默认 120，尊重她自己用空行分的段）。"],
+    "chunking_newline_mode": ["单换行处理方式", "auto=主链优先（用空行表达分条），只对极短行例外切分；always=一律切；never=不切。"],
+    "chunking_short_line_chars": ["极短行长度上限", "称呼、笑声、短反应这类极短行（默认 ≤12 字）在 auto 模式下独立成条。"],
     "chunking_max_segments": ["单次回复最大分段数", "超过此数量时会合并末尾的多段为一段，避免刷屏。默认 5。"],
     "silence_enabled": ["启用沉默判断", "开启后由模型结合上下文判断是否真的无需回应。只有明确收口、明确要求停止交流或确实无法承接的纯噪声才允许沉默；普通问候、称呼、呼唤、撒娇、求关注和表达亲近必须自然回应。'好的''嗯''谢谢''晚安'等短句不能脱离上下文直接判定。"],
     "silence_strategy": ["沉默判断策略", "inject=指令注入（省一次 LLM 调用，推荐）；prejudge=独立预判断（更可控但慢）；both=二者结合。"],
@@ -835,7 +838,7 @@ function panelContent(data, pluginId = "") {
       const inputType = field.type === "number" ? "number" : field.type === "password" || field.secret ? "password" : "text";
       return `<label><span>${label}</span><input type="${inputType}" data-panel-field="${name}" data-field-type="${field.type === "number" ? "number" : "text"}" value="${value}" placeholder="${hint}" ${disabled} /></label>`;
     }).join("");
-    return `<div class="panel-action">${fields ? `<div class="panel-action-form">${fields}</div>` : ""}<button class="btn ${action.danger ? "danger" : "primary"}" data-panel-action="${esc(action.id)}" data-action-effect="${esc(action.effect || "idempotent")}" data-action-revision-required="${action.revision_required ? "true" : "false"}" data-action-idempotency-required="${action.idempotency_required ? "true" : "false"}" ${disabled}>${esc(action.label || action.id)}${allowed ? "" : ` · 需要 ${esc(action.min_role || "admin")}`}</button></div>`;
+    return `<div class="panel-action">${fields ? `<div class="panel-action-form">${fields}</div>` : ""}<button class="btn ${action.danger ? "danger" : "primary"}" data-panel-plugin="${esc(pluginId)}" data-panel-action="${esc(action.id)}" data-action-effect="${esc(action.effect || "idempotent")}" data-action-revision-required="${action.revision_required ? "true" : "false"}" data-action-idempotency-required="${action.idempotency_required ? "true" : "false"}" ${disabled}>${esc(action.label || action.id)}${allowed ? "" : ` · 需要 ${esc(action.min_role || "admin")}`}</button></div>`;
   }).join("");
   const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
   const artifactHtml = artifacts.length

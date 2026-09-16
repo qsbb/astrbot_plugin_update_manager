@@ -108,7 +108,14 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "providers": [
             {
                 "plugin_id": _CF,
-                "fields": ["chunking_enabled", "chunking_min_length", "chunking_max_segments"],
+                "fields": [
+                    "chunking_enabled",
+                    "chunking_min_length",
+                    "chunking_max_segments",
+                    "chunking_long_paragraph_threshold",
+                    "chunking_newline_mode",
+                    "chunking_short_line_chars",
+                ],
                 "switch_field": "chunking_enabled",
                 "switch_label": "智能分段",
                 "hint": "段落策略与「分段延迟」（打字节奏）在「言 → 设置中心 → 智能分段 / 分段延迟」。",
