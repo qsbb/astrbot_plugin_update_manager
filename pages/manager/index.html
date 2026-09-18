@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="title">凝心溯溪-核 · 模块运营中心</title>
-  <link rel="stylesheet" href="./style.css?v=0.19.10-1" />
-    <link rel="stylesheet" href="./series-ui.css?v=0.19.10-1" />
+  <link rel="stylesheet" href="./style.css?v=0.19.11-1" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.19.11-1" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -17,16 +17,13 @@
       </div>
       <div class="toolbar">
         <select id="locale" aria-label="语言" data-i18n-aria-label="languageLabel"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
-        <span id="webui-status" class="webui-status" data-i18n="webuiAddressLoading">独立 WebUI 地址加载中…</span>
-        <button class="page-link" id="open-webui" type="button" data-i18n="controlCenter">打开独立 WebUI</button>
+        <button class="page-link" id="open-webui" type="button" data-i18n="openWebUi">打开独立 WebUI</button>
         <button id="copy-webui" type="button" data-i18n="copyWebUiLink">复制链接</button>
         <button id="refresh" type="button" data-i18n="refresh">刷新</button>
       </div>
       <div class="webui-address-row">
         <p id="webui-address" class="webui-address" role="status" data-i18n="webuiAddressLoading">独立 WebUI 地址加载中…</p>
-        <div class="webui-actions" aria-label="WebUI 操作" data-i18n-aria-label="webuiActionsLabel">
-          <button id="open-webui-direct" type="button" data-i18n="openWebUi">打开独立 WebUI</button>
-        </div>
+
       </div>
       <div id="webui-manual" class="webui-manual" hidden>
         <label for="webui-manual-url" data-i18n="webuiManualHint">手动复制/打开地址</label>
@@ -48,7 +45,7 @@
       <div class="overview-grid">
         <article class="card overview-modules">
           <div class="section-heading">
-            <div><h2 data-i18n="overviewModulesTitle">模块状态</h2><p data-i18n="overviewModulesHint">版本、运行状态与本地/远端提交</p></div>
+            <div><h2 data-i18n="overviewModulesTitle">模块状态</h2></div>
             <span id="overview-module-count" class="field-hint" role="status"></span>
           </div>
           <div class="table-wrap overview-table-wrap">
@@ -62,8 +59,8 @@
           <div class="section-heading"><div><h2 data-i18n="overviewQueueTitle">更新队列</h2><p id="overview-queue-summary"></p></div></div>
           <div id="overview-queue-list" class="overview-queue-list"></div>
           <div class="overview-queue-actions">
-            <button id="overview-apply-all" class="primary" type="button" data-i18n="overviewApplyAll">一键全部更新</button>
-            <button id="overview-check-only" type="button" data-i18n="overviewCheckOnly">只检查不更新</button>
+            <button id="overview-apply-all" class="primary" type="button" data-i18n="overviewApplyAll">一键安装/更新全部</button>
+            <button id="overview-check-only" type="button" data-i18n="overviewCheckOnly">检查推荐更新</button>
           </div>
           <p id="overview-budget" class="overview-budget"></p>
         </aside>
@@ -84,12 +81,11 @@
         <label class="module-search"><span>搜索</span><input id="module-search" type="search" placeholder="模块名称或 ID" /></label>
         <span id="module-scope-summary" class="field-hint" role="status" aria-live="polite">正在读取模块…</span>
       </div>
-      <p class="field-hint" data-i18n="modulesHint"></p>
       <article class="card" data-module-scope-card="series">
-        <div class="section-heading"><div><h2 data-i18n="recommendationsTitle">凝心溯溪系列推荐</h2><p data-i18n="recommendationsHint">官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。</p></div><div class="section-actions"><button id="apply-all-recommendations" type="button" data-i18n="applyAll">一键全部安装/更新</button><button id="check-latest" type="button" data-i18n="checkLatest">检查最新版本</button><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查目录更新</button></div></div><div id="recommendations-list" class="recommendations-list"><p data-i18n="loading">加载中…</p></div>
+        <div class="section-heading"><div><h2 data-i18n="recommendationsTitle">凝心溯溪系列推荐</h2></div><div class="section-actions"><button id="apply-all-recommendations" type="button" data-i18n="applyAll">一键全部安装/更新</button><button id="check-latest" type="button" data-i18n="checkLatest">检查推荐更新</button><button id="catalog-check-updates" type="button" data-i18n="checkUpdates">检查目录更新</button></div></div><div id="recommendations-list" class="recommendations-list"><p data-i18n="loading">加载中…</p></div>
       </article>
       <article class="card" data-module-scope-card="catalog">
-        <div class="section-heading"><div><h2 data-i18n="catalogTitle">其他插件目录</h2><p data-i18n="catalogHint">合并展示运行时插件与已安装元数据；未加载插件不可更新。系列推荐里已经出现的模块不会在这里重复显示。</p></div></div><div id="catalog-list" class="catalog-list"></div>
+        <div class="section-heading"><div><h2 data-i18n="catalogTitle">其他插件目录</h2><p data-i18n="catalogHint">未加载的插件不可更新；系列推荐里已出现的模块不会在这里重复显示。</p></div></div><div id="catalog-list" class="catalog-list"></div>
       </article>
     </section>
 
@@ -100,7 +96,6 @@
         <button type="button" role="tab" data-si-tab="accounts" data-i18n="settingsAccountsTab">控制中心账户</button>
         <button type="button" role="tab" data-si-tab="mirrors" data-i18n="settingsMirrorsTab">镜像与网络</button>
       </nav>
-      <p class="field-hint" data-i18n="settingsHint"></p>
       <div id="config" data-si-panel="config">
       <form id="config-form" class="card">
         <div class="section-heading"><div><h2 data-i18n="configTitle">配置读取与保存</h2><p data-i18n="tokenHint">敏感 token 仅显示是否已配置，留空不会覆盖。</p></div><button type="submit" data-i18n="save">保存</button></div>
@@ -127,7 +122,7 @@
       </div>
       <div data-si-panel="accounts" hidden>
       <article class="card" id="webui-admins">
-        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><div class="section-actions"><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button><button id="open-webui-config" type="button" data-i18n="openWebUi">打开独立 WebUI</button></div></div>
+        <div class="section-heading"><div><h2 data-i18n="webuiAdminsTitle">控制中心管理员</h2><p data-i18n="webuiAdminsHint">管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。</p></div><div class="section-actions"><button id="webui-admins-refresh" type="button" data-i18n="refreshAdmins">刷新管理员</button></div></div>
         <form id="webui-admin-create-form" class="admin-form">
           <label><span data-i18n="adminUsername">用户名</span><input id="webui-admin-username" autocomplete="off" required /></label>
           <label><span data-i18n="adminPassword">初始密码</span><input id="webui-admin-password" type="password" autocomplete="new-password" minlength="8" required /></label>
@@ -162,7 +157,6 @@
         <div class="section-heading">
           <div><h2 data-i18n="diagnosticEventStream">事件流</h2><p id="diagnostic-summary" class="diagnostic-summary" aria-live="polite"></p></div>
           <div class="section-actions diagnostic-controls">
-            <span id="diagnostic-cursor-state" class="diagnostic-cursor-chip">增量游标</span>
             <button id="diagnostic-pause" type="button" data-i18n="pauseLogs">暂停</button>
             <button id="diagnostic-autoscroll" type="button" aria-pressed="true" data-i18n="autoScrollLogs">自动滚动</button>
             <button id="diagnostic-export" type="button" data-i18n="exportLogs">导出</button>
@@ -187,7 +181,8 @@
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js?v=0.19.10-1"></script>
-  <script type="module" src="./app.js?v=0.19.10-1"></script>
+  <script src="./series-ui.js?v=0.19.11-1"></script>
+  <script src="./series-kernel.js?v=0.19.11-1"></script>
+  <script type="module" src="./app.js?v=0.19.11-1"></script>
 </body>
 </html>

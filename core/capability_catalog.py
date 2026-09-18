@@ -8,8 +8,7 @@
 - providers.switch_field 指定该能力的“主开关”字段（必须是 fields 里的布尔项），
   核 WebUI 会把它直接渲染成能力卡片上的滑块开关，点开详情再调其余字段。
 - 治理域（核自身）用 views 指向核 WebUI 既有视图。
-- 目录是 P0-1 的策展映射；P2 会改为插件在契约里声明 capabilities[]，
-  本目录降级为兼容兜底。
+- 若后续改由插件在契约里声明 capabilities[]，本目录可作为兼容兜底。
 """
 
 from __future__ import annotations

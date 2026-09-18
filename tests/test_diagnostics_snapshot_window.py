@@ -82,14 +82,16 @@ def test_update_manager_consumers_can_catch_up_without_duplicates():
     root = Path(__file__).resolve().parents[1]
     webui = (root / "webui" / "app.js").read_text(encoding="utf-8")
     manager = (root / "pages" / "manager" / "app.js").read_text(encoding="utf-8")
+    kernel = (root / "ui" / "series-kernel.js").read_text(encoding="utf-8")
 
-    # 两端都必须识别 has_more/truncated，并用有界追平循环推进 next_seq。
+    # 协议细节收敛在 series-kernel.js：两端都经它识别 has_more/truncated。
+    assert "has_more ?? member?.truncated" in kernel
     for source in (webui, manager):
-        assert "has_more ?? member?.truncated" in source
+        assert "SeriesKernel" in source
+        # 有界追平循环推进 next_seq
         assert "pass >= 4" in source
     assert "function applyDiagnosticPage(result, wasReset)" in webui
-    assert "seen.has(key)" in webui
-    assert "resetIds" in webui
     assert "function applyDiagnosticPage(data, generation, wasReset)" in manager
-    assert "resetPluginIds" in manager
     assert "diagnosticMemberHasMore" in manager
+    assert "mergeLogEvents" in webui and "mergeLogEvents" in manager
+    assert "pruneForMembers" in webui and "pruneForMembers" in manager

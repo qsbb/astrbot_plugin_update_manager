@@ -7,8 +7,6 @@ let state = {
   providers: [],
   routes: null,
   control: null,
-  controlSchema: null,
-  controlSnapshot: null,
   controlSwitches: {},
   settingsTab: "route",
   capTabs: {},
@@ -63,7 +61,7 @@ const VIEWS = {
   recommendations: { icon: "＋", label: "系列推荐", group: "operations", inSuite: "updates" },
   rules: { icon: "▤", label: "每日规则", group: "operations", inSuite: "updates" },
   mirrors: { icon: "⇄", label: "镜像加速", group: "operations", inSuite: "updates" },
-  diagnostics: { icon: "⌁", label: "诊断与日志", tabLabel: "事件流", group: "operations", suite: ["diagnostics", "modules"] },
+  diagnostics: { icon: "⌁", label: "诊断与日志", tabLabel: "日志", group: "operations", suite: ["diagnostics", "modules"] },
   settings: { icon: "⚙", label: "设置与安全", group: "operations" },
   security: { icon: "◇", label: "账户与安全", group: "operations", hidden: true },
 };
@@ -98,7 +96,7 @@ const notify = (message, error = false, action = null) => {
     window.SeriesUI.toast(message, error ? "error" : "info", undefined, action);
     return;
   }
-  const fallback = document.querySelector("[data-toast-fallback], #bridge-error, #startup-error, #page-error");
+  const fallback = document.querySelector("[data-toast-fallback]");
   if (fallback) {
     fallback.textContent = String(message || "");
     fallback.hidden = false;
@@ -342,7 +340,10 @@ function fieldLabel(key, def, pluginId) {
 }
 
 function parse(value) { return typeof value === "string" ? JSON.parse(value) : value; }
-function esc(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function esc(value) {
+  if (window.SeriesUI?.escapeHtml) return window.SeriesUI.escapeHtml(value);
+  return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
 async function get(name) { const response = await fetch(`${API_PREFIX}/${name}`, { credentials: "same-origin" }); const data = parse(await response.json()); if (!response.ok || data?.success === false) throw new Error(data.error || "请求失败"); return data; }
 async function post(name, payload, extraHeaders = {}) { const response = await fetch(`${API_PREFIX}/${name}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...extraHeaders }, body: JSON.stringify(payload || {}) }); const data = parse(await response.json()); if (!response.ok || data?.success === false) throw new Error(data.error || "请求失败"); return data; }
 
@@ -360,7 +361,7 @@ async function confirmDialog(message, options = {}) {
   return false;
 }
 function loginView(message = "") {
-  app.innerHTML = `<section class="login"><div class="login-side"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="login-copy"><h1>把每个模块，放进同一张工作台。</h1><p>管理员账户由“核” Page 创建和维护。WebUI 只负责安全登录，不提供注册入口。</p></div><small>Dashboard Page 二次认证 · 管理员会话受服务端控制</small></div><div class="login-main"><form class="login-card" id="login-form"><h2>登录模块运营中心</h2><p>${state.configured ? "请输入在“核” Page 中配置的管理员账户。" : "当前还没有可用管理员，请先回到“核” Page 设置管理员。"}</p><div class="field"><label for="username">管理员账户</label><input id="username" name="username" autocomplete="username" required ${state.configured ? "" : "disabled"}></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required ${state.configured ? "" : "disabled"}></div><div class="error" role="alert">${esc(message)}</div><button class="btn primary" type="submit" ${state.configured ? "" : "disabled"}>安全登录</button><div class="note">WebUI 不在浏览器保存账户、密码或会话令牌。请在“核” Page 管理多个管理员、角色和禁用状态。</div></form></div></section>`;
+  app.innerHTML = `<section class="login"><div class="login-side"><div class="brand"><span class="brand-mark">核</span><div><strong>凝心溯溪</strong><small>模块运营中心</small></div></div><div class="login-copy"><h1>把每个模块，放进同一张工作台。</h1><p>管理员账户由「核」 Page 创建和维护，WebUI 不提供注册入口。</p></div></div><div class="login-main"><form class="login-card" id="login-form"><h2>登录模块运营中心</h2><p>${state.configured ? "请输入在“核” Page 中配置的管理员账户。" : "当前还没有可用管理员，请先回到“核” Page 设置管理员。"}</p><div class="field"><label for="username">管理员账户</label><input id="username" name="username" autocomplete="username" required ${state.configured ? "" : "disabled"}></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required ${state.configured ? "" : "disabled"}></div><div class="error" role="alert">${esc(message)}</div><button class="btn primary" type="submit" ${state.configured ? "" : "disabled"}>安全登录</button><div class="note">账户、角色与禁用状态请在「核」 Page 管理。</div></form></div></section>`;
   document.getElementById("login-form")?.addEventListener("submit", async event => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -383,7 +384,7 @@ function modulesView() {
   const normal = state.modules.filter(x => x.status === "normal").length;
   const offline = state.modules.length - normal;
   const updatesPending = state.modules.filter(x => x.update_available).length;
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生产状态</div><h1>模块运营中心</h1><p>统一查看可信自有模块的运行状态、版本、契约与诊断入口。</p></div><div class="actions"><button class="btn" id="export">导出摘要</button><button class="btn primary" id="check">检查更新</button></div></div><div class="stats"><div class="stat"><label>可信模块</label><strong>${state.modules.length}</strong><small>来自可信登记</small></div><div class="stat"><label>运行正常</label><strong>${normal}</strong><small>核心链路可用</small></div><div class="stat"><label>需关注</label><strong>${offline}</strong><small>非阻断状态</small></div><div class="stat"><label>契约发现</label><strong>已接入</strong><small>版本化能力</small></div><div class="stat"><label>管理边界</label><strong>安全</strong><small>高危操作仍需确认</small></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>系列模块</h2><span>${filtered().length} 个匹配当前视图 · ${updatesPending} 个有更新 · <button class="link" data-view="updates">查看更新与回滚</button></span></div><div class="filters"><label class="search">⌕<input id="query" placeholder="搜索模块名称或 ID" value="${esc(state.query)}"></label><div class="seg"><button data-filter="all" class="${state.filter === "all" ? "active" : ""}">全部</button><button data-filter="normal" class="${state.filter === "normal" ? "active" : ""}">正常</button><button data-filter="offline" class="${state.filter === "offline" ? "active" : ""}">需关注</button></div><span class="grow"></span><button class="btn" id="reload">刷新状态</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>运行状态</th><th>契约</th><th>版本</th><th>操作</th></tr></thead><tbody>${moduleRows()}</tbody></table></div><div class="footer"><span>只纳管可信登记中的凝心溯溪系列插件。</span><span>${state.modules.length} 个模块</span></div></section>${selectedDetail()}`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生产状态</div><h1>模块总览</h1><p>统一查看可信自有模块的运行状态、版本与诊断入口。</p></div><div class="actions"><button class="btn" id="export">导出摘要</button><button class="btn primary" id="check">检查更新</button></div></div><div class="stats"><div class="stat"><label>可信模块</label><strong>${state.modules.length}</strong><small>来自可信登记</small></div><div class="stat"><label>运行正常</label><strong>${normal}</strong><small>核心链路可用</small></div><div class="stat"><label>需关注</label><strong>${offline}</strong><small>非阻断状态</small></div><div class="stat"><label>有更新</label><strong>${updatesPending}</strong><small>可前往更新页处理</small></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>系列模块</h2><span>${filtered().length} 个匹配当前视图 · ${updatesPending} 个有更新 · <button class="link" data-view="updates">查看更新与回滚</button></span></div><div class="filters"><label class="search">⌕<input id="query" placeholder="搜索模块名称或 ID" value="${esc(state.query)}"></label><div class="seg"><button data-filter="all" class="${state.filter === "all" ? "active" : ""}">全部</button><button data-filter="normal" class="${state.filter === "normal" ? "active" : ""}">正常</button><button data-filter="offline" class="${state.filter === "offline" ? "active" : ""}">需关注</button></div><span class="grow"></span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>运行状态</th><th>契约</th><th>版本</th><th>操作</th></tr></thead><tbody>${moduleRows()}</tbody></table></div><div class="footer"><span>只纳管可信登记中的凝心溯溪系列插件。</span><span>${state.modules.length} 个模块</span></div></section>${selectedDetail()}`;
 }
 function relativeTime(timestamp) {
   const time = Date.parse(timestamp || "");
@@ -415,32 +416,17 @@ function diagnosticEvents() {
   }).slice(-500).reverse();
 }
 function diagnosticProblems() {
-  const groups = {};
-  (state.logs || []).filter(item => ["ERROR", "WARNING", "CRITICAL"].includes(String(item.level || "").toUpperCase())).forEach(item => {
-    const key = `${item.plugin_id}:${item.code || "UNKNOWN"}`;
-    const current = groups[key] || { plugin_id: item.plugin_id, plugin_name: item.plugin_name || item.plugin_id, code: item.code || "UNKNOWN", level: item.level, count: 0, last: item.timestamp };
-    current.count += 1;
-    if (String(item.timestamp || "") > String(current.last || "")) current.last = item.timestamp;
-    if (String(item.level || "").toUpperCase() !== "WARNING") current.level = "ERROR";
-    groups[key] = current;
-  });
-  return Object.values(groups).sort((a, b) => (b.level === "ERROR") - (a.level === "ERROR") || b.count - a.count);
+  return window.SeriesKernel.aggregateProblems(state.logs || []);
 }
 function problemSuggestion(item) {
-  const code = String(item?.code || "").toUpperCase();
-  if (code.includes("RATE_LIMIT")) return "GitHub 限流：稍后重试，或先在核 Page 配置镜像 / Token。";
-  if (code.includes("TIMEOUT") || code.includes("UNREACHABLE") || code.includes("NETWORK")) return "网络或超时：确认代理与镜像可达后重试。";
-  if (code.includes("MIGRAT") || code.includes("SCHEMA") || code.includes("CONFIG")) return "配置或迁移：核对核 Page 中该模块的配置与版本后重试。";
-  if (code.includes("AUTH") || code.includes("TOKEN") || code.includes("CREDENTIAL")) return "凭据问题：检查 GitHub Token 或控制中心账户权限。";
-  if (code.includes("IMPORT") || code.includes("LOAD")) return "加载失败：展开同模块上下文，确认依赖与运行环境。";
-  return "展开事件详情查看同模块上下文后，再决定是否重试。";
+  return window.SeriesKernel.problemSuggestion(item?.code);
 }
 
 function linkStateLabel(state) {
-  return ({ ready: "正常", degraded: "降级", unavailable: "不可用", disabled: "已关闭", stale: "数据陈旧", unknown: "未知" })[String(state || "")] || "未知";
+  return window.SeriesKernel.linkStateLabel(state);
 }
 function linkStateClass(state) {
-  return ({ ready: "ok", degraded: "warn", unavailable: "warn", disabled: "native", stale: "mixed", unknown: "native" })[String(state || "")] || "native";
+  return window.SeriesKernel.linkStateClass(state);
 }
 function linkHealthCard() {
   const health = state.linkHealth;
@@ -467,7 +453,7 @@ function diagnosticsView() {
     : `<span class="pill">未加载</span>`;
   const modules = [...new Map((state.logs || []).map(item => [item.plugin_id, item.plugin_name || item.plugin_id])).entries()];
   const events = diagnosticEvents();
-  const problemRows = problems.length ? problems.slice(0, 8).map(item => `<button class="problem-item" data-log-problem="${esc(item.plugin_id)}" data-log-code="${esc(item.code)}"><span class="pill ${item.level === "ERROR" ? "managed" : "warn"}">${esc(item.level)}</span><b>${esc(item.plugin_name)}</b><code>${esc(item.code)}</code><small>${item.count} 次 · ${esc(relativeTime(item.last))}</small><span class="problem-impact">影响范围：仅 ${esc(item.plugin_name)}（当前日志缓冲内 ${item.count} 条）</span><span class="problem-suggestion">建议动作：${esc(problemSuggestion(item))}</span></button>`).join("") : `<p class="empty-cell">当前缓冲区没有警告或错误。</p>`;
+  const problemRows = problems.length ? problems.slice(0, 8).map(item => `<button class="problem-item" data-log-problem="${esc(item.plugin_id)}" data-log-code="${esc(item.code)}"><span class="pill ${item.level === "ERROR" ? "managed" : "warn"}">${esc(item.level)}</span><b>${esc(item.plugin_name)}</b><code>${esc(item.code)}</code><small>${item.count} 次 · ${esc(relativeTime(item.last))}</small><span class="problem-impact">影响范围：${esc(item.plugin_name)}</span><span class="problem-suggestion">建议动作：${esc(problemSuggestion(item))}</span></button>`).join("") : `<p class="empty-cell">当前缓冲区没有警告或错误。</p>`;
   const eventCards = events.length ? events.map(item => {
     const key = `${item.plugin_id}:${item.seq}`;
     const expanded = state.logExpanded.has(key);
@@ -476,9 +462,8 @@ function diagnosticsView() {
     return `<article class="diagnostic-event level-${esc(level)} ${expanded ? "expanded" : ""} ${state.logNewKeys.has(key) ? "new-event" : ""}" data-log-event="${esc(key)}"><button class="diagnostic-event-head" data-log-toggle="${esc(key)}"><time title="${esc(item.timestamp || "")}">${esc(relativeTime(item.timestamp))}</time><span class="event-module">${esc(item.plugin_name || item.plugin_id)}</span><span class="level-chip level-${esc(level)}">${esc(item.level)}</span><b class="event-message">${esc(item.summary || "未命名事件")}</b><span class="event-chevron">${expanded ? "收起" : "详情"}</span></button>${expanded ? `<div class="diagnostic-event-detail"><div class="event-meta"><span>代码 <code>${esc(item.code || "-")}</code></span><span>序号 <code>${esc(item.seq)}</code></span></div>${logDetailRows(item.details)}${context ? `<div class="log-context"><strong>同模块上下文</strong>${context}</div>` : ""}</div>` : ""}</article>`;
   }).join("") : `<div class="empty-cell">暂无匹配日志，请调整过滤条件或点击「加载日志」。</div>`;
   const selectedModules = modules.map(([id, name]) => `<button class="filter-chip ${state.logModules.includes(id) ? "active" : ""}" data-log-module="${esc(id)}">${esc(name)}</button>`).join("");
-  const cursorLabel = state.logPaused ? "已暂停" : state.logCatchUp ? "追平中" : "增量游标";
   const canClear = state.session?.role === "owner" || state.session?.role === "admin";
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>运行日志</h1><p>先看问题聚合，再展开事件流与上下文。日志来自各模块的 series.diagnostics 业务事件。</p></div><div class="actions"><span class="pill" id="log-cursor">${cursorLabel}</span><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="log-pause">${state.logPaused ? "继续" : "暂停"}</button><button class="btn" id="log-autoscroll" aria-pressed="${state.logAutoScroll}">自动滚动${state.logAutoScroll ? " ✓" : ""}</button><button class="btn" id="log-export">导出</button><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${canClear ? "" : "disabled"}>清空</button></div></div>${linkHealthCard()}<section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>待处理问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span id="log-summary">显示最近 ${events.length} 条 · 缓存 ${state.logs.length}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list" id="diagnostic-log-list">${eventCards}</div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 可观测性</div><h1>诊断与日志</h1><p>先看问题聚合，再展开事件流与上下文。</p></div><div class="actions"><label class="switch"><input type="checkbox" id="log-auto" ${state.logAuto ? "checked" : ""} /><span>5 秒自动刷新</span></label><button class="btn" id="log-pause">${state.logPaused ? "继续" : "暂停"}</button><button class="btn" id="log-autoscroll" aria-pressed="${state.logAutoScroll}">自动滚动${state.logAutoScroll ? " ✓" : ""}</button><button class="btn" id="log-export">导出</button><button class="btn" id="refresh-logs">加载日志</button><button class="btn danger" id="clear-logs" ${canClear ? "" : "disabled"}>清空</button></div></div>${linkHealthCard()}<section class="workspace diagnostic-summary"><div class="workspace-head"><div class="section-title"><h2>待处理问题</h2><span>${problems.length ? `${problems.length} 组待分析问题` : "状态良好"}</span></div></div><div class="problem-list">${problemRows}</div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>事件流</h2><span id="log-summary">显示最近 ${events.length} 条 · 缓存 ${state.logs.length}</span></div></div><div class="diagnostic-filters"><label class="search">⌕<input id="log-search" placeholder="搜索摘要、代码或详情" value="${esc(state.logQuery)}"></label><select id="log-level" class="select"><option value="">全部级别</option>${["ERROR", "WARNING", "INFO", "DEBUG", "CRITICAL"].map(level => `<option value="${level}" ${state.logThreshold === level ? "selected" : ""}>至少 ${level}</option>`).join("")}</select><select id="log-range" class="select">${[["15m", "最近 15 分钟"], ["1h", "最近 1 小时"], ["today", "今天"], ["all", "全部时间"]].map(([value, label]) => `<option value="${value}" ${state.logRange === value ? "selected" : ""}>${label}</option>`).join("")}</select><div class="log-module-filters">${selectedModules || `<span class="form-hint">加载日志后可按模块筛选</span>`}</div></div><div class="diagnostic-log-list" id="diagnostic-log-list">${eventCards}</div></section>`;
 }
 
 function updatesView() {
@@ -539,12 +524,12 @@ function settingsView() {
     else if (Array.isArray(def.options)) input = `<select data-setting-key="${esc(key)}" data-setting-type="string" ${disabled ? "disabled" : ""}>${def.options.map(option => `<option value="${esc(option)}" ${String(value) === String(option) ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>`;
     else input = `<input type="${def.write_only ? "password" : "text"}" data-setting-key="${esc(key)}" data-setting-type="string" value="${esc(def.write_only ? "" : (value ?? ""))}" placeholder="${def.write_only ? (value?.configured ? "已配置；留空保持不变" : "未配置") : ""}" ${disabled ? "disabled" : ""} />`;
     const label = fieldLabel(key, def);
-    const meta = [typeLabel(def.type), def.read_only ? "重启/部署层字段" : "", def.write_only ? "写入后不回显" : ""].filter(Boolean).join(" · ");
+    const meta = [def.read_only ? "重启后生效" : "", def.write_only ? "写入后不回显" : ""].filter(Boolean).join(" · ");
     const hint = fieldHint(key, def);
     const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div></div><div class="route-note">每个职责独立选服务商与模型；卡片右上角是当前状态，「当前生效」来自核的解析快照（插件显式配置 &gt; 核路由 &gt; AstrBot 原生）。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div></div><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.0</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
 }
 function controlCatalog() {
   const catalog = state.control?.capabilities;
@@ -862,7 +847,7 @@ function capabilityLifecycleTab(pluginId) {
   const module = state.modules.find(item => item.plugin_id === pluginId);
   const isOwner = state.session?.role === "owner";
   const status = module ? `<span class="status ${module.status === "normal" ? "" : "off"}">${module.status === "normal" ? "运行正常" : "已停用/未加载"}</span>` : `<span class="pill">未安装</span>`;
-  return `<div class="detail-grid"><div><span>当前状态</span><strong>${status}</strong></div><div><span>当前版本</span><strong><code>v${esc(module?.version || "未知")}</code></strong></div><div><span>更新检查</span><strong>${module?.update_available ? "有更新" : "未检查/当前"}</strong></div></div><p class="form-hint">${isOwner ? "操作走核的事务路径（串行、可回滚、热重载），执行前需确认；仅 owner 可执行。" : "生命周期操作仅 owner 可执行。"}</p><div class="form-actions"><label class="switch"><input type="checkbox" id="lifecycle-force" /><span>强制更新（覆盖本地）</span></label><button class="btn primary" data-lifecycle="update" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>更新</button><button class="btn" data-lifecycle="enable" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>启用</button><button class="btn danger" data-lifecycle="disable" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>停用</button><button class="btn" data-lifecycle="install" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && !module ? "" : "disabled"}>安装</button></div>`;
+  return `<div class="detail-grid"><div><span>当前状态</span><strong>${status}</strong></div><div><span>当前版本</span><strong><code>v${esc(module?.version || "未知")}</code></strong></div><div><span>更新检查</span><strong>${module?.update_available ? "有更新" : "未检查/当前"}</strong></div></div><p class="form-hint">${isOwner ? "更新与启停失败可回滚，执行前需确认。" : "生命周期操作仅 owner 可执行。"}</p><div class="form-actions"><label class="switch"><input type="checkbox" id="lifecycle-force" /><span>强制更新（覆盖本地）</span></label><button class="btn primary" data-lifecycle="update" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>更新</button><button class="btn" data-lifecycle="enable" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>启用</button><button class="btn danger" data-lifecycle="disable" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && module ? "" : "disabled"}>停用</button><button class="btn" data-lifecycle="install" data-lifecycle-plugin="${esc(pluginId)}" ${isOwner && !module ? "" : "disabled"}>安装</button></div>`;
 }
 function rulesView() {
   const data = state.rulesData;
@@ -874,7 +859,7 @@ function rulesView() {
   const failures = [["rollback_continue", "失败回滚后继续"], ["rollback_stop", "失败回滚并停止"]];
   const pluginRows = (data.catalog || []).map(item => `<label class="filter-chip ${selected.has(item.plugin_id) ? "active" : ""}"><input type="checkbox" data-rule-plugin="${esc(item.plugin_id)}" ${selected.has(item.plugin_id) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${esc(item.display_name || item.plugin_id)} <small>v${esc(item.version || "?")}</small></label>`).join("");
   const globalState = data.global?.effective ? "规则与总开关均已启用" : "当前不会自动执行，请检查总开关、自动更新与规则开关";
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生命周期</div><h1>每日规则</h1><p>统一管理更新窗口、版本策略、失败处理与目标模块；保存带并发保护，避免两台页面互相覆盖。</p></div><div class="actions"><button class="btn" id="rules-reload">重读</button><button class="btn primary" id="save-rule" ${canWrite ? "" : "disabled"}>保存规则</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>执行窗口</h2><span>${esc(globalState)}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：enabled"><strong>启用此规则</strong><small>每日规则自身开关</small></label><div class="form-input"><label class="switch"><input id="rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用此规则</span></label></div><div class="form-meta"><span class="pill">revision ${esc(rule.revision ?? 0)}</span></div></div><div class="form-row"><label title="技术名：local_time"><strong>执行时间</strong><small>每天执行时间</small></label><div class="form-input"><input id="rule-time" type="time" value="${esc(rule.local_time || "04:00")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：timezone"><strong>时区</strong><small>IANA 时区</small></label><div class="form-input"><input id="rule-timezone" value="${esc(rule.timezone || "Asia/Shanghai")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：jitter_minutes"><strong>随机延迟（分钟）</strong><small>随机抖动，避免同时请求</small></label><div class="form-input"><input id="rule-jitter" type="number" min="0" max="120" value="${esc(rule.jitter_minutes ?? 0)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：misfire_grace_minutes"><strong>错过执行的宽限（分钟）</strong><small>错过后的补执行窗口</small></label><div class="form-input"><input id="rule-misfire" type="number" min="0" max="1440" value="${esc(rule.misfire_grace_minutes ?? 60)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>版本与失败策略</h2><span>${data.next_run ? `下次执行：${esc(data.next_run)}` : "当前无计划"}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：policy"><strong>更新策略</strong><small>允许升级的最大范围</small></label><div class="form-input"><select id="rule-policy" ${canWrite ? "" : "disabled"}>${policies.map(([value, label]) => `<option value="${value}" ${rule.policy === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：minimum_release_age_hours"><strong>最小发布年龄（小时）</strong><small>发布冷却时间</small></label><div class="form-input"><input id="rule-age" type="number" min="0" max="8760" value="${esc(rule.minimum_release_age_hours ?? 24)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：on_failure"><strong>失败处理</strong><small>失败回滚策略</small></label><div class="form-input"><select id="rule-failure" ${canWrite ? "" : "disabled"}>${failures.map(([value, label]) => `<option value="${value}" ${rule.on_failure === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：prerelease"><strong>允许预发布版本</strong><small>是否接受预发布版本</small></label><div class="form-input"><label class="switch"><input id="rule-prerelease" type="checkbox" ${rule.prerelease ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>允许 prerelease</span></label></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>目标模块</h2><span>${selected.size} 个已选择；核自身始终排除</span></div></div><div class="log-module-filters">${pluginRows || `<span class="empty-cell">当前没有可选择的已加载模块。</span>`}</div><p class="form-hint">${esc(data.policy_note || "规则保存后会立即重建调度。")}</p></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 生命周期</div><h1>每日规则</h1><p>统一管理更新窗口、版本策略、失败处理与目标模块；保存带并发保护，避免两台页面互相覆盖。</p></div><div class="actions"><button class="btn" id="rules-reload">重读</button><button class="btn primary" id="save-rule" ${canWrite ? "" : "disabled"}>保存规则</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>执行窗口</h2><span>${esc(globalState)}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：enabled"><strong>启用此规则</strong><small>每日规则自身开关</small></label><div class="form-input"><label class="switch"><input id="rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用此规则</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：local_time"><strong>执行时间</strong><small>每天执行时间</small></label><div class="form-input"><input id="rule-time" type="time" value="${esc(rule.local_time || "04:00")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：timezone"><strong>时区</strong><small>IANA 时区</small></label><div class="form-input"><input id="rule-timezone" value="${esc(rule.timezone || "Asia/Shanghai")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：jitter_minutes"><strong>随机延迟（分钟）</strong><small>随机抖动，避免同时请求</small></label><div class="form-input"><input id="rule-jitter" type="number" min="0" max="120" value="${esc(rule.jitter_minutes ?? 0)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：misfire_grace_minutes"><strong>错过执行的宽限（分钟）</strong><small>错过后的补执行窗口</small></label><div class="form-input"><input id="rule-misfire" type="number" min="0" max="1440" value="${esc(rule.misfire_grace_minutes ?? 60)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>版本与失败策略</h2><span>${data.next_run ? `下次执行：${esc(data.next_run)}` : "当前无计划"}</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：policy"><strong>更新策略</strong><small>允许升级的最大范围</small></label><div class="form-input"><select id="rule-policy" ${canWrite ? "" : "disabled"}>${policies.map(([value, label]) => `<option value="${value}" ${rule.policy === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：minimum_release_age_hours"><strong>最小发布年龄（小时）</strong><small>发布冷却时间</small></label><div class="form-input"><input id="rule-age" type="number" min="0" max="8760" value="${esc(rule.minimum_release_age_hours ?? 24)}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：on_failure"><strong>失败处理</strong><small>失败回滚策略</small></label><div class="form-input"><select id="rule-failure" ${canWrite ? "" : "disabled"}>${failures.map(([value, label]) => `<option value="${value}" ${rule.on_failure === value ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：prerelease"><strong>允许预发布版本</strong><small>是否接受预发布版本</small></label><div class="form-input"><label class="switch"><input id="rule-prerelease" type="checkbox" ${rule.prerelease ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>允许 prerelease</span></label></div><div class="form-meta"></div></div></div></section><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>目标模块</h2><span>${selected.size} 个已选择；核自身始终排除</span></div></div><div class="log-module-filters">${pluginRows || `<span class="empty-cell">当前没有可选择的已加载模块。</span>`}</div><p class="form-hint">${esc(data.policy_note || "规则保存后会立即重建调度。")}</p></section>`;
 }
 function mirrorsView() {
   const data = state.mirrorsData;
@@ -898,7 +883,7 @@ function recommendationsView() {
     const status = item.installed ? (item.update_available ? `<span class="pill managed">可更新${item.latest_version ? ` → v${esc(item.latest_version)}` : ""}</span>` : `<span class="pill native">${esc(item.version_status || "已安装")}</span>`) : `<span class="pill">未安装</span>`;
     return `<tr><td><b>${esc(item.name || item.plugin_id)}</b><small>${esc(item.plugin_id)}</small></td><td>${status}</td><td><code>${item.installed ? "v" + esc(item.version || "?") : "—"}</code></td><td><button class="link" data-control-open="${esc(item.plugin_id)}">${actions.install || actions.update ? "前往接管台" : "查看状态"}</button></td></tr>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 全系列</div><h1>系列推荐</h1><p>固定可信清单的安装与版本状态；批量操作串行执行，核自身不会自更新。</p></div><div class="actions"><button class="btn primary" id="check-recommendations" ${canCheck ? "" : "disabled"}>检查最新版本</button><button class="btn danger" id="apply-recommendations" ${canApply ? "" : "disabled"}>一键安装/更新</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>可信模块</h2><span>${data.items?.length || 0} 个模块</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>状态与目标版本</th><th>当前版本</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="empty-cell">暂无模块。</td></tr>`}</tbody></table></div><div class="footer"><span>普通更新只在远端版本更高时执行。</span><span>${data.rate_limit ? `GitHub 剩余 ${esc(data.rate_limit.remaining ?? "?")}` : "未读取限流状态"}</span></div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 全系列</div><h1>系列推荐</h1><p>固定可信清单的安装与版本状态；批量操作逐个执行并保留恢复点，核自身不会更新。</p></div><div class="actions"><button class="btn primary" id="check-recommendations" ${canCheck ? "" : "disabled"}>检查最新版本</button><button class="btn danger" id="apply-recommendations" ${canApply ? "" : "disabled"}>一键安装/更新</button></div></div><section class="workspace"><div class="workspace-head"><div class="section-title"><h2>可信模块</h2><span>${data.items?.length || 0} 个模块</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>模块</th><th>状态与目标版本</th><th>当前版本</th><th>操作</th></tr></thead><tbody>${rows || `<tr><td colspan="4" class="empty-cell">暂无模块。</td></tr>`}</tbody></table></div><div class="footer"><span>普通更新只在远端版本更高时执行。</span><span>${data.rate_limit ? `GitHub 剩余 ${esc(data.rate_limit.remaining ?? "?")}` : "未读取限流状态"}</span></div></section>`;
 }
 function securityPanel() {
   const data = state.adminsData;
@@ -909,7 +894,7 @@ function securityPanel() {
 }
 
 function securityView() {
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；密码只保存 PBKDF2 派生值，浏览器不持久化令牌。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div>${securityPanel()}`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；登录状态有时效，过期后需重新登录。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div>${securityPanel()}`;
 }
 const VIEW_RENDERERS = { modules: modulesView, control: controlView, updates: updatesView, recommendations: recommendationsView, rules: rulesView, mirrors: mirrorsView, diagnostics: diagnosticsView, settings: settingsView, security: securityView };
 const VIEW_ENTERS = { control: loadControl, updates: async () => { dashboard(); await loadTransactions(); }, recommendations: loadRecommendations, rules: loadRules, mirrors: loadMirrors, diagnostics: loadDiagnostics, settings: loadSettings, security: loadAdmins };
@@ -983,7 +968,7 @@ function bindSettingsTabs() {
 function bindDashboard() {
   bindSettingsTabs();
   document.getElementById("logout")?.addEventListener("click", logout); document.getElementById("rail-logout")?.addEventListener("click", logout); document.getElementById("mobile-logout")?.addEventListener("click", logout);
-  document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("reload")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
+  document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
   document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings());
   document.getElementById("route-reset-all")?.addEventListener("click", resetAllRoutes);
   document.getElementById("route-export")?.addEventListener("click", exportRoutes); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl({ force: true })); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
@@ -998,7 +983,6 @@ function bindDashboard() {
   document.querySelectorAll("[data-view]").forEach(node => node.addEventListener("click", () => { state.selectedModule = node.dataset.module || ""; enterView(node.dataset.view || "modules"); }));
   document.querySelectorAll("[data-diagnostic]").forEach(node => node.addEventListener("click", async () => { state.logModules = [node.dataset.diagnostic]; await loadDiagnostics(); })); document.querySelectorAll("[data-module]").forEach(node => node.addEventListener("click", () => { state.view = "modules"; state.selectedModule = node.dataset.module || ""; dashboard(); })); document.getElementById("close-module-detail")?.addEventListener("click", () => { state.selectedModule = ""; dashboard(); });
   document.querySelectorAll("[data-filter]").forEach(node => node.addEventListener("click", () => { state.filter = node.dataset.filter; dashboard(); })); const query = document.getElementById("query"); query?.addEventListener("input", () => { state.query = query.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("query"); next?.focus(); next?.setSelectionRange(state.query.length, state.query.length); }); });
-  document.querySelectorAll("[data-domain-view]").forEach(node => node.addEventListener("click", async () => { await enterView(node.dataset.domainView || "modules"); }));
   document.querySelectorAll("[data-cap-tab]").forEach(node => node.addEventListener("click", async () => {
     const [pluginId, tab] = String(node.dataset.capTab || "").split("|");
     if (!pluginId || !tab) return;
@@ -1011,7 +995,6 @@ function bindDashboard() {
   document.querySelectorAll("[data-control-refresh]").forEach(node => node.addEventListener("click", () => refreshControlFields(node.dataset.controlRefresh)));
   document.querySelectorAll("[data-catalog-domain-open]").forEach(node => node.addEventListener("click", async () => { state.selectedDomain = node.dataset.catalogDomainOpen; state.selectedCapability = ""; dashboard(); await ensureCapabilitySwitchData(); }));
   document.querySelectorAll("[data-cap-switch-field]").forEach(node => node.addEventListener("change", () => applyCapabilitySwitch(node)));
-  document.querySelectorAll("[data-catalog-back]").forEach(node => node.addEventListener("click", () => { state.selectedDomain = ""; dashboard(); }));
   document.querySelectorAll("[data-capability-open]").forEach(node => node.addEventListener("click", () => loadCapability(node.dataset.capabilityOpen)));
   document.querySelectorAll("[data-capability-back]").forEach(node => node.addEventListener("click", () => { state.selectedCapability = ""; state.capabilityData = {}; dashboard(); }));
   document.querySelectorAll("[data-cap-panels-load]").forEach(node => node.addEventListener("click", () => loadCapPanels(node.dataset.capPanelsLoad)));
@@ -1027,38 +1010,21 @@ function bindDashboard() {
 }
 async function loadDiagnostics() { try { const result = await post("diagnostics", {}); state.providers = result.providers || []; state.view = "diagnostics"; dashboard(); await loadDiagnosticLogs(true); } catch (error) { notify(error.message, true); } }
 function logCursors() {
-  const cursors = {};
-  const streams = {};
-  (state.logMembers || []).forEach(item => {
-    const next = Number(item.next_seq);
-    cursors[item.plugin_id] = Number.isFinite(next) && next >= 0 ? next : 0;
-    streams[item.plugin_id] = item.stream_id || "";
-  });
-  return { cursors, streams };
+  return window.SeriesKernel.deriveCursors(state.logMembers || []);
 }
+// 诊断协议细节统一走 series-kernel.js（核 Page 与 WebUI 共用一份）。
 function logMemberHasMore(member) {
-  return Boolean(member?.has_more ?? member?.truncated ?? member?.payload_has_more);
+  return window.SeriesKernel.memberHasMore(member);
 }
 function applyDiagnosticPage(result, wasReset) {
   const members = result.members || [];
   state.logMembers = members;
   if (result.link_health) state.linkHealth = result.link_health;
-  const activeIds = new Set(members.map(item => item.plugin_id));
-  const resetIds = new Set(members.filter(item => item.reset).map(item => item.plugin_id));
-  if (state.logs.some(item => !activeIds.has(item.plugin_id)) || resetIds.size) {
-    state.logs = state.logs.filter(item => activeIds.has(item.plugin_id) && !resetIds.has(item.plugin_id));
-  }
-  const seen = new Set(state.logs.map(item => `${item.plugin_id}:${item.seq}`));
-  const fresh = (result.events || []).filter(item => {
-    const key = `${item.plugin_id}:${item.seq}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  window.SeriesKernel.pruneForMembers(state.logs, {}, {}, members);
+  const merge = window.SeriesKernel.mergeLogEvents(state.logs, result.events, { cap: 3000 });
+  const fresh = merge.fresh;
   state.logNewKeys = new Set(fresh.map(item => `${item.plugin_id}:${item.seq}`));
   if (fresh.length) state.logPendingScroll = true;
-  state.logs = [...state.logs, ...fresh];
-  if (state.logs.length > 3000) state.logs = state.logs.slice(-3000);
   return members.some(item => item.status === "ready" && logMemberHasMore(item));
 }
 async function loadDiagnosticLogs(reset = false) {
@@ -1141,26 +1107,18 @@ function exportDiagnosticLogs() {
     members: state.logMembers,
     events
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-  link.hidden = true;
-  document.body.appendChild(link);
-  link.click();
-  window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  window.SeriesUI.downloadJson(`series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, payload);
   notify(events.length ? "诊断事件已导出" : "暂无可导出事件", !events.length);
 }
 async function checkUpdates() {
-  try { notify("正在检查更新…"); state.updatesCheck = await post("updates/check", {}); notify("检查完成"); await loadDashboard(); if (state.view === "updates") await loadTransactions(); } catch (error) { notify(error.message, true); }
+  try { notify("正在检查更新…"); state.updatesCheck = await post("updates/check", {}); notify("检查完成"); await loadDashboard(); } catch (error) { notify(error.message, true); }
 }
 async function loadTransactions() {
   try { state.transactions = (await get("updates/transactions")).transactions || []; if (state.view === "updates") dashboard(); } catch (error) { notify(error.message, true); }
 }
 async function rollbackUpdate(txId) {
   if (!(await confirmDialog("确定回滚该次更新？插件将恢复到更新前版本并热重载。"))) return;
-  try { const result = await post("updates/rollback", { tx_id: txId }); notify(`已回滚 ${result.plugin_id || ""} → v${result.from_version || "?"}`); await Promise.all([loadDashboard(), loadTransactions()]); } catch (error) { notify(error.message, true); }
+  try { const result = await post("updates/rollback", { tx_id: txId }); notify(`已回滚 ${result.plugin_id || ""} → v${result.from_version || "?"}`); await loadDashboard(); } catch (error) { notify(error.message, true); }
 }
 async function loadRules() {
   try { state.rulesData = await get("rules"); } catch (error) { notify(error.message, true); }
@@ -1203,11 +1161,11 @@ async function loadRecommendations() {
   if (state.view === "recommendations") dashboard();
 }
 async function checkRecommendations() {
-  try { state.recommendationsData = await post("recommendations/check", {}); notify("最新版本检查完成"); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { notify(error.message, true); }
+  try { state.recommendationsData = await post("recommendations/check", {}); notify("最新版本检查完成"); dashboard(); } catch (error) { notify(error.message, true); }
 }
 async function applyAllRecommendations() {
   if (!(await confirmDialog("确定安装未安装模块并更新所有确有新版本的模块？核自身不会更新。"))) return;
-  try { const result = await post("recommendations/apply-all", { confirm: true }); notify(`批量完成：成功 ${result.succeeded} / 失败 ${result.failed}`); await Promise.all([loadRecommendations(), loadDashboard()]); } catch (error) { notify(error.message, true); }
+  try { const result = await post("recommendations/apply-all", { confirm: true }); notify(`批量完成：成功 ${result.succeeded} / 失败 ${result.failed}`); await loadDashboard(); } catch (error) { notify(error.message, true); }
 }
 async function loadAdmins() {
   try { state.adminsData = await get("admins"); } catch (error) { notify(error.message, true); }
@@ -1244,12 +1202,7 @@ async function resetAllRoutes() {
 }
 function exportRoutes() {
   const payload = { generated_at: new Date().toISOString(), model_routing: state.settingsData?.settings?.model_routing || {}, resolved: state.routes?.routes || {} };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url; link.download = "series-model-routing.json"; link.hidden = true;
-  document.body.appendChild(link); link.click();
-  window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  window.SeriesUI.downloadJson("series-model-routing.json", payload);
   notify("已导出当前路由");
 }
 async function saveSettings() {
@@ -1288,7 +1241,7 @@ async function saveSettings() {
     if (type === "float") { const value = parseFloat(raw); if (Number.isFinite(value)) payload[key] = value; return; }
     payload[key] = raw;
   });
-  try { const result = await post("settings", payload); notify("设置已保存并生效（连接项重启后生效）"); await Promise.all([loadSettings(), loadDashboard()]); } catch (error) { notify(error.message, true); }
+  try { const result = await post("settings", payload); notify("设置已保存并生效（连接项重启后生效）"); await loadDashboard(); } catch (error) { notify(error.message, true); }
 }
 async function loadControl(options = {}) {
   try {
@@ -1465,8 +1418,8 @@ async function applyControlPatch(pluginId, root) {
   const id = pluginId || "";
   if (!id) return;
   const fromCapability = (state.capabilityData || {})[id];
-  const schema = fromCapability?.schema || state.controlSchema;
-  const snapshot = fromCapability?.snapshot || state.controlSnapshot;
+  const schema = fromCapability?.schema;
+  const snapshot = fromCapability?.snapshot;
   if (!schema) return;
   const patch = collectControlPatch(schema, snapshot, root);
   if (!Object.keys(patch).length) { notify("没有修改需要应用"); return; }
@@ -1496,18 +1449,14 @@ async function resetControlFields(pluginId) {
 async function refreshControlFields(pluginId) {
   const id = pluginId || "";
   if (!id) return;
-  if ((state.capabilityData || {})[id]) {
-    try {
-      const [schema, snapshot] = await Promise.all([
-        get(`series/${encodeURIComponent(id)}/control/schema`),
-        get(`series/${encodeURIComponent(id)}/control/snapshot`)
-      ]);
-      state.capabilityData[id] = { schema, snapshot };
-      dashboard();
-    } catch (error) { notify(error.message, true); }
-    return;
-  }
-  await loadControlPlugin(id);
+  try {
+    const [schema, snapshot] = await Promise.all([
+      get(`series/${encodeURIComponent(id)}/control/schema`),
+      get(`series/${encodeURIComponent(id)}/control/snapshot`)
+    ]);
+    state.capabilityData[id] = { schema, snapshot };
+    dashboard();
+  } catch (error) { notify(error.message, true); }
 }
 
 async function uploadArtifact(file, pluginId, panelId) {
@@ -1625,7 +1574,7 @@ async function runLifecycle(action, pluginId) {
   } catch (error) { notify(error.message, true); }
 }
 async function toggleControl() { try { const next = state.control?.mode === "managed" ? "native" : "managed"; await post("series/control/mode", { mode: next }); await loadControl(); notify(next === "managed" ? "统一接管已启用" : "已恢复插件自身配置"); } catch (error) { notify(error.message, true); } }
-function exportSummary() { const payload = { generated_at: new Date().toISOString(), modules: state.modules.map(item => ({ plugin_id: item.plugin_id, version: item.version, status: item.status, contracts: item.contracts })) }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "series-control-summary.json"; link.hidden = true; document.body.appendChild(link); link.click(); window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000); notify("已生成脱敏诊断摘要"); }
+function exportSummary() { const payload = { generated_at: new Date().toISOString(), modules: state.modules.map(item => ({ plugin_id: item.plugin_id, version: item.version, status: item.status, contracts: item.contracts })) }; window.SeriesUI.downloadJson("series-control-summary.json", payload); notify("已生成脱敏诊断摘要"); }
 async function loadDashboard() { try { const session = await get("session"); state.configured = !!session.configured; if (!session.authenticated) { state.authenticated = false; loginView(); return; } state.authenticated = true; state.session = session.session; const modules = await get("modules"); state.modules = modules.modules || []; await enterView(state.view); } catch (error) { loginView(error.message); } }
 async function logout() { try { await post("logout", {}); } finally { state.authenticated = false; state.session = null; loginView(); } }
 async function start() { try { await loadDashboard(); } catch (error) { loginView(error.message); } }

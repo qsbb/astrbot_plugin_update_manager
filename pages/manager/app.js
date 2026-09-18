@@ -2,91 +2,91 @@ const messages = {
   "zh-CN": {
     title: "凝心溯溪-核 · 模块运营中心", heading: "凝心溯溪-核", subtitle: "统一管理系列模块的安装、更新、回滚与诊断",
     refresh: "刷新", controlCenter: "模块运营中心", overview: "总览", catalog: "目录", logs: "日志", loading: "加载中…", webuiAdminsTitle: "控制中心管理员", webuiAdminsHint: "管理员只能在这个已鉴权的 Page 中创建、修改和禁用；WebUI 不提供注册入口。", refreshAdmins: "刷新管理员", adminUsername: "用户名", adminPassword: "初始密码", adminRole: "角色", createAdmin: "创建管理员", adminCreated: "管理员已创建", adminUpdated: "管理员已更新", adminDisabled: "管理员已禁用", adminEnable: "启用", adminDisable: "禁用", adminResetPassword: "重置密码", adminNewPassword: "新密码", adminConfirmDisable: "确认禁用该管理员？",
-    openWebUi: "打开独立 WebUI", copyWebUiLink: "复制链接", copiedWebUiLink: "WebUI 链接已复制", copyWebUiPrompt: "请复制独立 WebUI 地址", copyWebUiManual: "无法自动复制，已显示地址，请手动复制", openWebUiBlocked: "宿主页面禁止新窗口，可复制地址或点击“在当前面板打开”", webuiManualHint: "手动复制/打开地址", openAddress: "打开地址", openInPanel: "在当前面板打开", webuiPublicUrlHint: "未配置公开地址，若无法打开请在配置中填写 webui_public_url", webuiActionsLabel: "独立 WebUI 操作", startupFailed: "页面启动失败", webuiAddressLoading: "独立 WebUI 地址加载中…", webuiAddressUnavailable: "独立 WebUI 地址不可用", webuiAddressRunning: "运行中", webuiAddressStopped: "未启动，点击按钮启动", webuiAddressDisabled: "已关闭，请在配置中启用", webuiAddressLabel: "地址", portLabel: "端口", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
+    openWebUi: "打开独立 WebUI", copyWebUiLink: "复制链接", copiedWebUiLink: "WebUI 链接已复制", copyWebUiManual: "无法自动复制，已显示地址，请手动复制", openWebUiBlocked: "宿主页面禁止新窗口，可复制地址或点击“在当前面板打开”", webuiManualHint: "手动复制/打开地址", openAddress: "打开地址", openInPanel: "在当前面板打开", webuiPublicUrlHint: "未配置公开地址，若无法打开请在配置中填写 webui_public_url", webuiActionsLabel: "独立 WebUI 操作", startupFailed: "页面启动失败", webuiAddressLoading: "独立 WebUI 地址加载中…", webuiAddressUnavailable: "独立 WebUI 地址不可用", webuiAddressRunning: "运行中", webuiAddressStopped: "未启动，点击按钮启动", webuiAddressDisabled: "已关闭，请在配置中启用", webuiAddressLabel: "地址", portLabel: "端口", eyebrow: "AstrBot 插件管理页", languageLabel: "语言", managerSectionsLabel: "管理页分区", diagnosticStatusLabel: "插件诊断状态",
     retry: "重试", sectionLoadFailed: "本区域加载失败", saving: "保存中…",
     capabilities: "运行时能力", capabilitiesHint: "内部诊断信息，正常使用时无需查看", configTitle: "配置读取与保存", tokenHint: "敏感 token 仅显示是否已配置，留空不会覆盖。",
-    save: "保存", catalogTitle: "插件目录", catalogHint: "合并展示运行时插件与已安装元数据；未加载插件不可更新。",
-    settings: "设置", settingsHint: "运行配置、自动更新、控制中心账户与镜像网络都在这里；每个分区独立保存。",
+    save: "保存", catalogTitle: "插件目录", catalogHint: "未加载的插件不可更新；系列推荐里已出现的模块不会在这里重复显示。",
+    settings: "设置",
     settingsConfigTab: "运行配置", settingsAutoTab: "自动更新", settingsAccountsTab: "控制中心账户", settingsMirrorsTab: "镜像与网络",
-    modules: "推荐与目录", modulesHint: "系列推荐与其他目录插件合并展示；系列推荐里已出现的模块不会在目录里重复。",
-    recommendationsTitle: "凝心溯溪系列推荐", recommendationsHint: "官方安装会直接加载；更新和启用由 AstrBot 内部热重载，页面不会额外重复重载。核禁止自更新和自停用。",
-    checkLatest: "检查最新版本", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
+    modules: "推荐与目录",
+    recommendationsTitle: "凝心溯溪系列推荐",
+    checkLatest: "检查推荐更新", checkingLatest: "正在检查…", latestChecked: "版本检查完成", currentVersion: "当前", latestVersion: "最新", checkFailed: "检查失败",
     applyAll: "一键全部安装/更新", applyingAll: "正在全部安装/更新…", applyAllConfirm: "确定要安装或更新全部可用的推荐插件吗？", applyAllDone: "全部操作完成", applyAllPartial: "部分操作失败",
     updateAvailable: "有新版本", upToDate: "已是最新版", localNewer: "本地版本更新", notInstalled: "未安装", unknown: "未知",
-    selfUpdateNotice: "核有新版本：当前 {current}，最新 {latest}。核禁止自更新，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制", copyInstalledPageUrl: "请复制更新页地址后在浏览器中打开：",
+    selfUpdateNotice: "核有新版本：当前 {current}，最新 {latest}。核禁止自更新，请前往已安装插件页更新。", goToInstalledPlugins: "前往已安装插件页", installedPageUrlLabel: "更新页地址", installedPageUrlCopied: "宿主阻止自动跳转，更新页地址已复制",
     install: "安装", installed: "已安装", update: "更新", forceUpdate: "强制更新", enable: "启用", disable: "停用", operationDone: "操作完成", operationFailed: "操作失败", unavailableAction: "仅检测到新版本且运行时支持时可更新", forceUpdateUnavailable: "强制更新仅支持有新版本、已是最新版或本地版本更新的插件", catalogUnavailable: "此插件不可启停", errorUnknown: "请求失败，请稍后重试", error404: "远端未发布 Release 或标签", errorNetwork: "网络连接失败", errorTimeout: "请求超时", errorRateLimit: "GitHub 请求受限，请稍后重试", errorCode: "错误代码", errorHttpStatus: "HTTP 状态", errorRepository: "仓库", errorBranch: "分支",
     errorRetryAfter: "可重试时间", errorTokenHint: "可在配置中填写 GitHub Token 提升额度", rateLimitBanner: "GitHub 配额已用尽，{retry}后可再次检查。", rateLimitRemaining: "剩余配额",
     confirmTitle: "确认插件操作", confirmAction: "确认操作", cancel: "取消", confirmPrompt: "确定要{action}“{name}”吗？", forceUpdateConfirm: "确定要强制更新“{name}”吗？即使已是最新版或远端版本更旧，也会用远端版本覆盖本地代码。", installRunning: "正在安装…", updateRunning: "正在更新…", forceUpdateRunning: "正在强制更新…", enableRunning: "正在启用…", disableRunning: "正在停用…",
-    enabled: "插件启用", automatic: "自动更新", busy: "执行状态", idle: "空闲", running: "执行中", nextRun: "下次运行",
+    nextRun: "下次运行",
     available: "可用", unavailable: "不可用", configured: "已配置", notConfigured: "未配置", writeOnly: "仅写入，不回显",
     eligible: "可规划", blocked: "已阻断", loaded: "已加载", notLoaded: "未加载", active: "已启用", inactive: "未启用",
     empty: "暂无插件", emptyDiagnostics: "目录诊断", saved: "配置已保存", loadFailed: "加载失败", saveFailed: "保存失败",
-    checkUpdates: "检查更新", checkingUpdates: "正在检查更新…", updatesChecked: "更新检查完成", notChecked: "未检查", catalogUpdateHint: "点击「检查更新」后才会显示版本状态",
+    checkUpdates: "检查目录更新", checkingUpdates: "正在检查更新…", updatesChecked: "更新检查完成", notChecked: "未检查",
     mirrorsTitle: "GitHub 镜像加速", mirrorsHint: "加速站只做前缀代理；镜像不可用会自动回退直连，不会导致检查失败。", mirrorDirect: "直连 GitHub（不使用加速站）", mirrorBuiltin: "内置", mirrorCustom: "自定义",
     mirrorBenchmark: "一键测速", mirrorBenchmarking: "正在测速…", mirrorBenchmarkDone: "测速完成", mirrorLatency: "延迟", mirrorUnreachable: "不可用", mirrorUntested: "未测速",
     mirrorApply: "使用该加速站", mirrorApplied: "加速站已切换", mirrorAddTitle: "添加自定义加速站", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "添加", mirrorAdded: "自定义加速站已添加", mirrorInvalid: "加速站必须是合法的 https 前缀", mirrorDuplicate: "该加速站已在列表中", mirrorRemove: "移除", mirrorRemoved: "自定义加速站已移除", mirrorProbeHint: "测速探针",
     ruleTitle: "每日自动更新", saveRule: "保存规则", ruleEnabled: "启用每日规则", autoUpdateGate: "允许自动更新总闸", autoUpdateGateHint: "关闭时任何每日规则都不会执行自动更新。", ruleTime: "运行时间", ruleTimezone: "时区", rulePolicy: "更新策略", failurePolicy: "失败策略", jitter: "抖动（分钟）", minimumAge: "最小发布年龄（小时）", prerelease: "允许预发行版本", selectPlugins: "选择插件", ruleSaved: "每日规则与总闸已保存", checkOnlyNote: "check_only 仅检查并记录，绝不会更新插件。", gateReady: "总闸已开启，启用规则后将注册每日任务。", gateClosed: "自动更新总闸已关闭。", pluginDisabled: "插件当前未启用，规则不会执行。", policyCheckOnly: "仅检查（check_only）", policyPatch: "仅补丁版本（patch）", policyMinor: "允许次版本（minor）", policyStable: "最新稳定版（stable）", failureRollbackContinue: "回滚后继续（rollback_continue）", failureRollbackStop: "回滚并停止（rollback_stop）",
-    diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码、摘要或详情", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticDisabled: "已关闭", diagnosticUnavailable: "不可用", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticCount: "显示 {shown} 条，共缓存 {total} 条", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", diagnosticNoDetails: "暂无更多详细信息", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
+    diagnosticTitle: "系列诊断日志", pauseLogs: "暂停", resumeLogs: "继续", refreshLogs: "刷新日志", clearLogs: "清空", pluginFilter: "插件", levelFilter: "级别", searchLogs: "搜索", searchLogsPlaceholder: "事件码、摘要或详情", allPlugins: "全部插件", allLevels: "全部级别", diagnosticReady: "可读取", diagnosticMissing: "未加载", diagnosticDisabled: "已关闭", diagnosticUnavailable: "不可用", diagnosticUnsupported: "暂不支持", diagnosticFailed: "读取失败", diagnosticPaused: "已暂停", diagnosticEmpty: "暂无符合条件的日志", diagnosticNoDetails: "暂无更多详细信息", clearDiagnosticsConfirm: "清空所有系列插件的内存诊断日志？", diagnosticsCleared: "诊断日志已清空", diagnosticGap: "部分较早日志已被环形缓冲覆盖"
   },
   "en-US": {
     title: "Ningxin Suxi Core · Module Operations Center", heading: "Ningxin Suxi Core", subtitle: "Install, update, roll back and diagnose series modules in one place",
     refresh: "Refresh", controlCenter: "Module operations", overview: "Overview", catalog: "Catalog", logs: "Logs", loading: "Loading…", webuiAdminsTitle: "Control center administrators", webuiAdminsHint: "Administrators are created, changed, and disabled only from this authenticated Page. The WebUI has no registration screen.", refreshAdmins: "Refresh administrators", adminUsername: "Username", adminPassword: "Initial password", adminRole: "Role", createAdmin: "Create administrator", adminCreated: "Administrator created", adminUpdated: "Administrator updated", adminDisabled: "Administrator disabled", adminEnable: "Enable", adminDisable: "Disable", adminResetPassword: "Reset password", adminNewPassword: "New password", adminConfirmDisable: "Disable this administrator?",
-    openWebUi: "Open standalone WebUI", copyWebUiLink: "Copy link", copiedWebUiLink: "WebUI link copied", copyWebUiPrompt: "Copy the standalone WebUI address", copyWebUiManual: "Automatic copy failed; the address is shown for manual copy", openWebUiBlocked: "The host page blocks new windows; copy the address or open it in this panel", webuiManualHint: "Manually copy/open the address", openAddress: "Open address", openInPanel: "Open in this panel", webuiPublicUrlHint: "No public URL configured; set webui_public_url if this address is unreachable", webuiActionsLabel: "Standalone WebUI actions", startupFailed: "Page startup failed", webuiAddressLoading: "Loading standalone WebUI address…", webuiAddressUnavailable: "Standalone WebUI address unavailable", webuiAddressRunning: "Running", webuiAddressStopped: "Stopped; click the button to start", webuiAddressDisabled: "Disabled; enable it in configuration", webuiAddressLabel: "Address", portLabel: "Port", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
+    openWebUi: "Open standalone WebUI", copyWebUiLink: "Copy link", copiedWebUiLink: "WebUI link copied", copyWebUiManual: "Automatic copy failed; the address is shown for manual copy", openWebUiBlocked: "The host page blocks new windows; copy the address or open it in this panel", webuiManualHint: "Manually copy/open the address", openAddress: "Open address", openInPanel: "Open in this panel", webuiPublicUrlHint: "No public URL configured; set webui_public_url if this address is unreachable", webuiActionsLabel: "Standalone WebUI actions", startupFailed: "Page startup failed", webuiAddressLoading: "Loading standalone WebUI address…", webuiAddressUnavailable: "Standalone WebUI address unavailable", webuiAddressRunning: "Running", webuiAddressStopped: "Stopped; click the button to start", webuiAddressDisabled: "Disabled; enable it in configuration", webuiAddressLabel: "Address", portLabel: "Port", eyebrow: "AstrBot plugin management", languageLabel: "Language", managerSectionsLabel: "Manager sections", diagnosticStatusLabel: "Plugin diagnostic status",
     retry: "Retry", sectionLoadFailed: "This section failed to load", saving: "Saving…",
     capabilities: "Runtime capabilities", capabilitiesHint: "Internal diagnostics. No need to check during normal use.", configTitle: "Read and save configuration", tokenHint: "Sensitive tokens are write-only. Empty values keep the current secret.",
-    save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Runtime plugins and installed metadata are always merged; unloaded plugins cannot be updated.",
-    settings: "Settings", settingsHint: "Runtime config, auto-update, control center accounts and mirrors live here; each section saves on its own.",
+    save: "Save", catalogTitle: "Plugin catalog", catalogHint: "Unloaded plugins cannot be updated; modules already listed in recommendations are not repeated here.",
+    settings: "Settings",
     settingsConfigTab: "Runtime config", settingsAutoTab: "Auto update", settingsAccountsTab: "Control center accounts", settingsMirrorsTab: "Mirrors & network",
-    modules: "Recommendations & catalog", modulesHint: "Series recommendations and other catalog plugins are merged; modules already listed above are not repeated.",
-    recommendationsTitle: "Ningxin Suxi series", recommendationsHint: "Official installation loads directly. Update and enable use AstrBot's internal hot reload; this page never triggers a duplicate reload. Core cannot update or disable itself.",
-    checkLatest: "Check latest versions", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
+    modules: "Recommendations & catalog",
+    recommendationsTitle: "Ningxin Suxi series",
+    checkLatest: "Check recommended updates", checkingLatest: "Checking…", latestChecked: "Version check completed", currentVersion: "Current", latestVersion: "Latest", checkFailed: "Check failed",
     applyAll: "Install/update all", applyingAll: "Installing/updating all…", applyAllConfirm: "Install or update all available recommended plugins?", applyAllDone: "All operations completed", applyAllPartial: "Some operations failed",
     updateAvailable: "New version available", upToDate: "Up to date", localNewer: "Local version is newer", notInstalled: "Not installed", unknown: "Unknown",
-    selfUpdateNotice: "A newer Core release is available: current {current}, latest {latest}. Core never updates itself; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.", copyInstalledPageUrl: "Copy this update page URL and open it in a browser:",
+    selfUpdateNotice: "A newer Core release is available: current {current}, latest {latest}. Core never updates itself; update it from the installed plugins page.", goToInstalledPlugins: "Open installed plugins", installedPageUrlLabel: "Update page URL", installedPageUrlCopied: "The host blocked automatic navigation. The update page URL was copied.",
     install: "Install", installed: "Installed", update: "Update", forceUpdate: "Force update", enable: "Enable", disable: "Disable", operationDone: "Operation completed", operationFailed: "Operation failed", unavailableAction: "Update is enabled only when a newer version is detected and supported", forceUpdateUnavailable: "Force update requires an available, up-to-date, or locally newer version state", catalogUnavailable: "This plugin cannot be toggled", errorUnknown: "Request failed; try again later", error404: "No release or tag was found", errorNetwork: "Network connection failed", errorTimeout: "Request timed out", errorRateLimit: "GitHub request limit reached; try again later", errorCode: "Error code", errorHttpStatus: "HTTP status", errorRepository: "Repository", errorBranch: "Branch",
     errorRetryAfter: "Retry after", errorTokenHint: "Set a GitHub Token in configuration to raise the quota", rateLimitBanner: "The GitHub quota is exhausted; you can check again in {retry}.", rateLimitRemaining: "Remaining quota",
     confirmTitle: "Confirm plugin action", confirmAction: "Confirm", cancel: "Cancel", confirmPrompt: "Are you sure you want to {action} “{name}”?", forceUpdateConfirm: "Force update “{name}”? The remote version will overwrite local code even when it is the same version or older.", installRunning: "Installing…", updateRunning: "Updating…", forceUpdateRunning: "Force updating…", enableRunning: "Enabling…", disableRunning: "Disabling…",
-    enabled: "Plugin enabled", automatic: "Automatic updates", busy: "Execution", idle: "Idle", running: "Running", nextRun: "Next run",
+    nextRun: "Next run",
     available: "Available", unavailable: "Unavailable", configured: "Configured", notConfigured: "Not configured", writeOnly: "Write-only; never returned",
     eligible: "Eligible", blocked: "Blocked", loaded: "Loaded", notLoaded: "Not loaded", active: "Active", inactive: "Inactive",
     empty: "No plugins", emptyDiagnostics: "Catalog diagnostics", saved: "Configuration saved", loadFailed: "Load failed", saveFailed: "Save failed",
-    checkUpdates: "Check for updates", checkingUpdates: "Checking for updates…", updatesChecked: "Update check completed", notChecked: "Not checked", catalogUpdateHint: "Version status appears after you run a check",
+    checkUpdates: "Check catalog updates", checkingUpdates: "Checking for updates…", updatesChecked: "Update check completed", notChecked: "Not checked",
     mirrorsTitle: "GitHub mirror acceleration", mirrorsHint: "Mirrors only proxy by prefix. An unavailable mirror falls back to a direct connection and never fails the check.", mirrorDirect: "Direct GitHub connection (no mirror)", mirrorBuiltin: "Built-in", mirrorCustom: "Custom",
     mirrorBenchmark: "Run benchmark", mirrorBenchmarking: "Benchmarking…", mirrorBenchmarkDone: "Benchmark completed", mirrorLatency: "Latency", mirrorUnreachable: "Unavailable", mirrorUntested: "Not tested",
     mirrorApply: "Use this mirror", mirrorApplied: "Mirror switched", mirrorAddTitle: "Add a custom mirror", mirrorAddPlaceholder: "https://your-mirror.example.com", mirrorAdd: "Add", mirrorAdded: "Custom mirror added", mirrorInvalid: "A mirror must be a valid https prefix", mirrorDuplicate: "This mirror is already listed", mirrorRemove: "Remove", mirrorRemoved: "Custom mirror removed", mirrorProbeHint: "Benchmark probe",
     ruleTitle: "Daily automatic updates", saveRule: "Save rule", ruleEnabled: "Enable daily rule", autoUpdateGate: "Allow automatic updates — master switch", autoUpdateGateHint: "When off, no daily rule can perform automatic updates.", ruleTime: "Run time", ruleTimezone: "Timezone", rulePolicy: "Update policy", failurePolicy: "Failure policy", jitter: "Jitter (minutes)", minimumAge: "Minimum release age (hours)", prerelease: "Allow prereleases", selectPlugins: "Select plugins", ruleSaved: "Daily rule and master switch saved", checkOnlyNote: "check_only checks and records only; it never updates plugins.", gateReady: "The automatic-update master switch is on; enabling the rule registers the daily job.", gateClosed: "The automatic-update master switch is off.", pluginDisabled: "The plugin is disabled, so the rule will not run.", policyCheckOnly: "Check only (check_only)", policyPatch: "Patch releases only (patch)", policyMinor: "Allow minor releases (minor)", policyStable: "Latest stable release (stable)", failureRollbackContinue: "Roll back and continue (rollback_continue)", failureRollbackStop: "Roll back and stop (rollback_stop)",
-    diagnosticTitle: "Series diagnostic logs", pauseLogs: "Pause", resumeLogs: "Resume", refreshLogs: "Refresh logs", clearLogs: "Clear", pluginFilter: "Plugin", levelFilter: "Level", searchLogs: "Search", searchLogsPlaceholder: "Event code, summary, or details", allPlugins: "All plugins", allLevels: "All levels", diagnosticReady: "Ready", diagnosticMissing: "Not loaded", diagnosticDisabled: "Disabled", diagnosticUnavailable: "Unavailable", diagnosticUnsupported: "Unsupported", diagnosticFailed: "Read failed", diagnosticCount: "Showing {shown} of {total} cached events", diagnosticPaused: "Paused", diagnosticEmpty: "No matching events", diagnosticNoDetails: "No additional details", clearDiagnosticsConfirm: "Clear all in-memory series diagnostic logs?", diagnosticsCleared: "Diagnostic logs cleared", diagnosticGap: "Some older events were overwritten by the ring buffer"
+    diagnosticTitle: "Series diagnostic logs", pauseLogs: "Pause", resumeLogs: "Resume", refreshLogs: "Refresh logs", clearLogs: "Clear", pluginFilter: "Plugin", levelFilter: "Level", searchLogs: "Search", searchLogsPlaceholder: "Event code, summary, or details", allPlugins: "All plugins", allLevels: "All levels", diagnosticReady: "Ready", diagnosticMissing: "Not loaded", diagnosticDisabled: "Disabled", diagnosticUnavailable: "Unavailable", diagnosticUnsupported: "Unsupported", diagnosticFailed: "Read failed", diagnosticPaused: "Paused", diagnosticEmpty: "No matching events", diagnosticNoDetails: "No additional details", clearDiagnosticsConfirm: "Clear all in-memory series diagnostic logs?", diagnosticsCleared: "Diagnostic logs cleared", diagnosticGap: "Some older events were overwritten by the ring buffer"
   }
 };
 
 // 方案1（紧凑总览 / 问题优先）新增文案；Object.assign 只追加新 key。
 Object.assign(messages["zh-CN"], {
   overviewTrusted: "可信模块", overviewNormal: "运行正常", overviewAttention: "需关注", overviewUpdates: "有更新",
-  overviewModulesTitle: "模块状态", overviewModulesHint: "版本、运行状态与本地/远端提交",
+  overviewModulesTitle: "模块状态",
   overviewModule: "模块", overviewVersion: "版本", overviewStatus: "状态", overviewLatestCommit: "最新提交", overviewDetail: "详情",
   overviewQueueTitle: "更新队列", overviewQueueCount: "{count} 个待更新", overviewQueueEmpty: "当前没有待更新模块",
-  overviewApplyAll: "一键全部更新", overviewCheckOnly: "只检查不更新",
+  overviewApplyAll: "一键安装/更新全部", overviewCheckOnly: "检查推荐更新",
   overviewBudget: "1次/仓 · 条件请求 · 已用 {used}/{limit} · 重置 {minutes} 分钟",
   overviewStatusNormal: "正常", overviewStatusUpdate: "有更新", overviewStatusNotInstalled: "未安装", overviewStatusDisabled: "已停用", overviewStatusCheckFailed: "检查失败", overviewStatusLocalNewer: "本地较新", overviewStatusUnknown: "未知",
   overviewCommitUnknown: "未知", overviewCommitLocal: "本地", overviewCommitRemote: "远端",
   diagnosticProblemsTitle: "待处理问题", diagnosticProblemsHint: "按错误类型聚合，点击可定位事件流",
   diagnosticProblemGroups: "{count} 组", diagnosticProblemsNone: "当前缓冲区没有错误或警告。", diagnosticProblemsEmpty: "还没有读取到诊断事件。",
-  diagnosticEventStream: "事件流", diagnosticCursor: "增量游标", diagnosticCursorPaused: "已暂停", diagnosticCursorCatchingUp: "追平中",
+  diagnosticEventStream: "事件流",
   autoScrollLogs: "自动滚动", exportLogs: "导出", diagnosticShowing: "显示最近 {shown} 条 · 缓存 {total}", diagnosticCatchingUp: "正在追平积压",
   diagnosticExportDone: "诊断事件已导出", diagnosticExportEmpty: "暂无可导出事件", details: "详情"
 });
 Object.assign(messages["en-US"], {
   overviewTrusted: "Trusted modules", overviewNormal: "Healthy", overviewAttention: "Attention", overviewUpdates: "Updates",
-  overviewModulesTitle: "Module status", overviewModulesHint: "Version, runtime status, and local/remote commit",
+  overviewModulesTitle: "Module status",
   overviewModule: "Module", overviewVersion: "Version", overviewStatus: "Status", overviewLatestCommit: "Latest commit", overviewDetail: "Details",
   overviewQueueTitle: "Update queue", overviewQueueCount: "{count} pending", overviewQueueEmpty: "No pending updates",
-  overviewApplyAll: "Update all", overviewCheckOnly: "Check only",
+  overviewApplyAll: "Install/update all", overviewCheckOnly: "Check recommended updates",
   overviewBudget: "1/repo · conditional requests · used {used}/{limit} · reset in {minutes} min",
   overviewStatusNormal: "Healthy", overviewStatusUpdate: "Update available", overviewStatusNotInstalled: "Not installed", overviewStatusDisabled: "Disabled", overviewStatusCheckFailed: "Check failed", overviewStatusLocalNewer: "Local is newer", overviewStatusUnknown: "Unknown",
   overviewCommitUnknown: "Unknown", overviewCommitLocal: "local", overviewCommitRemote: "remote",
   diagnosticProblemsTitle: "Open issues", diagnosticProblemsHint: "Grouped by error type; click to filter the event stream",
   diagnosticProblemGroups: "{count} groups", diagnosticProblemsNone: "No warnings or errors in the current buffer.", diagnosticProblemsEmpty: "No diagnostic events loaded yet.",
-  diagnosticEventStream: "Event stream", diagnosticCursor: "Incremental cursor", diagnosticCursorPaused: "Paused", diagnosticCursorCatchingUp: "Catching up",
+  diagnosticEventStream: "Event stream",
   autoScrollLogs: "Auto-scroll", exportLogs: "Export", diagnosticShowing: "Showing latest {shown} · cached {total}", diagnosticCatchingUp: "Catching up on backlog",
   diagnosticExportDone: "Diagnostic events exported", diagnosticExportEmpty: "No events to export", details: "Details"
 });
@@ -96,7 +96,7 @@ const notify = (message, error = false) => {
     window.SeriesUI.toast(message, error ? "error" : "info");
     return;
   }
-  const fallback = document.querySelector("[data-toast-fallback], #bridge-error, #startup-error, #page-error");
+  const fallback = document.querySelector("[data-toast-fallback], #startup-error");
   if (fallback) {
     fallback.textContent = String(message || "");
     fallback.hidden = false;
@@ -107,19 +107,9 @@ const notify = (message, error = false) => {
 
 let bridge = null;
 
-function readStoredLocale() {
-  // Compatibility shim: legacy window.localStorage.getItem is intentionally unused in sandboxed pages.
-  return null;
-}
-
-function storeLocale(locale) {
-  // Compatibility shim: legacy window.localStorage.setItem is intentionally unused in sandboxed pages.
-  void locale;
-}
-
-const storedLocale = readStoredLocale();
+// 沙箱页禁用 localStorage，语言选择只在本次会话内生效。
 const state = {
-  locale: Object.prototype.hasOwnProperty.call(messages, storedLocale) ? storedLocale : "zh-CN",
+  locale: "zh-CN",
   config: null,
   rule: null,
   mirrors: null,
@@ -272,8 +262,9 @@ function parseJsonResponse(value) {
   return data;
 }
 
+const HTML_ESCAPE_FALLBACK = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+  return (window.SeriesUI?.escapeHtml || HTML_ESCAPE_FALLBACK)(value);
 }
 
 // 移动端 Plugin Page 常嵌在受限 iframe 中。宿主 bridge 能明确接管导航时才算成功；
@@ -555,7 +546,7 @@ function renderOverviewQueue(items) {
   if (!list) return;
   const pending = items.filter((item) => item.update_available);
   const summary = document.getElementById("overview-queue-summary");
-  if (summary) summary.textContent = pending.length ? t("overviewQueueCount").replace("{count}", String(pending.length)) : t("overviewQueueEmpty");
+  if (summary) summary.textContent = pending.length ? t("overviewQueueCount").replace("{count}", String(pending.length)) : "";
   list.innerHTML = pending.length
     ? pending.slice(0, 12).map((item) => `<button type="button" class="overview-queue-item" data-overview-detail="${escapeHtml(item.plugin_id)}"><span>${escapeHtml(item.key || item.name || item.plugin_id)}</span><code>${escapeHtml(item.latest_version || item.version || "")}</code></button>`).join("")
     : `<p class="empty-cell">${escapeHtml(t("overviewQueueEmpty"))}</p>`;
@@ -624,7 +615,11 @@ function makeField(key, field, value) {
 }
 
 async function loadSettingsPanel() {
-  await Promise.all([loadConfig(), loadRule(), loadMirrors()]);
+  await Promise.all([
+    loadOnce("config", loadConfig),
+    loadOnce("rule", loadRule),
+    loadOnce("mirrors", loadMirrors),
+  ]);
   state.settingsLoaded = true;
 }
 
@@ -679,15 +674,8 @@ function renderWebUiAddress(data) {
   state.webUi = data || null;
   const node = document.getElementById("webui-address");
   if (!node) return;
-  const statusNode = document.getElementById("webui-status");
-  const setStatus = (text, cls) => {
-    if (!statusNode) return;
-    statusNode.textContent = text;
-    statusNode.className = `webui-status ${cls}`;
-  };
   if (!data?.url) {
     node.textContent = t("webuiAddressUnavailable");
-    setStatus(t("webuiAddressUnavailable"), "off");
     setWebUiManualUrl("");
     return;
   }
@@ -699,7 +687,6 @@ function renderWebUiAddress(data) {
   const publicHint = data.public_url_configured === false ? ` · ${t("webuiPublicUrlHint")}` : "";
   node.textContent = `${t("webuiAddressLabel")}: ${data.url} · ${t("portLabel")}: ${data.port} · ${stateText}${publicHint}`;
   node.title = data.url;
-  setStatus(stateText, data.ready ? "ready" : "off");
   setWebUiManualUrl(data.url);
 }
 
@@ -710,6 +697,16 @@ async function loadWebUiAddress() {
     renderWebUiAddress(null);
     console.warn("Unable to read standalone WebUI address", error);
   }
+}
+
+// 取独立 WebUI 地址；未启动则尝试启动。失败抛错，成功时更新地址行。
+async function ensureWebUiReady() {
+  let data = state.webUi;
+  if (!data?.url) data = await apiGet("webui/url");
+  if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
+  if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
+  renderWebUiAddress(data);
+  return data;
 }
 
 async function openStandaloneWebUi() {
@@ -725,10 +722,7 @@ async function openStandaloneWebUi() {
   }
   let data = state.webUi;
   try {
-    if (!data?.url) data = await apiGet("webui/url");
-    if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
-    if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
-    renderWebUiAddress(data);
+    data = await ensureWebUiReady();
     if (popup && !popup.closed) {
       try { popup.opener = null; } catch (_) { /* Optional hardening. */ }
       popup.location.replace(data.url);
@@ -772,10 +766,7 @@ function openStandaloneWebUiInFrame() {
 async function copyStandaloneWebUiLink() {
   let data = state.webUi;
   try {
-    if (!data?.url) data = await apiGet("webui/url");
-    if (!data.enabled || !data.ready || !data.url) data = await apiPost("webui/start", {});
-    if (!data.enabled || !data.ready || !data.url) throw new Error("独立 WebUI 启动后仍不可用");
-    renderWebUiAddress(data);
+    data = await ensureWebUiReady();
     if (await copyText(data.url)) {
       notify(t("copiedWebUiLink"));
       return;
@@ -1156,7 +1147,10 @@ function applyModuleScope() {
 }
 
 async function loadModules() {
-  await Promise.all([loadRecommendations(), loadCatalog()]);
+  await Promise.all([
+    loadOnce("recommendations", loadRecommendations),
+    loadOnce("catalog", loadCatalog),
+  ]);
   // 目录去重要用到推荐结果，两个请求都回来后再渲染一次，避免并发顺序导致重复卡片。
   renderCatalog();
   applyModuleScope();
@@ -1595,37 +1589,11 @@ function filteredDiagnosticEvents() {
 }
 
 function diagnosticProblems() {
-  const groups = new Map();
-  state.diagnosticEvents
-    .filter((event) => ["ERROR", "WARNING", "CRITICAL"].includes(String(event.level || "").toUpperCase()))
-    .forEach((event) => {
-      const key = `${event.plugin_id}:${event.code || "UNKNOWN"}`;
-      const current = groups.get(key) || {
-        pluginId: event.plugin_id,
-        pluginName: event.plugin_name || event.plugin_id,
-        code: event.code || "UNKNOWN",
-        level: "WARNING",
-        count: 0,
-        last: event.timestamp,
-      };
-      current.count += 1;
-      if (String(event.timestamp || "") > String(current.last || "")) current.last = event.timestamp;
-      if (String(event.level || "").toUpperCase() !== "WARNING") current.level = "ERROR";
-      groups.set(key, current);
-    });
-  return [...groups.values()]
-    .sort((a, b) => (b.level === "ERROR") - (a.level === "ERROR") || b.count - a.count)
-    .slice(0, 8);
+  return kernel().aggregateProblems(state.diagnosticEvents, { limit: 8 });
 }
 
 function diagnosticSuggestion(code) {
-  const value = String(code || "").toUpperCase();
-  if (value.includes("RATE_LIMIT")) return "GitHub 限流：稍后重试，或先在镜像加速里选择可用站点。";
-  if (value.includes("TIMEOUT") || value.includes("UNREACHABLE") || value.includes("NETWORK")) return "网络或超时：确认代理与镜像可达后重试。";
-  if (value.includes("MIGRAT") || value.includes("SCHEMA") || value.includes("CONFIG")) return "配置或迁移：核对配置页中该模块字段后重试。";
-  if (value.includes("AUTH") || value.includes("TOKEN") || value.includes("CREDENTIAL")) return "凭据问题：检查 GitHub Token 或控制中心账户权限。";
-  if (value.includes("IMPORT") || value.includes("LOAD")) return "加载失败：展开事件详情确认依赖与运行环境。";
-  return "展开该事件详情查看上下文，再决定是否重试。";
+  return kernel().problemSuggestion(code);
 }
 
 function renderDiagnosticProblems() {
@@ -1641,12 +1609,12 @@ function renderDiagnosticProblems() {
   node.innerHTML = problems.map((item) => {
     const level = String(item.level || "WARNING").toUpperCase();
     const levelClass = level === "ERROR" || level === "CRITICAL" ? "error" : "warning";
-    return `<button type="button" class="diagnostic-problem level-${levelClass}" data-problem-plugin="${escapeHtml(item.pluginId)}" data-problem-code="${escapeHtml(item.code)}">`
+    return `<button type="button" class="diagnostic-problem level-${levelClass}" data-problem-plugin="${escapeHtml(item.plugin_id)}" data-problem-code="${escapeHtml(item.code)}">`
       + `<span class="diagnostic-level diagnostic-level-${levelClass}">${escapeHtml(level)}</span>`
-      + `<strong>${escapeHtml(item.pluginName)}</strong>`
+      + `<strong>${escapeHtml(item.plugin_name)}</strong>`
       + `<code>${escapeHtml(item.code)}</code>`
       + `<small>${item.count} 次 · ${escapeHtml(diagnosticTime(item.last))}</small>`
-      + `<span class="diagnostic-problem-impact">影响：${escapeHtml(item.pluginName)} · 当前缓冲区 ${item.count} 条</span>`
+      + `<span class="diagnostic-problem-impact">影响：${escapeHtml(item.plugin_name)} · 当前缓冲区 ${item.count} 条</span>`
       + `<span class="diagnostic-problem-suggestion">建议：${escapeHtml(diagnosticSuggestion(item.code))}</span>`
       + `</button>`;
   }).join("");
@@ -1698,12 +1666,6 @@ function renderDiagnostics() {
       hasGap ? t("diagnosticGap") : ""
     ].filter(Boolean).join(" · ");
   }
-  const cursor = document.getElementById("diagnostic-cursor-state");
-  if (cursor) {
-    cursor.textContent = state.diagnosticPaused ? t("diagnosticCursorPaused") : state.diagnosticCatchUp ? t("diagnosticCursorCatchingUp") : t("diagnosticCursor");
-    cursor.classList.toggle("paused", state.diagnosticPaused);
-    cursor.classList.toggle("busy", state.diagnosticCatchUp);
-  }
   const pause = document.getElementById("diagnostic-pause");
   if (pause) pause.textContent = t(state.diagnosticPaused ? "resumeLogs" : "pauseLogs");
   const autoScroll = document.getElementById("diagnostic-autoscroll");
@@ -1713,8 +1675,10 @@ function renderDiagnostics() {
   }
 }
 
+// 诊断协议细节统一走 series-kernel.js（核 Page 与 WebUI 共用一份）。
+const kernel = () => window.SeriesKernel;
 function diagnosticMemberHasMore(member) {
-  return Boolean(member?.has_more ?? member?.truncated ?? member?.payload_has_more);
+  return kernel().memberHasMore(member);
 }
 
 function applyDiagnosticPage(data, generation, wasReset) {
@@ -1722,51 +1686,23 @@ function applyDiagnosticPage(data, generation, wasReset) {
   const nextMembers = data.members || [];
   const membersChanged = JSON.stringify(state.diagnosticMembers) !== JSON.stringify(nextMembers);
   state.diagnosticMembers = nextMembers;
-  const activePluginIds = new Set(nextMembers.map((member) => member.plugin_id));
-  const removedPluginIds = new Set(
-    state.diagnosticEvents
-      .map((event) => event.plugin_id)
-      .filter((pluginId) => !activePluginIds.has(pluginId))
+  const prune = kernel().pruneForMembers(
+    state.diagnosticEvents, state.diagnosticCursors, state.diagnosticStreams, nextMembers
   );
-  const resetPluginIds = new Set(
-    nextMembers.filter((member) => member.reset).map((member) => member.plugin_id)
-  );
-  let eventsChanged = wasReset || resetPluginIds.size > 0 || removedPluginIds.size > 0;
-  if (resetPluginIds.size || removedPluginIds.size) {
-    state.diagnosticEvents = state.diagnosticEvents.filter(
-      (event) => !resetPluginIds.has(event.plugin_id) && !removedPluginIds.has(event.plugin_id)
-    );
-  }
-  Object.keys(state.diagnosticCursors).forEach((pluginId) => {
-    if (!activePluginIds.has(pluginId)) delete state.diagnosticCursors[pluginId];
+  let eventsChanged = wasReset || prune.changed;
+  // 保留非 ready 成员的旧游标（其事件流暂停后可从原位置恢复），只更新 ready 成员
+  const derived = kernel().deriveCursors(nextMembers);
+  Object.assign(state.diagnosticCursors, derived.cursors);
+  Object.assign(state.diagnosticStreams, derived.streams);
+  nextMembers.forEach((member) => {
+    if (member.status === "ready" && !member.stream_id) delete state.diagnosticStreams[member.plugin_id];
   });
-  Object.keys(state.diagnosticStreams).forEach((pluginId) => {
-    if (!activePluginIds.has(pluginId)) delete state.diagnosticStreams[pluginId];
-  });
-  state.diagnosticMembers.forEach((member) => {
-    if (member.status === "ready") {
-      state.diagnosticCursors[member.plugin_id] = member.next_seq || 0;
-      if (member.stream_id) {
-        state.diagnosticStreams[member.plugin_id] = member.stream_id;
-      } else {
-        delete state.diagnosticStreams[member.plugin_id];
-      }
-    }
-  });
-  const seen = new Set(state.diagnosticEvents.map((event) => `${event.plugin_id}:${event.seq}`));
-  (data.events || []).forEach((event) => {
-    const key = `${event.plugin_id}:${event.seq}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      state.diagnosticEvents.push(event);
-      eventsChanged = true;
-    }
-  });
-  state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
-  if (state.diagnosticEvents.length > 10000) {
-    state.diagnosticEvents.splice(0, state.diagnosticEvents.length - 10000);
+  const merge = kernel().mergeLogEvents(state.diagnosticEvents, data.events, { cap: 10000 });
+  if (merge.fresh.length) {
     eventsChanged = true;
+    state.diagnosticEvents.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)) || left.plugin_id.localeCompare(right.plugin_id) || left.seq - right.seq);
   }
+  if (merge.changed) eventsChanged = true;
   const hasMore = nextMembers.some((member) => member.status === "ready" && diagnosticMemberHasMore(member));
   return { applied: true, hasMore, changed: membersChanged || eventsChanged };
 }
@@ -1864,26 +1800,41 @@ function exportDiagnostics() {
     members: state.diagnosticMembers,
     events
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-  link.hidden = true;
-  document.body.appendChild(link);
-  link.click();
-  window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  const filename = `series-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  if (window.SeriesUI?.downloadJson) {
+    window.SeriesUI.downloadJson(filename, payload);
+  } else {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 1000);
+  }
   notify(events.length ? t("diagnosticExportDone") : t("diagnosticExportEmpty"), !events.length);
 }
 
+
+// 同一刷新周期内的相同底层请求去重：modules 加载器内含 catalog、settings 内含 rule，
+// 直接登记会导致 refreshAll 把它们各打两遍。
+const inflightSectionRequests = new Map();
+function loadOnce(key, fn) {
+  if (!inflightSectionRequests.has(key)) {
+    inflightSectionRequests.set(key, Promise.resolve().then(fn).finally(() => inflightSectionRequests.delete(key)));
+  }
+  return inflightSectionRequests.get(key);
+}
 
 const sectionLoaders = {
   overview: { targetId: "summary", labelKey: "overview", load: loadOverview },
   modules: { targetId: "recommendations-list", labelKey: "modules", load: loadModules },
   settings: { targetId: "config-fields", labelKey: "settings", load: loadSettingsPanel },
-  rule: { targetId: "rule-plugins", labelKey: "ruleTitle", load: loadRule },
+  rule: { targetId: "rule-plugins", labelKey: "ruleTitle", load: () => loadOnce("rule", loadRule) },
 
-  catalog: { targetId: "catalog-list", labelKey: "catalog", load: loadCatalog },
+  catalog: { targetId: "catalog-list", labelKey: "catalog", load: () => loadOnce("catalog", loadCatalog) },
   diagnostics: { targetId: "diagnostic-log-list", labelKey: "diagnosticTitle", load: () => loadDiagnostics(true) }
 };
 
@@ -2045,9 +1996,7 @@ function bindEvents() {
   document.getElementById("config-form").addEventListener("submit", saveConfig);
   document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
   document.getElementById("open-webui")?.addEventListener("click", openStandaloneWebUi);
-  document.getElementById("open-webui-direct")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("copy-webui")?.addEventListener("click", copyStandaloneWebUiLink);
-  document.getElementById("open-webui-config")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("webui-open-frame")?.addEventListener("click", async () => {
     if (hasUnsavedChanges() && !await confirmDiscardChanges()) return;
     openStandaloneWebUiInFrame();
@@ -2160,7 +2109,6 @@ function bindEvents() {
     }
     discardUnsavedChanges();
     state.locale = event.target.value;
-    storeLocale(state.locale);
     applyI18n();
     await refreshAll();
   });

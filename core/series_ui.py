@@ -8,8 +8,12 @@ import re
 import shutil
 from pathlib import Path
 
-UI_VERSION = "1.0.2"
+UI_VERSION = "1.0.3"
 ASSETS = ("series-ui.css", "series-ui.js")
+# 仅分发到特定插件页面目录的额外资产（如核专用的 series-kernel.js）
+EXTRA_ASSETS = {
+    "astrbot_plugin_update_manager": ("series-kernel.js",),
+}
 TARGETS = {
     "astrbot_plugin_active_learner": ("pages/manager",),
     "astrbot_plugin_conversation_flow": ("pages/manager",),
@@ -40,15 +44,28 @@ def verify(root: Path) -> list[str]:
     if errors:
         return errors
     expected = {name: _digest(source / name) for name in ASSETS}
+    extras_expected: dict[str, str] = {}
+    for extra_names in EXTRA_ASSETS.values():
+        for name in extra_names:
+            if not (source / name).is_file():
+                errors.append(f"series.ui canonical missing: {name}")
+            else:
+                extras_expected[name] = _digest(source / name)
+    if errors:
+        return errors
     for plugin_id, page_dirs in TARGETS.items():
         for page_dir in page_dirs:
             target = root / plugin_id / page_dir
-            for name in ASSETS:
+            names = list(ASSETS)
+            for name in EXTRA_ASSETS.get(plugin_id, ()):
+                names.append(name)
+            for name in names:
                 copied = target / name
                 if not copied.is_file():
                     errors.append(f"series.ui copy missing: {plugin_id}/{page_dir}/{name}")
                     continue
-                if _digest(copied) != expected[name]:
+                want = expected.get(name) or extras_expected.get(name)
+                if _digest(copied) != want:
                     errors.append(f"series.ui copy drifted: {plugin_id}/{page_dir}/{name}")
             index = target / "index.html"
             if index.is_file():
@@ -158,7 +175,8 @@ def sync(root: Path) -> list[str]:
             target = root / plugin_id / page_dir
             if not target.is_dir():
                 raise FileNotFoundError(target)
-            for name in ASSETS:
+            names = list(ASSETS) + list(EXTRA_ASSETS.get(plugin_id, ()))
+            for name in names:
                 destination = target / name
                 shutil.copyfile(source / name, destination)
                 written.append(str(destination.relative_to(root)))

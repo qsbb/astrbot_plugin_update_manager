@@ -3,7 +3,13 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from astrbot_plugin_update_manager.core.series_ui import ASSETS, audit_interactions, sync, verify
+from astrbot_plugin_update_manager.core.series_ui import (
+    ASSETS,
+    EXTRA_ASSETS,
+    audit_interactions,
+    sync,
+    verify,
+)
 
 
 def _minimal_root(tmp_path: Path) -> Path:
@@ -12,6 +18,9 @@ def _minimal_root(tmp_path: Path) -> Path:
     source.mkdir(parents=True)
     for name in ASSETS:
         (source / name).write_text(f"/* {name} */\n", encoding="utf-8")
+    for extra_names in EXTRA_ASSETS.values():
+        for name in extra_names:
+            (source / name).write_text(f"/* {name} */\n", encoding="utf-8")
     target = root / "astrbot_plugin_active_learner" / "pages" / "manager"
     target.mkdir(parents=True)
     (target / "index.html").write_text(

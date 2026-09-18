@@ -160,10 +160,9 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert 'apiPost("diagnostics/logs", {' in js
     assert "cursors: state.diagnosticCursors" in js
     assert "streams: state.diagnosticStreams" in js
-    assert "const activePluginIds = new Set(nextMembers.map" in js
-    assert "!activePluginIds.has(pluginId)" in js
-    assert "delete state.diagnosticCursors[pluginId]" in js
-    assert "delete state.diagnosticStreams[pluginId]" in js
+    assert "pruneForMembers" in js
+    assert "mergeLogEvents" in js
+    assert "deriveCursors" in js
     assert 'apiPost("diagnostics/clear", { confirm: true })' in js
     assert "startDiagnosticPolling" in js
     assert "stopDiagnosticPolling" in js
@@ -173,8 +172,7 @@ def test_manager_page_has_incremental_series_diagnostic_console():
     assert "diagnosticDisabled" in js
     assert "diagnosticUnavailable" in js
     assert "generation !== state.diagnosticGeneration" in js
-    assert "resetPluginIds" in js
-    assert "!resetPluginIds.has(event.plugin_id)" in js
+    assert "pruneForMembers" in js
     assert "escapeHtml(event.summary" in js
     assert "diagnostic-plugin" in js
     assert '<details class="diagnostic-event' in js
@@ -210,15 +208,14 @@ def test_manager_page_waits_for_bridge_before_binding_events():
 
 def test_manager_page_handles_storage_and_startup_failures():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    assert "function readStoredLocale()" in js
-    assert "function storeLocale(locale)" in js
-    assert "window.localStorage.getItem" in js
-    assert "window.localStorage.setItem" in js
+    # 沙箱页禁用 localStorage：死持久化链已删除，语言选择仅会话内生效
+    assert "readStoredLocale" not in js
+    assert "storeLocale" not in js
     assert "catch (error)" in js
     assert "function showStartupError(error)" in js
     assert 'document.getElementById("startup-error")' in js
     assert "init().catch(showStartupError);" in js
-    assert "Object.prototype.hasOwnProperty.call(messages, storedLocale)" in js
+    assert 'locale: "zh-CN"' in js
     assert "Object.hasOwn(" not in js
     assert "const state = { locale: localStorage.getItem" not in js
 
@@ -250,8 +247,8 @@ def test_manager_ui_calls_independent_api_and_treats_token_as_write_only():
     assert 'item.loaded ? t("loaded") : t("notLoaded")' in js
     assert "item.display_name || item.plugin_id" in js
     assert "<code>${escapeHtml(item.plugin_id)}</code>" in js
-    assert "未加载插件不可更新" in html
-    assert "unloaded plugins cannot be updated" in js
+    assert "未加载的插件不可更新" in html
+    assert "Unloaded plugins cannot be updated" in js
     assert "data.diagnostics?.messages" in js
 
 
@@ -317,7 +314,7 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
     )
     assert 't("notChecked")' in js
     assert "未检查" in js
-    assert 'checkUpdates: "Check for updates"' in js
+    assert 'checkUpdates: "Check catalog updates"' in js
 
 
 def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch():
@@ -362,8 +359,8 @@ def test_recommendations_have_forced_refresh_version_gate_and_accessible_switch(
     assert 'aria-checked="${item.activated ? "true" : "false"}"' in js
     assert "await loadRecommendations();" in js
     assert ".lifecycle-switch input:focus-visible" in css
-    assert "官方安装会直接加载" in html
-    assert "不会额外重复重载" in html
+    # 实现细节元注释已按审查结论删除
+    assert "不会额外重复重载" not in html
 
 
 def test_recommendations_tab_does_not_start_implicit_network_check():
@@ -624,8 +621,8 @@ def test_capability_cards_use_bilingual_label_comment_and_keep_code():
 def test_catalog_hint_describes_merged_runtime_and_metadata_catalog():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    assert "合并展示运行时插件与已安装元数据" in html
-    assert "Runtime plugins and installed metadata are always merged" in js
+    assert "未加载的插件不可更新" in html
+    assert "Unloaded plugins cannot be updated" in js
     assert "运行时列表为空时展示" not in html
 
 
@@ -755,7 +752,9 @@ def test_mirror_tab_escapes_interpolated_values_and_shares_i18n_keys():
     ]
     # 镜像与网络现在是「设置」下的子分区，随设置区一起加载。
     assert "load: loadSettingsPanel" in resilient_refresh
-    assert "await Promise.all([loadConfig(), loadRule(), loadMirrors()]);" in js
+    assert 'loadOnce("config", loadConfig)' in js
+    assert 'loadOnce("rule", loadRule)' in js
+    assert 'loadOnce("mirrors", loadMirrors)' in js
     assert "Promise.allSettled" in resilient_refresh
 
 
@@ -830,10 +829,7 @@ def test_control_center_export_uses_document_download_lifecycle():
     export_block = js[
         js.index("function exportSummary") : js.index("async function loadDashboard")
     ]
-    assert "document.body.appendChild(link)" in export_block
-    assert "link.click()" in export_block
-    assert "link.remove()" in export_block
-    assert "URL.revokeObjectURL(url)" in export_block
+    assert "SeriesUI.downloadJson" in export_block
 
 
 def test_manager_page_exposes_dashboard_protected_admin_management():
@@ -854,9 +850,9 @@ def test_manager_page_exposes_copy_and_direct_open_webui_actions():
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     assert 'id="copy-webui"' in html
-    assert 'id="open-webui-direct"' in html
+    assert 'id="open-webui"' in html
     assert 'data-i18n="copyWebUiLink"' in html
-    assert 'data-i18n-aria-label="webuiActionsLabel"' in html
+    # 地址行的第二个打开按钮已收敛为头部单一入口
     assert ".webui-address-row" in css
     assert 'id="webui-manual"' in html
     assert 'id="webui-manual-url"' in html
@@ -901,7 +897,7 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     # 诊断：游标续读 + 级别过滤 + 自动刷新 + 清空
     assert "diagnostics/logs" in js
     assert "diagnostics/clear" in js
-    assert "logCursors" in js and "next_seq" in js
+    assert "logCursors" in js and "deriveCursors" in js
     assert 'id="log-level"' in js and 'id="log-auto"' in js
     assert 'id="log-search"' in js and 'id="log-range"' in js
     assert "diagnosticProblems" in js and "diagnosticEvents" in js
@@ -1179,7 +1175,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.10-1" in html
+    assert "?v=0.19.11-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1191,27 +1187,27 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     # 管理页：待处理问题聚合 + 事件流控制条 + 事件 JSON 导出。
     for element_id in (
         "diagnostic-problem-count",
-        "diagnostic-cursor-state",
         "diagnostic-autoscroll",
         "diagnostic-export",
     ):
         assert f'id="{element_id}"' in html
     assert "function diagnosticMemberHasMore(member)" in js
-    assert "member?.has_more ?? member?.truncated" in js
+    # has_more/truncated 识别已收敛到 series-kernel.js（双前端共用）
+    assert "kernel().memberHasMore" in js
     assert "pass >= 4" in js
     assert "function exportDiagnostics()" in js
     assert "diagnosticShowing" in js
     # 独立 WebUI：问题优先、暂停/自动滚动、导出、按 plugin_id:seq 去重、has_more 追平。
-    for element_id in ("log-pause", "log-autoscroll", "log-export", "log-cursor", "log-summary"):
+    for element_id in ("log-pause", "log-autoscroll", "log-export", "log-summary"):
         assert f'id="{element_id}"' in webui_js
     assert "function logMemberHasMore(member)" in webui_js
-    assert "member?.has_more ?? member?.truncated" in webui_js
+    assert "SeriesKernel.memberHasMore" in webui_js
     assert "state.logBusy" in webui_js
-    assert "seen.has(key)" in webui_js
-    assert "state.logs.length > 3000" in webui_js
+    # 去重与 3000 条上限已收敛进 series-kernel 的 mergeLogEvents
+    assert "mergeLogEvents" in webui_js
     assert "pass >= 4" in webui_js
     assert "function exportDiagnosticLogs()" in webui_js
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.10-1" in webui_html
+    assert "?v=0.19.11-1" in webui_html
