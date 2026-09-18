@@ -225,7 +225,9 @@ body[data-series-ui] .version-badge.check_failed { color: var(--si-danger); back
 .overview-queue-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
 .overview-queue-actions button { flex:1 1 130px; }
 .overview-budget { margin:10px 0 0; color:var(--si-muted); font-size:11px; line-height:1.5; }
-.overview-capabilities { margin-top:16px; }
+.runtime-capabilities { margin-top:16px; }
+.runtime-capabilities > summary .field-hint { font-weight:400; margin-left:10px; }
+.runtime-capabilities > .capability-list { padding:4px 14px 12px; }
 
 .diagnostic-problem-card { border-top:3px solid var(--si-warning); }
 .diagnostic-count { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; color:var(--si-warning); background:var(--si-warning-soft); font-size:12px; font-weight:700; }

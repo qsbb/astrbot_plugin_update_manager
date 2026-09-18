@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="title">凝心溯溪-核 · 模块运营中心</title>
-  <link rel="stylesheet" href="./style.css?v=0.19.9-1" />
-    <link rel="stylesheet" href="./series-ui.css?v=0.19.9-1" />
+  <link rel="stylesheet" href="./style.css?v=0.19.10-1" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.19.10-1" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -68,7 +68,6 @@
           <p id="overview-budget" class="overview-budget"></p>
         </aside>
       </div>
-      <article class="card overview-capabilities"><h2 data-i18n="capabilities">运行时能力</h2><div id="capabilities" class="capability-list"></div></article>
     </section>
 
     <section id="modules" class="panel" role="tabpanel" aria-labelledby="tab-modules" tabindex="0">
@@ -179,12 +178,16 @@
         <div id="diagnostic-members" class="diagnostic-members" aria-label="插件诊断状态" data-i18n-aria-label="diagnosticStatusLabel"></div>
         <div id="diagnostic-log-list" class="diagnostic-log-list" role="log" aria-live="off"><p data-i18n="loading">加载中…</p></div>
       </article>
+      <details class="card si-disclosure runtime-capabilities">
+        <summary><span data-i18n="capabilities">运行时能力</span><span class="field-hint" data-i18n="capabilitiesHint">内部诊断信息，正常使用时无需查看</span></summary>
+        <div id="capabilities" class="capability-list"></div>
+      </details>
     </section>
     <div id="startup-error" class="startup-error" role="alert" hidden></div>
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js?v=0.19.9-1"></script>
-  <script type="module" src="./app.js?v=0.19.9-1"></script>
+  <script src="./series-ui.js?v=0.19.10-1"></script>
+  <script type="module" src="./app.js?v=0.19.10-1"></script>
 </body>
 </html>
