@@ -77,7 +77,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.11"
+__version__ = "0.19.12"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -351,35 +351,113 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         """Declare the optional, read-only unified model routing contract."""
         return model_router_contract()
 
+    @staticmethod
+    def _provider_values(manager: Any, name: str) -> list[Any]:
+        """把 provider_manager 上的容器统一取成列表（Mapping/list/tuple/set）。"""
+        values = getattr(manager, name, None)
+        if isinstance(values, Mapping):
+            return list(values.values())
+        if isinstance(values, (list, tuple, set)):
+            return list(values)
+        return []
+
+    @staticmethod
+    def _provider_supports_image(provider: Any) -> bool:
+        """判定 provider 是否具备图像能力（与 AstrBot 同源语义）。
+
+        AstrBot 的 ``_provider_supports_modality`` 把迁移产生的空列表视为
+        "未配置 → 支持所有模态"，这里保持一致；大小写敏感，只认 ``"image"``。
+        """
+        config = getattr(provider, "provider_config", None)
+        if not isinstance(config, Mapping):
+            return False
+        modalities = config.get("modalities", None)
+        if modalities == []:
+            return True
+        return isinstance(modalities, list) and "image" in modalities
+
+    def _default_image_caption_provider_id(self) -> str:
+        """读取 AstrBot 的「图片描述 provider」配置（读不到返回空串）。"""
+        getter = getattr(self.context, "get_config", None)
+        if not callable(getter):
+            return ""
+        try:
+            config = getter()
+        except Exception:
+            return ""
+        if not isinstance(config, Mapping):
+            return ""
+        settings = config.get("provider_settings")
+        if not isinstance(settings, Mapping):
+            return ""
+        return str(settings.get("default_image_caption_provider_id") or "").strip()
+
+    def _current_chat_provider(self) -> Any:
+        for name in ("get_using_provider", "get_default_provider"):
+            getter = getattr(self.context, name, None)
+            if not callable(getter):
+                continue
+            try:
+                value = getter()
+            except Exception:
+                continue
+            if value is not None:
+                return value
+        return None
+
+    def _native_provider_by_id(self, provider_id: str) -> Any:
+        if not provider_id:
+            return None
+        getter = getattr(self.context, "get_provider_by_id", None)
+        if not callable(getter):
+            return None
+        try:
+            return getter(provider_id)
+        except Exception:
+            return None
+
     def _astrbot_provider_for_kind(self, kind: str) -> Any:
         """Best-effort native provider discovery without invoking a provider."""
         context = self.context
         if kind in {"conversation", "fast", "reasoning"}:
-            for name in ("get_using_provider", "get_default_provider"):
-                getter = getattr(context, name, None)
-                if callable(getter):
-                    try:
-                        value = getter()
-                        if value is not None:
-                            return value
-                    except Exception:
-                        continue
-            return None
+            return self._current_chat_provider()
         manager = getattr(context, "provider_manager", None)
+        if kind == "vision":
+            # 1) 当前对话 provider 自己支持图像时，AstrBot 会把图直接交给它
+            current = self._current_chat_provider()
+            if current is not None and self._provider_supports_image(current):
+                return current
+            # 2) 配置了图片描述 provider 就用它；配了却找不到 → fail-closed
+            caption_id = self._default_image_caption_provider_id()
+            if caption_id:
+                return self._native_provider_by_id(caption_id)
+            # 3) 否则在已加载的对话 provider 里找第一个支持图像的
+            for item in self._provider_values(manager, "provider_insts"):
+                if self._provider_supports_image(item):
+                    return item
+            return None
+        if kind in {"stt", "tts"}:
+            # 优先 AstrBot 的"当前使用"provider，再回退到已加载列表首个
+            getter_name = (
+                "get_using_stt_provider" if kind == "stt" else "get_using_tts_provider"
+            )
+            getter = getattr(context, getter_name, None)
+            if callable(getter):
+                try:
+                    value = getter()
+                except Exception:
+                    value = None
+                if value is not None:
+                    return value
+            list_name = "stt_provider_insts" if kind == "stt" else "tts_provider_insts"
+            return next(iter(self._provider_values(manager, list_name)), None)
         aliases = {
-            "fast": ("provider_insts",),
-            "reasoning": ("provider_insts",),
             "embedding": ("embedding_provider_insts", "embed_provider_insts"),
-            "vision": ("provider_insts",),
-            "stt": ("stt_provider_insts",),
-            "tts": ("tts_provider_insts",),
         }
         for name in aliases.get(kind, ()):
-            values = getattr(manager, name, None)
-            if isinstance(values, Mapping):
-                return next(iter(values.values()), None)
-            if isinstance(values, (list, tuple)):
-                return next(iter(values), None)
+            provider = next(iter(self._provider_values(manager, name)), None)
+            if provider is not None:
+                return provider
         return None
 
     def _provider_is_available(self, provider_id: str) -> bool:
@@ -639,11 +717,10 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         }
         values: list[Any] = []
         for name in aliases.get(kind, ()):
-            candidates = getattr(manager, name, None) or ()
-            if isinstance(candidates, Mapping):
-                values.extend(candidates.values())
-            elif isinstance(candidates, (list, tuple, set)):
-                values.extend(candidates)
+            candidates = self._provider_values(manager, name)
+            if kind == "vision":
+                candidates = [c for c in candidates if self._provider_supports_image(c)]
+            values.extend(candidates)
         if kind in {"conversation", "fast", "reasoning"} and not values:
             candidates = getattr(manager, "inst_map", {})
             if isinstance(candidates, Mapping):

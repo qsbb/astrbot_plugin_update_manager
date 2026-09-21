@@ -1,4 +1,19 @@
 ## [Unreleased]
+## 0.19.12 - 2026-09-21
+
+### 修复
+
+- 模型路由解析修复：回退 AstrBot 原生 provider 时改用真实结构读取身份（``provider_config["id"]`` 与 ``get_model()``），不再依赖不存在的 ``.id`` / ``.model`` / ``.name`` 属性；同时处理 ``"unknown"`` 占位模型名、class 对象、awaitable 与逐探针异常隔离。此前 WebUI 会把可用的原生 provider 全部显示为「不可用」。
+- 原生选择逻辑修正：识图改为「当前 provider 支持图像 → 图片描述 provider → 在已加载列表中找支持图像的 → 不可用」；STT/TTS 优先取 AstrBot 当前使用的 provider，再回退到已加载列表首个。
+
+### 新增
+
+- 模型路由语义回退：``fast`` / ``reasoning`` 未配置时继承 ``conversation`` 的路由，专用能力（embedding/vision/stt/tts）不跨类回退；路由响应新增 ``fallback_from`` 字段标注来源，契约版本 1.0 → 1.1（契约名 ``series.model_router@1.0`` 保持不变）。
+
+### 变更
+
+- 模型路由快照的「可用 / 不可用」改为「已解析 / 未解析」，并说明「已解析」表示配置已解析到 provider，不代表 API 一定可调用。
+
 ## 0.19.11 - 2026-09-19
 
 ### 变更
