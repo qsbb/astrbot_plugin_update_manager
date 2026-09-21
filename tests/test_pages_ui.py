@@ -906,6 +906,9 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     assert 'get("model-options")' in js
     assert "data-route-provider" in js and "data-route-model" in js
     assert "kind === \"tts\"" in js
+    # 切换服务商只允许替换模型控件本身：整块清空 .route-inputs 会连同服务商下拉、TTS 音色一起删掉
+    assert "wrapper.innerHTML" not in js
+    assert "model.replaceWith(" in js
     # 更新：真实检查更新 + 恢复点回滚
     assert "updates/check" in js
     assert "updates/transactions" in js
@@ -1175,7 +1178,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.12-1" in html
+    assert "?v=0.19.13-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1210,4 +1213,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.12-1" in webui_html
+    assert "?v=0.19.13-1" in webui_html
