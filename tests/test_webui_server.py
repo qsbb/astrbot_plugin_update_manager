@@ -108,6 +108,59 @@ def test_model_options_route_requires_auth_and_uses_callback(tmp_path):
     asyncio.run(exercise())
 
 
+def test_model_routing_test_route_requires_admin_and_uses_callback(tmp_path):
+    """测试全部模型：未登录 401、viewer 403、admin 才能真调自检回调。"""
+    (tmp_path / "index.html").write_text("standalone", encoding="utf-8")
+    auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
+    auth.create_admin("owner", "owner-pass", "owner")
+    auth.create_admin("viewer", "viewer-pass", "viewer")
+
+    calls: list[dict] = []
+
+    async def model_test(payload=None):
+        calls.append(payload or {})
+        return {"success": True, "results": [{"kind": "fast", "state": "ok", "latency_ms": 5}]}
+
+    server = WebUIServer(
+        auth,
+        static_root=tmp_path,
+        host="127.0.0.1",
+        port=free_port(),
+        modules=lambda: asyncio.sleep(0, result={}),
+        diagnostics=lambda: asyncio.sleep(0, result={}),
+        model_test=model_test,
+    )
+
+    async def exercise():
+        await server.start()
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(server.url + "/api/model-routing/test", json={}) as response:
+                assert response.status == 401
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "viewer", "password": "viewer-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.post(server.url + "/api/model-routing/test", json={}) as response:
+                assert response.status == 403
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "owner", "password": "owner-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.post(
+                server.url + "/api/model-routing/test", json={"kinds": ["fast"]}
+            ) as response:
+                assert response.status == 200
+                assert (await response.json())["results"][0]["state"] == "ok"
+        await server.stop()
+
+    asyncio.run(exercise())
+    assert calls == [{"kinds": ["fast"]}]
+
+
 def test_wildcard_webui_url_uses_dashboard_host_without_wildcard(tmp_path):
     auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
     server = WebUIServer(

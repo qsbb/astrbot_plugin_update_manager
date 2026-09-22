@@ -233,6 +233,13 @@ class PagesAPIMixin:
             ("config", self._pages_get_config, ["GET"], "读取更新管理器配置"),
             ("config", self._pages_save_config, ["POST"], "保存更新管理器配置"),
             ("model-routing", self._pages_model_routing, ["GET"], "读取统一模型路由"),
+            ("model-options", self._pages_model_options, ["GET"], "读取可用模型服务商与模型列表"),
+            (
+                "model-routing/test",
+                self._pages_model_test,
+                ["POST"],
+                "测试各职责模型连通性（官方 provider 自检）",
+            ),
             ("mirrors", self._pages_mirrors, ["GET"], "查看 GitHub 加速站候选"),
             (
                 "mirrors/benchmark",
@@ -484,6 +491,25 @@ class PagesAPIMixin:
                 {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
             )
         return json_response({"success": True, **resolver()})
+
+    async def _pages_model_options(self):
+        resolver = getattr(self, "_webui_model_options", None)
+        if not callable(resolver):
+            return json_response(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
+            )
+        return json_response(await resolver())
+
+    async def _pages_model_test(self):
+        probe = getattr(self, "probe_model_routes", None)
+        if not callable(probe):
+            return json_response(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
+            )
+        data = await self._request_json()
+        kinds = data.get("kinds") if isinstance(data, dict) else None
+        payload = await probe(kinds)
+        return json_response(payload)
 
     @staticmethod
     def _diagnostic_text(value: Any, limit: int | None = None) -> str:

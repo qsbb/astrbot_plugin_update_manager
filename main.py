@@ -36,6 +36,10 @@ from .core.diagnostics import (
 )
 from .core.health import HealthChecker
 from .core.mirrors import resolve_mirror
+from .core.model_probe import (
+    ResolvedProvider,
+    probe_routes as probe_model_routes_core,
+)
 from .core.model_router import (
     MODEL_KINDS,
     contract as model_router_contract,
@@ -77,7 +81,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.13"
+__version__ = "0.19.14"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -513,6 +517,72 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             },
         }
 
+    def _resolve_probe_provider(self, kind: str) -> ResolvedProvider:
+        """把某职责"当前生效"的路由解析成 provider 实例（不发起任何调用）。
+
+        - ``core``/``plugin`` 来源：路由是显式配置的，查不到实例就是"不在册"，
+          需要如实报出来，方便用户发现自己配错了 provider。
+        - ``astrbot`` 来源：实例由 AstrBot 原生发现提供，先信发现结果，
+          只有发现失败时才回退到按 id 反查。
+        """
+        route = self.resolve_model_route(kind)
+        provider_id = str(route.get("provider_id") or "").strip()
+        model = str(route.get("model") or "")
+        source = str(route.get("source") or "")
+        explicit = source in {"core", "plugin"}
+        provider = self._native_provider_by_id(provider_id) if provider_id else None
+        if provider is None and not explicit:
+            provider = self._astrbot_provider_for_kind(kind)
+        if provider is None:
+            error = (
+                f"路由指向的模型服务商 {provider_id} 当前不在册"
+                if provider_id
+                else "未解析到可用的模型服务商"
+            )
+            return ResolvedProvider(
+                provider_id=provider_id,
+                provider_label=provider_id,
+                source=source,
+                model=model,
+                error=error,
+            )
+        provider_id = provider_id or self._provider_id(provider)
+        if not source:
+            source = "astrbot"
+        try:
+            label = self._provider_label(provider)
+        except Exception:  # noqa: BLE001 - 展示用标签不允许影响自检
+            label = provider_id
+        return ResolvedProvider(
+            provider=provider,
+            provider_id=provider_id,
+            provider_label=label or provider_id,
+            source=source,
+            model=model,
+        )
+
+    async def probe_model_routes(
+        self, kinds: Any = None, *, concurrency: int = 3
+    ) -> dict[str, Any]:
+        """测试全部模型：只调用 AstrBot 官方 provider.test()，不写任何配置。"""
+        wanted = [
+            kind
+            for kind in (list(kinds) if kinds else list(MODEL_KINDS))
+            if kind in MODEL_KINDS
+        ] or list(MODEL_KINDS)
+        payload = await probe_model_routes_core(
+            wanted, self._resolve_probe_provider, concurrency=concurrency
+        )
+        return {"success": True, **payload}
+
+    async def _webui_model_test(self, payload: Any = None) -> dict[str, Any]:
+        kinds = None
+        if isinstance(payload, Mapping):
+            candidate = payload.get("kinds")
+            if isinstance(candidate, (list, tuple)) and candidate:
+                kinds = [str(item) for item in candidate]
+        return await self.probe_model_routes(kinds)
+
     def diagnostic_events(self, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:
         return read_diagnostic_events(after_seq=after_seq, limit=limit)
 
@@ -598,6 +668,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             settings_get=self._webui_settings_get,
             settings_save=self._webui_settings_save,
             model_options=self._webui_model_options,
+            model_test=self._webui_model_test,
             rules_get=self._webui_rules_get,
             rules_save=self._webui_rules_save,
             mirrors_get=self._webui_mirrors_get,

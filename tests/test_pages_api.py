@@ -39,6 +39,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/config", ("GET",)),
         (f"/{module.PLUGIN_NAME}/config", ("POST",)),
         (f"/{module.PLUGIN_NAME}/model-routing", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/model-options", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/model-routing/test", ("POST",)),
         (f"/{module.PLUGIN_NAME}/mirrors", ("GET",)),
         (f"/{module.PLUGIN_NAME}/mirrors/benchmark", ("POST",)),
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
@@ -165,6 +167,111 @@ def test_model_options_read_loaded_provider_configuration(monkeypatch, tmp_path)
     ]
     assert payload["capabilities"]["tts"][0]["models"] == ["tts-current"]
     assert payload["capabilities"]["embedding"] == []
+
+
+def test_model_options_page_endpoint_reuses_webui_payload(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+
+    class Provider:
+        provider_config = {"id": "chat", "type": "openai", "model": "chat-current"}
+        model_name = "chat-current"
+
+        def get_model(self):
+            return self.model_name
+
+    ctx = context(tmp_path)
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[Provider()],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    payload = unwrap(asyncio.run(plugin._pages_model_options()))
+    assert payload["success"] is True
+    assert payload["capabilities"]["conversation"][0]["provider_id"] == "chat"
+
+
+def test_model_test_page_endpoint_calls_official_provider_self_test(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    calls: list[str] = []
+
+    class Provider:
+        provider_config = {"id": "chat", "type": "openai", "model": "chat-current"}
+
+        async def test(self, timeout: float = 45.0) -> None:
+            calls.append("chat")
+
+    provider = Provider()
+    ctx = context(tmp_path)
+    ctx.get_using_provider = lambda: provider
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[provider],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    payload = unwrap(asyncio.run(plugin._pages_model_test()))
+    assert payload["success"] is True
+    by_kind = {item["kind"]: item for item in payload["results"]}
+    assert by_kind["conversation"]["state"] == "ok"
+    assert by_kind["conversation"]["provider_id"] == "chat"
+    # 没有 provider 的职责必须明确报 unavailable，而不是假通过
+    assert by_kind["tts"]["state"] == "unavailable"
+    assert by_kind["stt"]["state"] == "unavailable"
+    assert calls == ["chat"]
+
+
+def test_model_test_reports_failure_reason_without_leaking_secret(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+
+    class Provider:
+        provider_config = {"id": "chat", "type": "openai", "model": "chat-current"}
+
+        async def test(self, timeout: float = 45.0) -> None:
+            raise RuntimeError("request failed api_key=sk-live-123")
+
+    provider = Provider()
+    ctx = context(tmp_path)
+    ctx.get_using_provider = lambda: provider
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[provider],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    payload = unwrap(asyncio.run(plugin._pages_model_test()))
+    entry = next(item for item in payload["results"] if item["kind"] == "conversation")
+    assert entry["state"] == "failed"
+    assert "sk-live-123" not in json.dumps(payload, ensure_ascii=False)
+    assert "<已隐藏>" in entry["error"]
+
+
+def test_model_test_reports_unsupported_when_provider_has_no_self_test(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+
+    class AbstractProvider:
+        async def test(self) -> None:  # pragma: no cover - 占位基类
+            ...
+
+    class BareProvider(AbstractProvider):
+        provider_config = {"id": "chat", "type": "openai", "model": "chat-current"}
+
+    provider = BareProvider()
+    ctx = context(tmp_path)
+    ctx.get_using_provider = lambda: provider
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[provider],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    payload = unwrap(asyncio.run(plugin._pages_model_test()))
+    entry = next(item for item in payload["results"] if item["kind"] == "conversation")
+    assert entry["state"] == "unsupported"
 
 
 def test_model_routing_page_returns_contract_without_secrets(monkeypatch, tmp_path):
@@ -978,6 +1085,28 @@ def test_series_diagnostics_clear_validates_scope_and_degrades_missing(
     payload, status = asyncio.run(plugin._pages_clear_diagnostic_logs())
     assert status == 403
     assert payload["error"] == "PLUGIN_NOT_TRUSTED"
+
+
+def test_pages_save_config_keeps_all_model_route_kinds(monkeypatch, tmp_path):
+    """Page 的模型路由是整体替换：7 个职责必须都能存下来，不能只剩 schema 里列的 5 个。"""
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    routes = {
+        kind: {"provider_id": f"p-{kind}", "model": f"m-{kind}"}
+        for kind in ("conversation", "fast", "reasoning", "embedding", "vision", "stt", "tts")
+    }
+
+    async def payload():
+        return {"model_routing": routes}
+
+    monkeypatch.setattr(plugin, "_request_json", payload)
+    result = unwrap(asyncio.run(plugin._pages_save_config()))
+    assert result["success"] is True
+    persisted = plugin.store.read("manager-config.json", {})["model_routing"]
+    assert set(persisted) == set(routes)
+    assert persisted["fast"]["provider_id"] == "p-fast"
+    assert persisted["reasoning"]["model"] == "m-reasoning"
+    assert plugin.resolve_model_route("fast")["source"] == "core"
 
 
 def test_pages_save_config_validates_and_preserves_empty_token(monkeypatch, tmp_path):

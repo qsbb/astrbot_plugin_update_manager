@@ -61,6 +61,29 @@ const messages = {
 
 // 方案1（紧凑总览 / 问题优先）新增文案；Object.assign 只追加新 key。
 Object.assign(messages["zh-CN"], {
+  modelRoutingHint: "每项留空 = 跟随 AstrBot 原生；这里保存的是核的统一路由，插件显式配置仍然优先。",
+  modelFollowNative: "回退 AstrBot 原生 Provider",
+  modelNameHint: "模型名（可自定义）",
+  modelPickHint: "选择模型…",
+  modelCustomOption: "自定义输入…",
+  modelVoiceHint: "音色（可选）",
+  modelTestOne: "测试",
+  modelTestAll: "测试全部模型",
+  modelTesting: "测试中…",
+  modelTestPassed: "通过",
+  modelTestFailed: "失败",
+  modelTestUnsupported: "不支持自检",
+  modelTestUnavailable: "未配置",
+  modelTestIdle: "尚未测试：点击后按 AstrBot 官方自检真调一次，失败会给出原因。",
+  modelTestLastRun: "上次测试 {time} · 通过 {ok} · 失败 {failed}",
+  modelTestConfirm: "会对 {scope} 调用 AstrBot 官方自检（provider.test）：对话类会真发一次极小请求、向量/语音/识图按官方实现真调，可能产生极少量费用。继续？",
+  modelTestConfirmTitle: "测试全部模型",
+  modelTestStart: "开始测试",
+  modelTestDone: "模型自检完成",
+  modelTestDoneFailed: "模型自检完成：{failed} 个职责失败",
+  modelTestError: "模型自检失败：{message}",
+  webuiSandboxHint: "当前在 AstrBot 页面沙箱内，浏览器不允许直接打开新窗口；请复制地址到新标签打开。",
+  webuiSandboxAddressHint: "沙箱受限",
   overviewTrusted: "可信模块", overviewNormal: "运行正常", overviewAttention: "需关注", overviewUpdates: "有更新",
   overviewModulesTitle: "模块状态",
   overviewModule: "模块", overviewVersion: "版本", overviewStatus: "状态", overviewLatestCommit: "最新提交", overviewDetail: "详情",
@@ -76,6 +99,29 @@ Object.assign(messages["zh-CN"], {
   diagnosticExportDone: "诊断事件已导出", diagnosticExportEmpty: "暂无可导出事件", details: "详情"
 });
 Object.assign(messages["en-US"], {
+  modelRoutingHint: "Leave blank to follow AstrBot native providers; this saves the core route, plugin-explicit settings still win.",
+  modelFollowNative: "Fall back to AstrBot native provider",
+  modelNameHint: "Model name (custom allowed)",
+  modelPickHint: "Pick a model…",
+  modelCustomOption: "Custom input…",
+  modelVoiceHint: "Voice (optional)",
+  modelTestOne: "Test",
+  modelTestAll: "Test all models",
+  modelTesting: "Testing…",
+  modelTestPassed: "Passed",
+  modelTestFailed: "Failed",
+  modelTestUnsupported: "No self-test",
+  modelTestUnavailable: "Not configured",
+  modelTestIdle: "Not tested yet: each run calls AstrBot's official provider self-test once and reports the reason on failure.",
+  modelTestLastRun: "Last run {time} · passed {ok} · failed {failed}",
+  modelTestConfirm: "This calls AstrBot's official provider self-test for {scope}: chat sends one tiny request, embeddings/voice/vision call their official checks. A very small cost may apply. Continue?",
+  modelTestConfirmTitle: "Test all models",
+  modelTestStart: "Start test",
+  modelTestDone: "Model self-test finished",
+  modelTestDoneFailed: "Model self-test finished: {failed} failed",
+  modelTestError: "Model self-test failed: {message}",
+  webuiSandboxHint: "This AstrBot page runs in a sandbox, so new windows are blocked; copy the address and open it in a new tab.",
+  webuiSandboxAddressHint: "sandbox limited",
   overviewTrusted: "Trusted modules", overviewNormal: "Healthy", overviewAttention: "Attention", overviewUpdates: "Updates",
   overviewModulesTitle: "Module status",
   overviewModule: "Module", overviewVersion: "Version", overviewStatus: "Status", overviewLatestCommit: "Latest commit", overviewDetail: "Details",
@@ -111,6 +157,9 @@ let bridge = null;
 const state = {
   locale: "zh-CN",
   config: null,
+  modelOptions: null,
+  modelTest: null,
+  modelTestRunning: false,
   rule: null,
   mirrors: null,
   // 测速结果按加速站 URL 缓存，切换语言或重载列表都不用重新测速。
@@ -595,6 +644,176 @@ async function loadOverview() {
   }
 }
 
+// 模型路由的完整职责清单（与核 MODEL_KINDS / WebUI 的 7 项一致）。
+// _conf_schema.json 的 kinds 只声明了 5 项，若只按它渲染，从 Page 保存配置时
+// 会把 fast/reasoning 的路由整段覆盖掉，所以这里补齐；schema 里声明的中文名优先。
+const MODEL_ROUTE_KIND_LABELS = [
+  ["conversation", "对话/LLM"],
+  ["fast", "快速模型/Fast"],
+  ["reasoning", "推理模型/Reasoning"],
+  ["embedding", "向量/Embedding"],
+  ["vision", "识图/视觉"],
+  ["stt", "语音识别/STT"],
+  ["tts", "语音合成/TTS"],
+];
+
+function modelRouteKinds(field) {
+  const declared = field && typeof field.kinds === "object" && field.kinds ? field.kinds : {};
+  return MODEL_ROUTE_KIND_LABELS.map(([kind, label]) => [kind, declared[kind] || label]);
+}
+
+function modelOptionsForKind(kind) {
+  const list = state.modelOptions?.capabilities?.[kind];
+  return Array.isArray(list) ? list : [];
+}
+
+function modelProviderSelect(kind, selected) {
+  const options = modelOptionsForKind(kind);
+  const prepared = [...options];
+  if (selected && !prepared.some((item) => item.provider_id === selected)) {
+    prepared.unshift({ provider_id: selected, display_name: selected, in_use: true });
+  }
+  const body = [
+    `<option value="">${escapeHtml(t("modelFollowNative"))}</option>`,
+    ...prepared.map((item) => `<option value="${escapeHtml(item.provider_id)}" ${item.provider_id === selected ? "selected" : ""}>${escapeHtml(item.display_name || item.provider_id)} · ${escapeHtml(item.provider_id)}${item.in_use ? "（使用中）" : ""}</option>`),
+  ].join("");
+  return `<select data-model-kind="${escapeHtml(kind)}" data-model-field="provider_id">${body}</select>`;
+}
+
+function modelModelControl(kind, providerId, selected) {
+  const provider = modelOptionsForKind(kind).find((item) => item.provider_id === providerId);
+  const models = provider?.models || [];
+  const hasSelected = models.includes(selected);
+  if (!providerId || !models.length || (selected && !hasSelected)) {
+    return `<input data-model-kind="${escapeHtml(kind)}" data-model-field="model" placeholder="${escapeHtml(t("modelNameHint"))}" value="${escapeHtml(selected)}"/>`;
+  }
+  return `<select data-model-kind="${escapeHtml(kind)}" data-model-field="model"><option value="">${escapeHtml(t("modelPickHint"))}</option>${models.map((model) => `<option value="${escapeHtml(model)}" ${model === selected ? "selected" : ""}>${escapeHtml(model)}</option>`).join("")}<option value="__custom__">${escapeHtml(t("modelCustomOption"))}</option></select>`;
+}
+
+function renderModelRouteRow(kind, kindLabel, route) {
+  const providerId = String(route.provider_id || "");
+  const voice = kind === "tts"
+    ? `<input data-model-kind="${escapeHtml(kind)}" data-model-field="voice" placeholder="${escapeHtml(t("modelVoiceHint"))}" value="${escapeHtml(route.voice || "")}"/>`
+    : `<span class="model-route-spacer"></span>`;
+  return `<div class="model-route-row" data-model-row="${escapeHtml(kind)}"><strong>${escapeHtml(kindLabel)}</strong>${modelProviderSelect(kind, providerId)}${modelModelControl(kind, providerId, String(route.model || ""))}${voice}<button type="button" class="btn model-test-btn" data-route-test="${escapeHtml(kind)}" ${state.modelTestRunning ? "disabled" : ""}>${t("modelTestOne")}</button><span class="model-test-state" data-route-test-state="${escapeHtml(kind)}">${modelTestStateHtml(kind)}</span></div>`;
+}
+
+function modelTestEntry(kind) {
+  const results = state.modelTest?.results || [];
+  return results.find((item) => item.kind === kind) || null;
+}
+
+function modelTestStateHtml(kind) {
+  if (state.modelTestRunning) return `<span class="pill">${t("modelTesting")}</span>`;
+  const entry = modelTestEntry(kind);
+  if (!entry) return "";
+  if (entry.state === "ok") return `<span class="pill native">${t("modelTestPassed")} ${escapeHtml(String(entry.latency_ms ?? 0))}ms</span>`;
+  if (entry.state === "failed") return `<span class="pill managed" title="${escapeHtml(entry.error || "")}">${t("modelTestFailed")}</span>`;
+  if (entry.state === "unsupported") return `<span class="pill">${t("modelTestUnsupported")}</span>`;
+  return `<span class="pill">${t("modelTestUnavailable")}</span>`;
+}
+
+function modelTestSummaryHtml() {
+  if (state.modelTestRunning) return t("modelTesting");
+  if (!state.modelTest) return t("modelTestIdle");
+  const results = state.modelTest.results || [];
+  const ok = results.filter((item) => item.state === "ok").length;
+  const failed = results.filter((item) => item.state === "failed").length;
+  return t("modelTestLastRun")
+    .replace("{time}", escapeHtml(state.modelTest.testedAt || ""))
+    .replace("{ok}", String(ok))
+    .replace("{failed}", String(failed));
+}
+
+function modelTestDetailsHtml() {
+  const results = state.modelTest?.results || [];
+  const problems = results.filter((item) => item.state !== "ok");
+  if (!problems.length) return "";
+  const rows = problems.map((item) => {
+    const reused = item.reused_from ? `（复用 ${escapeHtml(item.reused_from)}）` : "";
+    return `<div class="model-test-detail${item.state === "failed" ? " failed" : ""}"><b>${escapeHtml(item.kind)}</b> · ${escapeHtml(item.state)}${item.error ? ` · ${escapeHtml(item.error)}` : ""}${reused}</div>`;
+  }).join("");
+  return `<div class="model-test-details" id="model-test-details">${rows}</div>`;
+}
+
+function refreshModelTestState() {
+  document.querySelectorAll("[data-route-test-state]").forEach((node) => {
+    node.innerHTML = modelTestStateHtml(node.dataset.routeTestState);
+  });
+  const summary = document.getElementById("model-test-summary");
+  if (summary) summary.innerHTML = modelTestSummaryHtml();
+  const button = document.getElementById("model-test-all");
+  if (button) {
+    button.disabled = Boolean(state.modelTestRunning);
+    button.textContent = t(state.modelTestRunning ? "modelTesting" : "modelTestAll");
+  }
+  document.querySelectorAll("[data-route-test]").forEach((node) => { node.disabled = Boolean(state.modelTestRunning); });
+  const fieldset = document.querySelector(".model-routing-field");
+  if (fieldset) {
+    const existing = document.getElementById("model-test-details");
+    const html = modelTestDetailsHtml();
+    if (existing) existing.remove();
+    if (html) fieldset.insertAdjacentHTML("beforeend", html);
+  }
+}
+
+async function runModelTest(kinds) {
+  if (state.modelTestRunning) return;
+  const list = Array.isArray(kinds) && kinds.length ? kinds : ["conversation", "fast", "reasoning", "embedding", "vision", "stt", "tts"];
+  const scope = list.length === 1 ? `「${list[0]}」` : `${list.length} 个职责`;
+  const confirmed = await window.SeriesUI.confirm({
+    title: t("modelTestConfirmTitle"),
+    message: t("modelTestConfirm").replace("{scope}", scope),
+    confirmText: t("modelTestStart"),
+    cancelText: t("cancel"),
+    danger: false,
+  });
+  if (!confirmed) return;
+  state.modelTestRunning = true;
+  refreshModelTestState();
+  try {
+    const payload = await apiPost("model-routing/test", { kinds: list });
+    state.modelTest = { results: payload.results || [], testedAt: payload.tested_at || "", durationMs: payload.duration_ms || 0 };
+    const failed = state.modelTest.results.filter((item) => item.state === "failed").length;
+    notify(failed ? t("modelTestDoneFailed").replace("{failed}", String(failed)) : t("modelTestDone"), failed > 0);
+  } catch (error) {
+    notify(t("modelTestError").replace("{message}", error.message), true);
+  } finally {
+    state.modelTestRunning = false;
+    refreshModelTestState();
+  }
+}
+
+function bindModelRoutingControls() {
+  const form = document.getElementById("config-form");
+  if (!form) return;
+  const swapModelControl = (kind) => {
+    const providerNode = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="provider_id"]`);
+    const modelNode = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="model"]`);
+    if (!providerNode || !modelNode) return;
+    const holder = document.createElement("div");
+    holder.innerHTML = modelModelControl(kind, providerNode.value, "");
+    const replacement = holder.firstElementChild;
+    if (!replacement) return;
+    modelNode.replaceWith(replacement);
+    bindModelNode(replacement);
+  };
+  const bindModelNode = (node) => node.addEventListener("change", () => {
+    if (node.tagName !== "SELECT" || node.value !== "__custom__") return;
+    const input = document.createElement("input");
+    input.dataset.modelKind = node.dataset.modelKind;
+    input.dataset.modelField = "model";
+    input.placeholder = t("modelNameHint");
+    input.value = "";
+    node.replaceWith(input);
+    input.focus();
+  });
+  form.querySelectorAll('[data-model-field="model"]').forEach(bindModelNode);
+  form.querySelectorAll('[data-model-field="provider_id"]').forEach((node) => node.addEventListener("change", () => swapModelControl(node.dataset.modelKind)));
+  document.getElementById("model-test-all")?.addEventListener("click", () => runModelTest());
+  form.querySelectorAll("[data-route-test]").forEach((node) => node.addEventListener("click", () => runModelTest([node.dataset.routeTest])));
+}
+
 function makeField(key, field, value) {
   const label = escapeHtml(field.description || key);
   if (field.write_only) {
@@ -604,8 +823,9 @@ function makeField(key, field, value) {
   if (field.type === "bool") return `<label class="switch"><input name="${key}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
   if (key === "model_routing" && field.type === "object") {
     const routes = value && typeof value === "object" ? value : {};
-    const kinds = Object.entries(field.kinds || {});
-    return `<fieldset class="model-routing-field"><legend>${label}</legend><p class="field-hint">插件显式配置优先，其次使用核，最后回退 AstrBot 原生配置。</p>${kinds.map(([kind, kindLabel]) => { const route = routes[kind] || {}; return `<div class="model-route-row"><strong>${escapeHtml(kindLabel)}</strong><input data-model-kind="${escapeHtml(kind)}" data-model-field="provider_id" placeholder="Provider ID" value="${escapeHtml(route.provider_id || "")}"/><input data-model-kind="${escapeHtml(kind)}" data-model-field="model" placeholder="模型名" value="${escapeHtml(route.model || "")}"/><input data-model-kind="${escapeHtml(kind)}" data-model-field="voice" placeholder="音色（可选）" value="${escapeHtml(route.voice || "")}"/></div>`; }).join("")}</fieldset>`;
+    const kinds = modelRouteKinds(field);
+    const rows = kinds.map(([kind, kindLabel]) => renderModelRouteRow(kind, kindLabel, routes[kind] || {})).join("");
+    return `<fieldset class="model-routing-field"><legend>${label}</legend><p class="field-hint">${t("modelRoutingHint")}</p>${rows}${modelTestDetailsHtml()}<div class="model-route-actions"><button type="button" class="btn primary" id="model-test-all" ${state.modelTestRunning ? "disabled" : ""}>${t(state.modelTestRunning ? "modelTesting" : "modelTestAll")}</button><span class="model-test-summary" id="model-test-summary">${modelTestSummaryHtml()}</span></div></fieldset>`;
   }
   if (field.options) return `<label><span>${label}</span><select name="${key}">${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
   const type = field.type === "int" || field.type === "float" ? "number" : "text";
@@ -662,9 +882,14 @@ function bindSettingsSubnav() {
 }
 
 async function loadConfig() {
-  const data = await apiGet("config");
+  const [data, options] = await Promise.all([
+    apiGet("config"),
+    apiGet("model-options").catch(() => null),
+  ]);
   state.config = data;
+  state.modelOptions = options;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  bindModelRoutingControls();
   configFormBaseline = captureFormState(document.getElementById("config-form"));
   await loadWebUiAddress();
   try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("settings", error); }
@@ -685,7 +910,8 @@ function renderWebUiAddress(data) {
       ? t("webuiAddressDisabled")
       : t("webuiAddressStopped");
   const publicHint = data.public_url_configured === false ? ` · ${t("webuiPublicUrlHint")}` : "";
-  node.textContent = `${t("webuiAddressLabel")}: ${data.url} · ${t("portLabel")}: ${data.port} · ${stateText}${publicHint}`;
+  const sandboxHint = isSandboxedFrame() ? ` · ${t("webuiSandboxAddressHint")}` : "";
+  node.textContent = `${t("webuiAddressLabel")}: ${data.url} · ${t("portLabel")}: ${data.port} · ${stateText}${publicHint}${sandboxHint}`;
   node.title = data.url;
   setWebUiManualUrl(data.url);
 }
@@ -754,11 +980,35 @@ function normalizeStandaloneWebUiUrl(value) {
   }
 }
 
+function isSandboxedFrame() {
+  // AstrBot 的 Plugin Page iframe 是 sandbox="allow-scripts allow-forms allow-downloads"：
+  // 没有 allow-same-origin → 文档处于不透明源，window.origin / location.origin 都是字符串 "null"；
+  // 也没有 allow-popups → window.open 会被拦。
+  // 这里只用 origin 判断，不碰 localStorage（沙箱里访问存储会直接抛错）。
+  try {
+    const origin = String(window.origin ?? "");
+    const locationOrigin = String(window.location?.origin ?? "");
+    return origin === "null" || locationOrigin === "null";
+  } catch (error) {
+    return true;
+  }
+}
+
+function showWebUiSandboxGuide(url) {
+  // 沙箱里既开不了新窗口、也不能把 iframe 导航到独立 WebUI：那样 WebUI 的
+  // /api/* 会变成跨源请求（Origin: null）被浏览器拦掉，只剩 Failed to fetch。
+  // 这里只把地址递到手上，让用户在浏览器新标签里打开。
+  revealWebUiUrl(url);
+  const input = document.getElementById("webui-manual-url");
+  if (input) { input.focus(); try { input.select(); } catch (error) { /* 选区失败不影响复制 */ } }
+  notify(t("webuiSandboxHint"), true);
+}
+
 function openStandaloneWebUiInFrame() {
   const url = normalizeStandaloneWebUiUrl(state.webUi?.url || document.getElementById("webui-manual-url")?.value);
   if (!url) { notify(t("webuiAddressUnavailable"), true); return false; }
-  // sandbox 只禁止顶层导航/弹窗，不允许改父页面；导航当前 iframe 是唯一
-  // 不依赖宿主源码修改的一键打开路径。浏览器后退即可回到 Plugin Page。
+  if (isSandboxedFrame()) { showWebUiSandboxGuide(url); return true; }
+  // 非沙箱（例如单独打开插件页内容地址）时才允许导航当前窗口。
   window.location.assign(url);
   return true;
 }

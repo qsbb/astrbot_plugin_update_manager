@@ -53,6 +53,7 @@ class WebUIServer:
         settings_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         model_options: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        model_test: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         rules_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         rules_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         mirrors_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
@@ -95,6 +96,7 @@ class WebUIServer:
         self.settings_get = settings_get
         self.settings_save = settings_save
         self.model_options = model_options
+        self.model_test = model_test
         self.rules_get = rules_get
         self.rules_save = rules_save
         self.mirrors_get = mirrors_get
@@ -180,6 +182,7 @@ class WebUIServer:
             app.router.add_get("/api/settings", self._settings_get)
             app.router.add_post("/api/settings", self._settings_save)
             app.router.add_get("/api/model-options", self._model_options)
+            app.router.add_post("/api/model-routing/test", self._model_test)
             app.router.add_get("/api/rules", self._rules_get)
             app.router.add_post("/api/rules", self._rules_save)
             app.router.add_get("/api/mirrors", self._mirrors_get)
@@ -838,6 +841,11 @@ class WebUIServer:
 
     async def _model_options(self, request: web.Request) -> web.Response:
         return await self._call_capability(request, "model_options")
+
+    async def _model_test(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "model_test", body=True, role_required="admin"
+        )
     async def _rules_get(self, request: web.Request) -> web.Response:
         return await self._call_capability(request, "rules_get")
 

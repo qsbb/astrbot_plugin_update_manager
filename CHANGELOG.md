@@ -1,4 +1,21 @@
 ## [Unreleased]
+## 0.19.14 - 2026-09-22
+
+### 新增
+
+- 模型自检（测试全部模型）：核 WebUI 的「模型路由」页与核 Page 的模型路由区都能一键测试全部职责，只调用 AstrBot 官方 `provider.test()`（对话类发一次极小请求、向量/语音/识图按官方实现），真调前有确认、失败原因脱敏展示、同一个 provider 实例只真调一次（fast/reasoning 继承对话路由时不重复计费）。新增 `POST /api/model-routing/test`（WebUI，admin 起）与 Page 接口 `GET model-options`、`POST model-routing/test`。
+- 核 Page 的模型路由区改为原生控件：服务商下拉 + 模型下拉/自定义输入 + TTS 音色，按职责可单独测试，也可以「测试全部模型」。
+
+### 变更
+
+- 核 WebUI「系列接管」页改为三栏主从（方案 D）：左功能域 / 中能力列表（可搜索、开关仍在行上）/ 右详情面板；点能力不再整页替换，选中行高亮，收起回到域概览。响应式：1280px 以下两栏（域变横向 chips）、860px 以下单栏。
+
+### 修复
+
+- 核 WebUI 系列接管页：选中能力后不再整页只剩详情，三栏与选中的能力行始终保留。
+- 核 Page 模型路由：补齐 fast / reasoning 两个职责。此前 `_conf_schema.json` 的 `kinds` 只声明 5 项，而保存是整体替换，从 Page 保存会静默清掉这两个职责的路由。
+- 核 Page「打开独立 WebUI」：AstrBot Plugin Page 是 sandbox iframe（无 `allow-same-origin`、无 `allow-popups`），把面板导航过去会让 WebUI 的 `/api/*` 变成 `Origin: null` 跨源请求而报 `Failed to fetch`。现在沙箱里只把地址填进复制框并提示在新标签打开，不再把页面拖进坏状态；非沙箱环境仍可直接打开。
+
 ## 0.19.13 - 2026-09-21
 
 ### 修复

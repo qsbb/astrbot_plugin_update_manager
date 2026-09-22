@@ -888,7 +888,33 @@ def test_manager_page_exposes_unified_model_routing_fields():
     assert 'id="config-fields"' in html
     assert 'key === "model_routing" && field.type === "object"' in js
     assert "data-model-kind" in js
-    assert "插件显式配置优先" in js
+    # 模型路由升级为「服务商下拉 + 模型下拉/自定义 + 音色」并带官方自检
+    assert "function modelProviderSelect(" in js
+    assert "function modelModelControl(" in js
+    assert "function renderModelRouteRow(" in js
+    assert 'data-route-test=' in js
+    assert 'id="model-test-all"' in js
+    assert 'apiPost("model-routing/test"' in js
+    assert 'apiGet("model-options")' in js
+    # 中英文词条都要有（同名 key 出现两次：zh-CN 与 en-US）
+    assert js.count("modelRoutingHint") >= 2
+    assert "modelTestConfirm" in js and "modelTestAll" in js
+    # Page 必须渲染全部 7 个职责：schema 的 kinds 只有 5 项，只按它渲染会丢 fast/reasoning
+    assert "const MODEL_ROUTE_KIND_LABELS = [" in js
+    assert "const kinds = modelRouteKinds(field);" in js
+    for kind in ("conversation", "fast", "reasoning", "embedding", "vision", "stt", "tts"):
+        assert f'["{kind}", ' in js
+
+
+def test_manager_page_never_navigates_into_standalone_webui_from_sandbox():
+    """AstrBot Plugin Page 沙箱里不能跳独立 WebUI：必须在沙箱内改为复制引导。"""
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function isSandboxedFrame(" in js
+    assert "function showWebUiSandboxGuide(" in js
+    assert "webuiSandboxHint" in js and "webuiSandboxAddressHint" in js
+    # 跳转只能出现在非沙箱分支里，且必须紧跟在沙箱守卫之后
+    assert js.count("window.location.assign(") == 1
+    assert "if (isSandboxedFrame()) { showWebUiSandboxGuide(url); return true; }" in js
 
 
 def test_standalone_webui_has_working_diagnostics_updates_settings():
@@ -939,10 +965,11 @@ def test_series_control_is_capability_first_not_plugin_cards():
     assert "function domainStatus(" in js
     assert "function capabilityDetail(" in js
     assert "async function loadCapability(" in js
-    # D3.1 主从结构：左域列表 + 右能力网格
+    # 方案 D 三栏：左域列表 + 中能力列表 + 右详情面板
     assert "function masterDetail(" in js
     assert "function domainItem(" in js
-    assert "function capabilityCard(" in js
+    assert "function capabilityRow(" in js
+    assert "function capabilityDomainOverview(" in js
     # D3.1 三行卡：状态徽标 / 能力名 / 动作 / 描述 / 元信息
     assert "function capabilityBadge(" in js
     assert "function capabilityMetaText(" in js
@@ -957,22 +984,24 @@ def test_series_control_is_capability_first_not_plugin_cards():
     assert "data-catalog-domain-open=" in js
     assert "data-capability-open=" in js
     assert "status-legend" in js
-    # 复评修正：域行状态文字 + 能力区头部（异常优先标识）
+    # 复评修正：域行状态文字 + 中栏搜索 + 异常优先标识
     assert 'class="domain-state' in js
-    assert "function capabilityCard(" in js
-    assert 'class="capability-head"' in js
+    assert 'id="capability-search"' in js
     assert "异常优先 ▾" in js
-    # 能力级状态与 D3.1 布局样式
+    # 三栏布局样式（方案 D）
     assert ".status-dot" in css
-    assert ".capability-row" not in css
+    assert ".capability-list" in css
+    assert ".capability-row" in css
+    assert ".capability-pane" in css
+    assert ".capability-card" not in css
+    assert ".capability-grid" not in css
     assert ".control-mode-line" in css
     assert ".capability-provider" in css
     assert ".master-detail" in css
     assert ".domain-item" in css
-    assert ".capability-card" in css
     assert ".cap-badge" in css
-    assert ".cap-card-meta" in css
-    assert "@media (max-width:1120px)" in css
+    assert "@media (max-width:1280px)" in css
+    assert "@media (max-width:860px)" in css
     assert "@media (max-width:620px)" in css
 
 
@@ -993,11 +1022,11 @@ def test_capability_cards_expose_inline_master_switch():
     assert "function refreshCapabilitySwitchData(" in js
     # 卡片开关复用同一套校验 + 覆盖写入接口（带 revision 并发保护）
     assert "/control/validate" in js and "/control/apply" in js
-    # 开关不能嵌在 button 里：卡片拆成「标题按钮 + 标题行右侧开关 + 设置行」
+    # 开关不能嵌在选择按钮里：行 = 「选择按钮 + 行尾开关 + 展开箭头」
     assert '<button class="capability-card"' not in js
-    assert 'class="cap-card-open"' in js
-    assert 'class="cap-card-head"' in js
-    assert "cap-card-open" in css and ".cap-card-head" in css and ".cap-switch" in css
+    assert 'class="capability-row-main"' in js
+    assert 'class="capability-row' in js
+    assert "capability-row-main" in css and ".capability-row" in css and ".cap-switch" in css
     # 方案 A：开关贴在标题行右侧，文字在左、轨道在右
     assert '<span class="cap-switch-text">' in js
     assert '<span class="cap-switch-text">${esc(label)}</span><input type="checkbox" role="switch"' in js
@@ -1178,7 +1207,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.13-1" in html
+    assert "?v=0.19.14-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1213,4 +1242,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.13-1" in webui_html
+    assert "?v=0.19.14-1" in webui_html
