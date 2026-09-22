@@ -19,6 +19,52 @@ class RuleValidationError(ValueError):
     pass
 
 
+async def remove_named_cron_jobs(cron: Any, name: str) -> None:
+    """按任务名清理 cron 任务（同名全删）。
+
+    AstrBot 的 ``CronJobManager.delete_job`` 收的是 **job_id（UUID）**，不是任务名；
+    早先按名字调用等于没删，导致每次插件重载都会多积一条同名任务，而同名任务会在
+    同一时刻**一起触发**。这里先列任务、按 name 匹配后用 job_id 逐个删除；不支持的
+    实现再回退到按名字删除。
+    """
+    if cron is None:
+        return
+    deleted = False
+    lister = getattr(cron, "list_jobs", None)
+    if callable(lister):
+        try:
+            jobs = lister()
+            if hasattr(jobs, "__await__"):
+                jobs = await jobs
+        except Exception:  # noqa: BLE001 - 列表失败就走回退
+            jobs = None
+        for job in jobs or []:
+            if getattr(job, "name", None) != name:
+                continue
+            job_id = getattr(job, "job_id", None) or getattr(job, "id", None)
+            if not job_id:
+                continue
+            try:
+                result = cron.delete_job(job_id)
+                if hasattr(result, "__await__"):
+                    await result
+                deleted = True
+            except (KeyError, ValueError):
+                continue
+    if deleted:
+        return
+    for method_name in ("delete_job", "remove_job"):
+        method = getattr(cron, method_name, None)
+        if callable(method):
+            try:
+                result = method(name)
+                if hasattr(result, "__await__"):
+                    await result
+            except (KeyError, ValueError):
+                pass
+            break
+
+
 class ScheduleService:
     JOB_ID = "astrbot_plugin_update_manager_daily"
 
@@ -112,18 +158,7 @@ class ScheduleService:
         self.ready = True
 
     async def remove_job(self) -> None:
-        if self.cron is None:
-            return
-        for method_name in ("delete_job", "remove_job"):
-            method = getattr(self.cron, method_name, None)
-            if callable(method):
-                try:
-                    result = method(self.JOB_ID)
-                    if hasattr(result, "__await__"):
-                        await result
-                except (KeyError, ValueError):
-                    pass
-                break
+        await remove_named_cron_jobs(self.cron, self.JOB_ID)
 
     async def close(self) -> None:
         await self.remove_job()

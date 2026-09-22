@@ -8,6 +8,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import utc_now
+from .scheduler import remove_named_cron_jobs
 
 #: cron 任务名（与更新规则的 JOB_ID 区分）
 JOB_ID = "astrbot_plugin_update_manager_backup"
@@ -157,18 +158,7 @@ class BackupScheduleService:
         self.ready = True
 
     async def remove_job(self) -> None:
-        if self.cron is None:
-            return
-        for method_name in ("delete_job", "remove_job"):
-            method = getattr(self.cron, method_name, None)
-            if callable(method):
-                try:
-                    result = method(JOB_ID)
-                    if hasattr(result, "__await__"):
-                        await result
-                except (KeyError, ValueError):
-                    pass
-                break
+        await remove_named_cron_jobs(self.cron, JOB_ID)
 
     async def close(self) -> None:
         await self.remove_job()

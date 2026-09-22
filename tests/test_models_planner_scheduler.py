@@ -322,6 +322,49 @@ class Cron:
         self.removed.append(name)
 
 
+def test_remove_named_cron_jobs_deletes_every_match_by_job_id():
+    """AstrBot 的 delete_job 收的是 job_id：同名任务必须逐个按 id 删干净。"""
+    from types import SimpleNamespace
+
+    from astrbot_plugin_update_manager.core.scheduler import remove_named_cron_jobs
+
+    class Cron:
+        def __init__(self):
+            self.deleted = []
+            self.jobs = [
+                SimpleNamespace(job_id="id-1", name="astrbot_plugin_update_manager_backup"),
+                SimpleNamespace(job_id="id-2", name="astrbot_plugin_update_manager_backup"),
+                SimpleNamespace(job_id="id-3", name="astrbot_plugin_update_manager_backup"),
+                SimpleNamespace(job_id="keep", name="someone_else_job"),
+            ]
+
+        def list_jobs(self, job_type=None):
+            return list(self.jobs)
+
+        def delete_job(self, job_id):
+            self.deleted.append(job_id)
+
+    cron = Cron()
+    asyncio.run(remove_named_cron_jobs(cron, "astrbot_plugin_update_manager_backup"))
+    assert cron.deleted == ["id-1", "id-2", "id-3"]
+
+
+def test_remove_named_cron_jobs_falls_back_to_name_delete():
+    """没有 list_jobs 的实现（老版本/测试替身）仍按名字删，保持兼容。"""
+    from astrbot_plugin_update_manager.core.scheduler import remove_named_cron_jobs
+
+    class Cron:
+        def __init__(self):
+            self.deleted = []
+
+        def delete_job(self, value):
+            self.deleted.append(value)
+
+    cron = Cron()
+    asyncio.run(remove_named_cron_jobs(cron, "astrbot_plugin_update_manager_daily"))
+    assert cron.deleted == ["astrbot_plugin_update_manager_daily"]
+
+
 def test_rule_cas_timezone_dst_and_duplicate_rebuild(tmp_path):
     store = AtomicJsonStore(tmp_path)
     cron = Cron()
