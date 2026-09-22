@@ -294,6 +294,27 @@ class BackupRunner:
         state["progress"] = progress
         return {"success": True, **state}
 
+    @staticmethod
+    def _align_ownership(artifact: Path, target_dir: Path) -> bool:
+        """把备份文件属主对齐到目标目录（best-effort）。
+
+        容器以 root 写宿主/NAS 目录时，文件默认是 root:root 0700 —— 目录属主
+        在文件管理器里能看能删却下载不了。目标目录属于真实用户时，把文件改成
+        该用户所有并保持 0600（备份含配置与密钥，不做全局可读）。
+        """
+        try:
+            info = target_dir.stat()
+        except OSError:
+            return False
+        if info.st_uid == 0:
+            return False  # 目录本身是 root 的（如官方默认目录），保持原样
+        try:
+            os.chown(artifact, info.st_uid, info.st_gid)
+            os.chmod(artifact, 0o600)
+        except (OSError, AttributeError):
+            return False
+        return True
+
     def _persist(self, result: dict[str, Any]) -> None:
         self._state["last_result"] = result
         if self.store is None:
@@ -431,6 +452,7 @@ class BackupRunner:
                     size = path.stat().st_size
                 except OSError:
                     size = 0
+                aligned = self._align_ownership(path, Path(check["path"]))
                 result = {
                     "success": True,
                     "trigger": trigger,
@@ -440,6 +462,8 @@ class BackupRunner:
                     "size_bytes": size,
                     "duration_ms": round((time.perf_counter() - started) * 1000),
                     "kb_included": kb_manager is not None,
+                    #: 目标目录属于某个真实用户时会顺带对齐属主/权限（便于在 NAS 上直接下载）
+                    "ownership_aligned": aligned,
                     "finished_at": _now(),
                 }
                 operation.finish(

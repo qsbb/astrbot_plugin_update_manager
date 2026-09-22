@@ -230,6 +230,46 @@ def test_runner_uses_official_exporter_and_reports_progress(monkeypatch, paths, 
     assert status["last_result"]["filename"] == result["filename"]
 
 
+def test_runner_aligns_artifact_ownership_with_target_dir(monkeypatch, paths, tmp_path):
+    """目标目录属于真实用户时，备份文件要对齐到该用户且保持 0600（能在文件管理器下载）。"""
+    import os
+
+    _settings_paths(monkeypatch, paths)
+    target = tmp_path / "nas-target"
+    target.mkdir()
+    runner = BackupRunner(_context(), store=None)
+    result = asyncio.run(runner.run(target_dir=str(target), trigger="manual"))
+
+    assert result["success"] is True
+    if os.getuid() == 0:
+        # 以 root 跑测试时目录属主也是 root，此时不对齐（保持官方行为）
+        assert result["ownership_aligned"] is False
+    else:
+        assert result["ownership_aligned"] is True
+        stat = pathlib.Path(result["zip_path"]).stat()
+        assert stat.st_uid == target.stat().st_uid
+        assert stat.st_gid == target.stat().st_gid
+        assert (stat.st_mode & 0o777) == 0o600
+
+
+def test_runner_survives_chown_failure(monkeypatch, paths, tmp_path):
+    """chown 失败不能影响备份成功（best-effort）。"""
+    import os as _os
+
+    _settings_paths(monkeypatch, paths)
+    target = tmp_path / "nas-target"
+    target.mkdir()
+
+    def boom(*args, **kwargs):
+        raise OSError("operation not permitted")
+
+    monkeypatch.setattr(br.os, "chown", boom)
+    runner = BackupRunner(_context(), store=None)
+    result = asyncio.run(runner.run(target_dir=str(target), trigger="manual"))
+    assert result["success"] is True
+    assert result["ownership_aligned"] is False
+
+
 def test_runner_marks_missing_kb_manager_as_degraded(monkeypatch, paths, tmp_path):
     _settings_paths(monkeypatch, paths)
     runner = BackupRunner(_context(kb=False), store=None)
