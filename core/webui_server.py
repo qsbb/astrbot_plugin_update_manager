@@ -54,6 +54,10 @@ class WebUIServer:
         settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         model_options: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         model_test: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        backup_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        backup_run: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        backup_list: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        backup_delete: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         rules_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         rules_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         mirrors_get: Callable[[], Awaitable[dict[str, Any]]] | None = None,
@@ -97,6 +101,10 @@ class WebUIServer:
         self.settings_save = settings_save
         self.model_options = model_options
         self.model_test = model_test
+        self.backup_status = backup_status
+        self.backup_run = backup_run
+        self.backup_list = backup_list
+        self.backup_delete = backup_delete
         self.rules_get = rules_get
         self.rules_save = rules_save
         self.mirrors_get = mirrors_get
@@ -183,6 +191,10 @@ class WebUIServer:
             app.router.add_post("/api/settings", self._settings_save)
             app.router.add_get("/api/model-options", self._model_options)
             app.router.add_post("/api/model-routing/test", self._model_test)
+            app.router.add_get("/api/backup/status", self._backup_status_route)
+            app.router.add_post("/api/backup/run", self._backup_run_route)
+            app.router.add_get("/api/backup/list", self._backup_list_route)
+            app.router.add_post("/api/backup/delete", self._backup_delete_route)
             app.router.add_get("/api/rules", self._rules_get)
             app.router.add_post("/api/rules", self._rules_save)
             app.router.add_get("/api/mirrors", self._mirrors_get)
@@ -845,6 +857,22 @@ class WebUIServer:
     async def _model_test(self, request: web.Request) -> web.Response:
         return await self._call_capability(
             request, "model_test", body=True, role_required="admin"
+        )
+
+    async def _backup_status_route(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "backup_status")
+
+    async def _backup_run_route(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "backup_run", role_required="admin"
+        )
+
+    async def _backup_list_route(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "backup_list")
+
+    async def _backup_delete_route(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "backup_delete", body=True, role_required="admin"
         )
     async def _rules_get(self, request: web.Request) -> web.Response:
         return await self._call_capability(request, "rules_get")

@@ -18,6 +18,16 @@ from urllib.parse import urlsplit
 from packaging.version import InvalidVersion, Version
 
 from .core.adapters.astrbot import AdapterUnavailableError
+from .core.backup_runner import (
+    delete_backup,
+    list_backups,
+    validate_dir as validate_backup_dir,
+)
+from .core.backup_scheduler import (
+    BackupScheduleError,
+    validate_local_time,
+    validate_timezone,
+)
 from .core.adapters.registry import (
     DEFAULT_CACHE_TTL_SECONDS,
     DEFAULT_RAW_TIMEOUT_SECONDS,
@@ -240,6 +250,10 @@ class PagesAPIMixin:
                 ["POST"],
                 "测试各职责模型连通性（官方 provider 自检）",
             ),
+            ("backup/status", self._pages_backup_status, ["GET"], "读取自动备份状态"),
+            ("backup/run", self._pages_backup_run, ["POST"], "立即执行一次 AstrBot 官方备份"),
+            ("backup/list", self._pages_backup_list, ["GET"], "列出目标目录里的备份文件"),
+            ("backup/delete", self._pages_backup_delete, ["POST"], "删除指定备份文件"),
             ("mirrors", self._pages_mirrors, ["GET"], "查看 GitHub 加速站候选"),
             (
                 "mirrors/benchmark",
@@ -499,6 +513,42 @@ class PagesAPIMixin:
                 {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
             )
         return json_response(await resolver())
+
+    async def _pages_backup_status(self):
+        status = getattr(self, "backup_status_payload", None)
+        if not callable(status):
+            return json_response(
+                {"success": False, "error": "BACKUP_UNAVAILABLE"}, status=503
+            )
+        return json_response(await status())
+
+    async def _pages_backup_run(self):
+        runner = getattr(self, "run_backup", None)
+        if not callable(runner):
+            return json_response(
+                {"success": False, "error": "BACKUP_UNAVAILABLE"}, status=503
+            )
+        # 业务失败也用 200 返回（payload 自带 success/error），
+        # 这样 Page 侧能拿到具体错误码（如 OFFICIAL_BACKUP_UNAVAILABLE），而不是被吞成笼统失败。
+        return json_response(await runner(trigger="manual"))
+
+    async def _pages_backup_list(self):
+        getter = getattr(self, "_backup_dir_config", None)
+        target = getter() if callable(getter) else ""
+        return json_response(list_backups(target))
+
+    async def _pages_backup_delete(self):
+        data = await self._request_json()
+        if not isinstance(data, dict) or not str(data.get("filename") or "").strip():
+            return json_response(
+                {"success": False, "error": "INVALID_JSON_PAYLOAD"}, status=400
+            )
+        guard = getattr(self, "_delete_backup_file", None)
+        if callable(guard):
+            return json_response(guard(str(data.get("filename") or "")))
+        getter = getattr(self, "_backup_dir_config", None)
+        target = getter() if callable(getter) else ""
+        return json_response(delete_backup(target, str(data.get("filename") or "")))
 
     async def _pages_model_test(self):
         probe = getattr(self, "probe_model_routes", None)
@@ -1649,6 +1699,11 @@ class PagesAPIMixin:
                 500,
             )
 
+        if any(str(key).startswith("auto_backup_") for key in changes):
+            refresh = getattr(self, "_refresh_backup_schedule", None)
+            if callable(refresh):
+                await refresh()
+
         schedule_updated = False
         if {"enabled", "auto_update_enabled"} & changes.keys():
             try:
@@ -1946,6 +2001,24 @@ class PagesAPIMixin:
             options = field.get("options")
             if options and value not in options:
                 raise ValueError(key)
+            if key == "auto_backup_local_time":
+                try:
+                    return validate_local_time(value)
+                except BackupScheduleError as exc:
+                    raise ValueError(key) from exc
+            if key == "auto_backup_timezone":
+                try:
+                    return validate_timezone(value)
+                except BackupScheduleError as exc:
+                    raise ValueError(key) from exc
+            if key == "auto_backup_dir":
+                text = str(value or "").strip()
+                if not text:
+                    return ""
+                check = validate_backup_dir(text)
+                if not check.get("ok"):
+                    raise ValueError(key)
+                return str(check.get("path") or "")
             if key == "github_mirror" and value.strip():
                 # 选中的加速站必须是合法 https 前缀，保存即拒绝而不是静默回直连。
                 normalized = normalize_mirror(value)

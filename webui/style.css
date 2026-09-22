@@ -241,6 +241,7 @@ body[data-series-ui] .content .table-wrap {
 .route-test-detail.ok { background:var(--si-success-soft, #eef7f1); color:#15803d; }
 .route-test-detail.failed { background:var(--si-danger-soft, #fff0f2); color:#b42318; }
 #route-test-summary { margin:8px 0 14px; }
+.backup-meta { display:grid; gap:4px; padding:0 20px 6px; }
 @media (max-width:900px) { .route-cards { grid-template-columns:1fr; padding:0 14px 14px; } }
 @media (max-width:620px) { .route-inputs { grid-template-columns:1fr; } }
 .cap-badge { padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; white-space:nowrap; }

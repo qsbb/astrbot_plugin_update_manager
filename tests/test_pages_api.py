@@ -41,6 +41,10 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/model-routing", ("GET",)),
         (f"/{module.PLUGIN_NAME}/model-options", ("GET",)),
         (f"/{module.PLUGIN_NAME}/model-routing/test", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/backup/status", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/backup/run", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/backup/list", ("GET",)),
+        (f"/{module.PLUGIN_NAME}/backup/delete", ("POST",)),
         (f"/{module.PLUGIN_NAME}/mirrors", ("GET",)),
         (f"/{module.PLUGIN_NAME}/mirrors/benchmark", ("POST",)),
         (f"/{module.PLUGIN_NAME}/rule", ("GET",)),
@@ -1107,6 +1111,212 @@ def test_pages_save_config_keeps_all_model_route_kinds(monkeypatch, tmp_path):
     assert persisted["fast"]["provider_id"] == "p-fast"
     assert persisted["reasoning"]["model"] == "m-reasoning"
     assert plugin.resolve_model_route("fast")["source"] == "core"
+
+
+def test_pages_save_backup_config_rebuilds_schedule(monkeypatch, tmp_path):
+    """保存 auto_backup_* 后必须按新配置重建独立 cron 任务（关掉则移除）。"""
+    module = import_main(monkeypatch)
+
+    class FakeCron:
+        def __init__(self) -> None:
+            self.jobs: list[dict] = []
+            self.deleted: list[str] = []
+
+        def add_basic_job(self, *, name, cron_expression, handler, timezone):
+            self.jobs.append(
+                {"name": name, "cron": cron_expression, "timezone": timezone, "handler": handler}
+            )
+            return None
+
+        def delete_job(self, name):
+            self.deleted.append(name)
+
+    cron = FakeCron()
+    ctx = context(tmp_path)
+    ctx.cron_manager = cron
+    plugin = module.UpdateManagerPlugin(ctx, {})
+
+    async def enable():
+        return {
+            "auto_backup_enabled": True,
+            "auto_backup_local_time": "03:30",
+            "auto_backup_timezone": "Asia/Shanghai",
+            "auto_backup_dir": "",
+        }
+
+    monkeypatch.setattr(plugin, "_request_json", enable)
+    payload = unwrap(asyncio.run(plugin._pages_save_config()))
+    assert payload["success"] is True
+    assert cron.jobs, "启用后应注册备份任务"
+    assert cron.jobs[-1]["name"] == "astrbot_plugin_update_manager_backup"
+    assert cron.jobs[-1]["cron"] == "30 3 * * *"
+    assert cron.jobs[-1]["timezone"] == "Asia/Shanghai"
+    assert plugin.backup_scheduler.last_error == ""
+
+    async def disable():
+        return {"auto_backup_enabled": False}
+
+    monkeypatch.setattr(plugin, "_request_json", disable)
+    payload = unwrap(asyncio.run(plugin._pages_save_config()))
+    assert payload["success"] is True
+    assert cron.deleted.count("astrbot_plugin_update_manager_backup") >= 1
+    assert len(cron.jobs) == 1, "关掉后不应再注册新任务"
+
+
+def test_pages_save_backup_config_rejects_bad_values(monkeypatch, tmp_path):
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    for bad in (
+        {"auto_backup_local_time": "25:00"},
+        {"auto_backup_timezone": "Mars/Olympus"},
+        {"auto_backup_dir": "relative/backups"},
+    ):
+        async def payload(bad=bad):
+            return bad
+
+        monkeypatch.setattr(plugin, "_request_json", payload)
+        body = unwrap(asyncio.run(plugin._pages_save_config()))
+        assert body["success"] is False
+        assert body["error"] == "VALIDATION_FAILED"
+        assert next(iter(bad)) in body["fields"]
+
+
+def test_pages_backup_endpoints_fail_closed_without_official_chain(monkeypatch, tmp_path):
+    """本机没有 AstrBot 官方备份链路时，四个端点必须 fail-closed，绝不假装成功。"""
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    status = unwrap(asyncio.run(plugin._pages_backup_status()))
+    assert status["success"] is True
+    assert status["running"] is False
+    assert status["target_dir"] == ""
+
+    listing = unwrap(asyncio.run(plugin._pages_backup_list()))
+    assert listing["success"] is False
+    assert listing["error"] == "OFFICIAL_BACKUP_UNAVAILABLE"
+    assert listing["files"] == []
+
+    async def payload():
+        return {}
+
+    monkeypatch.setattr(plugin, "_request_json", payload)
+    run_response = asyncio.run(plugin._pages_backup_run())
+    body, status_code = run_response if isinstance(run_response, tuple) else (run_response, 200)
+    assert status_code == 200  # 业务失败也用 200 返回，错误码在 payload 里
+    assert body["success"] is False
+    assert body["error"] == "OFFICIAL_BACKUP_UNAVAILABLE"
+
+
+def test_pages_backup_list_and_delete_use_official_directory(monkeypatch, tmp_path):
+    import astrbot_plugin_update_manager.core.backup_runner as backup_runner
+
+    module = import_main(monkeypatch)
+    data = tmp_path / "astrbot-data"
+    target = data / "backups"
+    target.mkdir(parents=True)
+    (target / "astrbot_backup_20260920_030000.zip").write_bytes(b"x" * 5)
+    paths = backup_runner.BackupPaths(
+        data_dir=str(data), default_dir=str(target), source_dirs=(str(data / "plugins"),)
+    )
+    monkeypatch.setattr(backup_runner, "official_paths", lambda: paths)
+
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    listing = unwrap(asyncio.run(plugin._pages_backup_list()))
+    assert listing["success"] is True
+    assert [item["name"] for item in listing["files"]] == ["astrbot_backup_20260920_030000.zip"]
+    assert listing["total_bytes"] == 5
+
+    async def bad_payload():
+        return {"filename": "../escape.zip"}
+
+    monkeypatch.setattr(plugin, "_request_json", bad_payload)
+    response = asyncio.run(plugin._pages_backup_delete())
+    body, status_code = response if isinstance(response, tuple) else (response, 200)
+    assert status_code == 200
+    assert body["success"] is False
+    assert body["error"] == "BACKUP_DELETE_INVALID_NAME"
+
+    async def good_payload():
+        return {"filename": "astrbot_backup_20260920_030000.zip"}
+
+    monkeypatch.setattr(plugin, "_request_json", good_payload)
+    response = asyncio.run(plugin._pages_backup_delete())
+    body, status_code = response if isinstance(response, tuple) else (response, 200)
+    assert status_code == 200
+    assert body["success"] is True
+    assert body["name"] == "astrbot_backup_20260920_030000.zip"
+    assert not (target / "astrbot_backup_20260920_030000.zip").exists()
+
+
+def test_backup_delete_is_blocked_while_backup_runs(monkeypatch, tmp_path):
+    """备份进行中禁止删除：否则可能删掉正在写入的那个文件，白跑一轮。"""
+    import astrbot_plugin_update_manager.core.backup_runner as backup_runner
+
+    module = import_main(monkeypatch)
+    data = tmp_path / "data"
+    target = data / "backups"
+    target.mkdir(parents=True)
+    victim = target / "astrbot_backup_20260920_030000.zip"
+    victim.write_bytes(b"x" * 5)
+    paths = backup_runner.BackupPaths(
+        data_dir=str(data), default_dir=str(target), source_dirs=(str(data / "plugins"),)
+    )
+    monkeypatch.setattr(backup_runner, "official_paths", lambda: paths)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+
+    plugin.backup_runner._lock._locked = True  # 模拟"备份正在跑"
+    try:
+        blocked = plugin._delete_backup_file(victim.name)
+        assert blocked["success"] is False
+        assert blocked["error"] == "BACKUP_ALREADY_RUNNING"
+        assert victim.exists()
+
+        async def payload():
+            return {"filename": victim.name}
+
+        monkeypatch.setattr(plugin, "_request_json", payload)
+        body = unwrap(asyncio.run(plugin._pages_backup_delete()))
+        assert body["error"] == "BACKUP_ALREADY_RUNNING"
+        assert victim.exists()
+    finally:
+        plugin.backup_runner._lock._locked = False
+
+    allowed = plugin._delete_backup_file(victim.name)
+    assert allowed["success"] is True
+    assert not victim.exists()
+
+
+def test_backup_config_fields_are_validated_on_save(monkeypatch, tmp_path):
+    import astrbot_plugin_update_manager.core.backup_runner as backup_runner
+
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {})
+    string_field = {"type": "string"}
+
+    assert plugin._coerce_page_value("auto_backup_local_time", "3:5", string_field) == "03:05"
+    assert plugin._coerce_page_value("auto_backup_timezone", "Asia/Shanghai", string_field) == "Asia/Shanghai"
+    assert plugin._coerce_page_value("auto_backup_dir", "", string_field) == ""
+
+    for key, value in (
+        ("auto_backup_local_time", "25:00"),
+        ("auto_backup_timezone", "Mars/Olympus"),
+        ("auto_backup_dir", "relative/path"),
+    ):
+        with pytest.raises(ValueError):
+            plugin._coerce_page_value(key, value, string_field)
+
+    # 目录落在官方源目录内部时也要拒绝
+    data = tmp_path / "data"
+    plugins = data / "plugins"
+    plugins.mkdir(parents=True)
+    paths = backup_runner.BackupPaths(
+        data_dir=str(data), default_dir=str(data / "backups"), source_dirs=(str(plugins),)
+    )
+    monkeypatch.setattr(backup_runner, "official_paths", lambda: paths)
+    with pytest.raises(ValueError):
+        plugin._coerce_page_value("auto_backup_dir", str(plugins / "backups"), string_field)
 
 
 def test_pages_save_config_validates_and_preserves_empty_token(monkeypatch, tmp_path):

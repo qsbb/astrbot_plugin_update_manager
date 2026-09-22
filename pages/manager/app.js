@@ -137,6 +137,81 @@ Object.assign(messages["en-US"], {
   diagnosticExportDone: "Diagnostic events exported", diagnosticExportEmpty: "No events to export", details: "Details"
 });
 
+Object.assign(messages["zh-CN"], {
+  settingsBackupTab: "备份",
+  backupTitle: "自动备份",
+  backupHint: "走 AstrBot 官方导出器生成完整备份（含主库、知识库、插件与数据目录、配置）；只做备份，不含恢复。",
+  backupEnabled: "启用自动备份",
+  backupTime: "备份时间",
+  backupTimezone: "时区",
+  backupDir: "保存目录",
+  backupDirHint: "留空 = AstrBot 官方默认目录；必须是绝对路径、可创建可写，且不能落在插件/数据目录内部。",
+  backupNextRun: "下次备份",
+  backupEffectiveDir: "实际目录",
+  backupDisabled: "未启用",
+  backupDirUnknown: "目录不可用（请检查配置）",
+  backupScheduleError: "计划未生效",
+  backupRun: "立即备份",
+  backupRunning: "备份中…",
+  backupRunConfirmTitle: "立即备份",
+  backupRunConfirm: "将调用 AstrBot 官方导出器生成完整备份；备份期间 AstrBot 会短暂变慢，可能产生约数 GB 的新文件。继续？",
+  backupDone: "备份完成：{name}（{size}）",
+  backupAlreadyRunning: "已有备份在运行，本次跳过",
+  backupIncomplete: "可能不完整（备份被中断，别当恢复点用）",
+  backupWriting: "可能正在写入（备份进行中）",
+  backupDeleteBusy: "备份进行中，暂不能删除备份文件",
+  backupFailed: "备份失败：{error}",
+  backupListTitle: "备份文件",
+  backupTotal: "合计占用",
+  backupEmpty: "目标目录里还没有核生成的备份。",
+  backupDelete: "删除",
+  backupDeleteConfirmTitle: "删除备份",
+  backupDeleteConfirm: "确定删除备份「{name}」？该文件会被永久删除，且不可恢复。",
+  backupDeleted: "备份已删除",
+  backupLastSuccess: "上次备份成功：{name}（{size}）",
+  backupLastFailed: "上次备份失败：{error}",
+  backupInvalidSetting: "备份设置校验失败：请检查时间/时区/目录（目录必须绝对路径、可写，且不能落在插件或数据目录内部）",
+  backupSlowHint: "备份期间 AstrBot 会短暂变慢（官方导出器没有异步打包），默认时间放在凌晨。",
+  backupNoCleanupHint: "核不会自动清理备份文件；请留意占用，在下方手动删除。"
+});
+Object.assign(messages["en-US"], {
+  settingsBackupTab: "Backup",
+  backupTitle: "Automatic backup",
+  backupHint: "Generates a full backup via AstrBot's official exporter (main DB, knowledge base, plugins & data dirs, config); backup only, no restore.",
+  backupEnabled: "Enable automatic backup",
+  backupTime: "Backup time",
+  backupTimezone: "Timezone",
+  backupDir: "Target directory",
+  backupDirHint: "Blank = AstrBot default directory; must be an absolute writable path outside plugin/data directories.",
+  backupNextRun: "Next backup",
+  backupEffectiveDir: "Effective directory",
+  backupDisabled: "Disabled",
+  backupDirUnknown: "Directory unavailable (check settings)",
+  backupScheduleError: "Schedule inactive",
+  backupRun: "Back up now",
+  backupRunning: "Backing up…",
+  backupRunConfirmTitle: "Back up now",
+  backupRunConfirm: "This calls AstrBot's official exporter for a full backup. AstrBot may slow down briefly and several GB may be written. Continue?",
+  backupDone: "Backup finished: {name} ({size})",
+  backupAlreadyRunning: "A backup is already running; skipped this time",
+  backupIncomplete: "May be incomplete (interrupted backup; do not use as a restore point)",
+  backupWriting: "May still be writing (backup in progress)",
+  backupDeleteBusy: "Cannot delete while a backup is running",
+  backupFailed: "Backup failed: {error}",
+  backupListTitle: "Backup files",
+  backupTotal: "Total size",
+  backupEmpty: "No backup created by the core yet.",
+  backupDelete: "Delete",
+  backupDeleteConfirmTitle: "Delete backup",
+  backupDeleteConfirm: "Delete backup “{name}”? The file is removed permanently.",
+  backupDeleted: "Backup deleted",
+  backupLastSuccess: "Last backup succeeded: {name} ({size})",
+  backupLastFailed: "Last backup failed: {error}",
+  backupInvalidSetting: "Backup settings rejected: check time/timezone/directory (absolute, writable, outside plugin & data directories)",
+  backupSlowHint: "AstrBot slows down briefly during backup (the official exporter has no async packing); the default time is early morning.",
+  backupNoCleanupHint: "The core never auto-deletes backups; watch disk usage and delete manually below."
+});
+
 const notify = (message, error = false) => {
   if (window.SeriesUI?.toast) {
     window.SeriesUI.toast(message, error ? "error" : "info");
@@ -205,6 +280,7 @@ const state = {
 const t = (key) => messages[state.locale][key] || key;
 let configFormBaseline = null;
 let ruleFormBaseline = null;
+let backupFormBaseline = null;
 const showUnsavedConfirm = window.SeriesUI.confirm;
 
 function captureFormState(form) {
@@ -226,7 +302,8 @@ function formHasUnsavedChanges(form, baseline) {
 
 function hasUnsavedChanges() {
   return formHasUnsavedChanges(document.getElementById("config-form"), configFormBaseline) ||
-    formHasUnsavedChanges(document.getElementById("rule-form"), ruleFormBaseline);
+    formHasUnsavedChanges(document.getElementById("rule-form"), ruleFormBaseline) ||
+    formHasUnsavedChanges(document.getElementById("backup-form"), backupFormBaseline);
 }
 
 async function confirmDiscardChanges() {
@@ -256,6 +333,7 @@ function restoreFormState(form, baseline) {
 function discardUnsavedChanges() {
   restoreFormState(document.getElementById("config-form"), configFormBaseline);
   restoreFormState(document.getElementById("rule-form"), ruleFormBaseline);
+  restoreFormState(document.getElementById("backup-form"), backupFormBaseline);
   const policy = document.getElementById("rule-policy");
   const note = document.getElementById("check-only-note");
   if (policy && note) note.hidden = policy.value !== "check_only";
@@ -839,6 +917,7 @@ async function loadSettingsPanel() {
     loadOnce("config", loadConfig),
     loadOnce("rule", loadRule),
     loadOnce("mirrors", loadMirrors),
+    loadOnce("backup", loadBackup),
   ]);
   state.settingsLoaded = true;
 }
@@ -888,7 +967,7 @@ async function loadConfig() {
   ]);
   state.config = data;
   state.modelOptions = options;
-  document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).filter(([key]) => !BACKUP_SETTING_KEYS.includes(key)).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
   bindModelRoutingControls();
   configFormBaseline = captureFormState(document.getElementById("config-form"));
   await loadWebUiAddress();
@@ -1090,6 +1169,192 @@ async function updateWebUiAdmin(adminId, action) {
     notify(action === "enable" ? t("adminEnable") : t("adminDisabled"));
   }
   await loadWebUiAdmins();
+}
+
+// ---------------------------------------------------------------- 自动备份
+
+const BACKUP_SETTING_KEYS = ["auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"];
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let index = 0;
+  let current = size;
+  while (current >= 1024 && index < units.length - 1) { current /= 1024; index += 1; }
+  return `${current >= 10 || index === 0 ? Math.round(current) : current.toFixed(1)} ${units[index]}`;
+}
+
+function renderBackupList(payload) {
+  const node = document.getElementById("backup-list");
+  const total = document.getElementById("backup-total");
+  if (!node) return;
+  if (total) total.textContent = formatBytes(payload?.total_bytes || 0);
+  if (!payload?.success) {
+    node.innerHTML = `<p class="field-hint">${escapeHtml(payload?.error || t("errorUnknown"))}</p>`;
+    return;
+  }
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  if (!files.length) {
+    node.innerHTML = `<p class="field-hint">${escapeHtml(t("backupEmpty"))}</p>`;
+    return;
+  }
+  const backupRunning = Boolean(state.backup?.status?.running);
+  node.innerHTML = files.map((item) => {
+    const note = item.valid === false
+      ? ` · ${escapeHtml(backupRunning ? t("backupWriting") : t("backupIncomplete"))}`
+      : "";
+    return `<div class="backup-row"><div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.modified_at || "")}${note}</small></div><span class="backup-size">${formatBytes(item.size)}</span><button type="button" class="danger" data-backup-delete="${escapeHtml(item.name)}">${escapeHtml(t("backupDelete"))}</button></div>`;
+  }).join("");
+  node.querySelectorAll("[data-backup-delete]").forEach((button) => button.addEventListener("click", () => deleteBackupFile(button.dataset.backupDelete)));
+}
+
+let backupPoller = null;
+
+function renderBackupProgress(status) {
+  const node = document.getElementById("backup-progress");
+  if (!node) return;
+  if (status?.running) {
+    const parts = [t("backupRunning")];
+    if (status.stage) parts.push(String(status.stage));
+    if (typeof status.progress === "number" && status.progress > 0) parts.push(`${status.progress}%`);
+    if (status.message) parts.push(String(status.message));
+    node.hidden = false;
+    node.textContent = parts.join(" · ");
+  } else {
+    node.hidden = true;
+    node.textContent = "";
+  }
+}
+
+function stopBackupPolling() {
+  if (backupPoller) { window.clearInterval(backupPoller); backupPoller = null; }
+}
+
+function startBackupPolling() {
+  if (backupPoller) return;
+  backupPoller = window.setInterval(async () => {
+    try {
+      const status = await apiGet("backup/status");
+      state.backup = { ...(state.backup || {}), status };
+      renderBackupProgress(status);
+      if (!status?.running) stopBackupPolling();
+    } catch (error) {
+      // 备份期间事件循环被官方导出器占住时，轮询可能超时；等下一轮即可
+    }
+  }, 3000);
+}
+
+async function loadBackup() {
+  const [status, listing] = await Promise.all([
+    apiGet("backup/status").catch((error) => ({ success: false, error: error.message })),
+    apiGet("backup/list").catch((error) => ({ success: false, error: error.message })),
+  ]);
+  state.backup = { status, listing };
+  const setValue = (id, value, prop = "value") => { const node = document.getElementById(id); if (node && value !== undefined && value !== null) node[prop] = value; };
+  setValue("backup-enabled", Boolean(status.enabled), "checked");
+  setValue("backup-time", status.local_time || "03:30");
+  setValue("backup-timezone", status.timezone || "Asia/Shanghai");
+  setValue("backup-dir", status.configured_dir || "");
+  const next = document.getElementById("backup-next-run");
+  if (next) next.textContent = status.next_run ? status.next_run.replace("T", " ").slice(0, 16) : t("backupDisabled");
+  const effective = document.getElementById("backup-effective-dir");
+  if (effective) effective.textContent = status.target_dir || t("backupDirUnknown");
+  const scheduleError = document.getElementById("backup-schedule-error");
+  if (scheduleError) {
+    scheduleError.hidden = !status.schedule_error;
+    scheduleError.textContent = status.schedule_error ? `${t("backupScheduleError")}: ${status.schedule_error}` : "";
+  }
+  const last = document.getElementById("backup-last-result");
+  if (last) {
+    const result = status.last_result;
+    if (!result) { last.hidden = true; last.textContent = ""; }
+    else {
+      last.hidden = false;
+      last.textContent = result.success
+        ? t("backupLastSuccess").replace("{name}", result.filename || "").replace("{size}", formatBytes(result.size_bytes || 0))
+        : t("backupLastFailed").replace("{error}", result.error || "");
+    }
+  }
+  renderBackupProgress(status);
+  if (status?.running) startBackupPolling();
+  renderBackupList(listing);
+  backupFormBaseline = captureFormState(document.getElementById("backup-form"));
+  return state.backup;
+}
+
+async function saveBackupSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setFormBusy(form, true);
+  const payload = {
+    auto_backup_enabled: Boolean(document.getElementById("backup-enabled")?.checked),
+    auto_backup_local_time: String(document.getElementById("backup-time")?.value || "").trim(),
+    auto_backup_timezone: String(document.getElementById("backup-timezone")?.value || "").trim(),
+    auto_backup_dir: String(document.getElementById("backup-dir")?.value || "").trim(),
+  };
+  try {
+    await apiPost("config", payload);
+    notify(t("saved"));
+    await loadBackup();
+  } catch (error) {
+    const message = String(error?.message || "");
+    const reason = message === "VALIDATION_FAILED" ? t("backupInvalidSetting") : message;
+    notify(`${t("saveFailed")}: ${reason}`, true);
+  } finally {
+    setFormBusy(form, false);
+  }
+}
+
+async function runBackupNow() {
+  const button = document.getElementById("backup-run");
+  const confirmed = await window.SeriesUI.confirm({
+    title: t("backupRunConfirmTitle"),
+    message: t("backupRunConfirm"),
+    confirmText: t("backupRun"),
+    cancelText: t("cancel"),
+    danger: false
+  });
+  if (!confirmed) return;
+  if (button) { button.disabled = true; button.textContent = t("backupRunning"); }
+  renderBackupProgress({ running: true, message: t("backupRunning") });
+  startBackupPolling();
+  try {
+    const result = await apiPost("backup/run", {});
+    if (result?.success) {
+      notify(t("backupDone").replace("{name}", result.filename || "").replace("{size}", formatBytes(result.size_bytes || 0)));
+    } else if (result?.skipped) {
+      notify(t("backupAlreadyRunning"));
+    } else {
+      notify(t("backupFailed").replace("{error}", result?.error || t("errorUnknown")), true);
+    }
+  } catch (error) {
+    notify(t("backupFailed").replace("{error}", error.message), true);
+  } finally {
+    stopBackupPolling();
+    if (button) { button.disabled = false; button.textContent = t("backupRun"); }
+    await loadBackup();
+  }
+}
+
+async function deleteBackupFile(name) {
+  const confirmed = await window.SeriesUI.confirm({
+    title: t("backupDeleteConfirmTitle"),
+    message: t("backupDeleteConfirm").replace("{name}", name),
+    confirmText: t("backupDelete"),
+    cancelText: t("cancel"),
+    danger: true
+  });
+  if (!confirmed) return;
+  try {
+    const result = await apiPost("backup/delete", { filename: name });
+    if (result?.success) notify(t("backupDeleted"));
+    else if (result?.error === "BACKUP_ALREADY_RUNNING") notify(t("backupDeleteBusy"), true);
+    else notify(t("backupFailed").replace("{error}", result?.error || t("errorUnknown")), true);
+  } catch (error) {
+    notify(t("backupFailed").replace("{error}", error.message), true);
+  }
+  await loadBackup();
 }
 
 async function loadRule() {
@@ -2244,6 +2509,9 @@ function bindEvents() {
     if (!await openExternalUrl(url)) notify(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
+  document.getElementById("backup-form")?.addEventListener("submit", saveBackupSettings);
+  document.getElementById("backup-run")?.addEventListener("click", runBackupNow);
+  document.getElementById("backup-refresh")?.addEventListener("click", () => { loadBackup().catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true)); });
   document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
   document.getElementById("open-webui")?.addEventListener("click", openStandaloneWebUi);
   document.getElementById("copy-webui")?.addEventListener("click", copyStandaloneWebUiLink);

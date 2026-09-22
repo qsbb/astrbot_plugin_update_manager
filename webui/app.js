@@ -36,6 +36,8 @@ let state = {
   modelOptions: null,
   modelTest: null,
   modelTestRunning: false,
+  backup: null,
+  backupBusy: false,
   logModules: [],
   logThreshold: "",
   logRange: "all",
@@ -569,7 +571,7 @@ function settingsView() {
     return `<div class="route-card"><div class="route-card-head"><b>${label}</b><span class="route-card-tools">${modelTestChip(kind)}<button class="link route-test-btn" data-route-test="${esc(kind)}" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>测试</button>${statusChip}</span></div><small>${esc(kindHints[kind] || "")}</small><div class="route-inputs">${providerSelect(kind, item.provider_id || "", canWrite)}${modelSelect(kind, item.provider_id || "", item.model || "", canWrite)}${voice}</div><div class="route-effective">当前生效：<b${effectiveClass}>${effective}</b>${resolved.source ? `（来源：${esc(resolved.source)}）` : ""}</div>${modelTestDetail(kind)}</div>`;
   }).join("");
   const resolvedRows = Object.entries(state.routes?.routes || {}).map(([kind, item]) => { const label = (labels.find(entry => entry[0] === kind) || [kind, kind])[1]; return `<tr><td>${esc(label)}</td><td><code>${esc(item.provider_id || "未配置")}</code></td><td>${esc(item.model || "自动")}</td><td>${esc(item.source || "unavailable")}</td><td><span class="status ${item.available ? "" : "off"}">${item.available ? "已解析" : "未解析"}</span></td></tr>`; }).join("");
-  const handled = new Set(["model_routing", "auto_update_enabled", "log_level", "webui_host", "webui_port", "webui_public_url"]);
+  const handled = new Set(["model_routing", "auto_update_enabled", "log_level", "webui_host", "webui_port", "webui_public_url", "auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"]);
   const genericRows = Object.entries(state.settingsData?.schema || {}).filter(([key]) => !handled.has(key) && key !== "model_routing").map(([key, def]) => {
     const value = s[key];
     const disabled = !canWrite || def.read_only;
@@ -584,8 +586,128 @@ function settingsView() {
     const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>${state.modelTestRunning ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="backup">备份</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>${state.modelTestRunning ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="backup">${backupPanel()}</section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
 }
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let index = 0; let current = size;
+  while (current >= 1024 && index < units.length - 1) { current /= 1024; index += 1; }
+  return `${current >= 10 || index === 0 ? Math.round(current) : current.toFixed(1)} ${units[index]}`;
+}
+
+function backupPanel() {
+  const settings = state.settingsData?.settings || {};
+  const canWrite = state.session?.role === "owner" || state.session?.role === "admin";
+  const status = state.backup?.status || {};
+  const listing = state.backup?.listing || {};
+  const busy = Boolean(state.backupBusy);
+  const files = Array.isArray(listing.files) ? listing.files : [];
+  const rows = files.length
+    ? files.map(item => `<tr><td><code>${esc(item.name)}</code>${item.valid === false ? ` <span class="pill managed">${status.running ? "可能正在写入（备份进行中）" : "可能不完整（中断）"}</span>` : ""}</td><td>${esc(item.modified_at || "")}</td><td>${formatBytes(item.size)}</td><td><button class="link" data-backup-delete="${esc(item.name)}" ${canWrite && !busy ? "" : "disabled"}>删除</button></td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty-cell">目标目录里还没有核生成的备份。</td></tr>`;
+  const last = status.last_result;
+  const lastText = !last
+    ? "尚无备份记录"
+    : last.success
+      ? `上次备份成功：${esc(last.filename || "")}（${formatBytes(last.size_bytes || 0)}）`
+      : `上次备份失败：${esc(last.error || "")}`;
+  const scheduleError = status.schedule_error
+    ? `<p class="form-hint" style="color:var(--orange)">计划未生效：${esc(status.schedule_error)}</p>`
+    : "";
+  const nextRun = status.next_run ? esc(String(status.next_run).replace("T", " ").slice(0, 16)) : "—";
+  return `<div class="workspace-head"><div class="section-title"><h2>自动备份</h2><span>走 AstrBot 官方导出器生成完整备份；只做备份，不含恢复</span></div><div class="actions"><button class="btn" id="backup-refresh">刷新</button><button class="btn primary" id="backup-run" ${canWrite && !busy ? "" : "disabled"}>${busy ? "备份中…" : "立即备份"}</button></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_backup_enabled"><strong>启用自动备份</strong><small>开关 · 独立于每日更新规则</small></label><div class="form-input"><label class="switch"><input type="checkbox" data-setting-key="auto_backup_enabled" data-setting-type="bool" ${settings.auto_backup_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动备份</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：auto_backup_local_time"><strong>备份时间</strong><small>文本 · HH:MM（本地时间）</small></label><div class="form-input"><input type="text" data-setting-key="auto_backup_local_time" data-setting-type="string" value="${esc(settings.auto_backup_local_time || "03:30")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：auto_backup_timezone"><strong>时区</strong><small>文本 · 例如 Asia/Shanghai</small></label><div class="form-input"><input type="text" data-setting-key="auto_backup_timezone" data-setting-type="string" value="${esc(settings.auto_backup_timezone || "Asia/Shanghai")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：auto_backup_dir"><strong>保存目录</strong><small>文本 · 留空 = AstrBot 官方默认目录；须绝对路径、可写、不在插件与数据目录内部</small></label><div class="form-input"><input type="text" data-setting-key="auto_backup_dir" data-setting-type="string" value="${esc(settings.auto_backup_dir || "")}" placeholder="${esc(status.target_dir || "data/backups")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div><div class="backup-meta"><p class="form-hint" id="backup-progress" ${status.running ? "" : "hidden"}>${esc(backupProgressText(status))}</p><p class="form-hint">实际目录：<b>${esc(status.target_dir || "—")}</b> · 下次备份：<b>${nextRun}</b></p>${scheduleError}<p class="form-hint">${lastText}</p><p class="form-hint">备份期间 AstrBot 会短暂变慢（官方导出器没有异步打包）；核不会自动清理备份文件，请自行留意占用。改完点右上角「保存设置」。</p></div><div class="table-wrap"><table class="table"><thead><tr><th>文件</th><th>时间</th><th>大小</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div><div class="footer"><span>合计占用：<b>${formatBytes(listing.total_bytes || 0)}</b></span><span>删除不可恢复</span></div>`;
+}
+
+let backupPoller = null;
+
+function backupProgressText(status) {
+  if (!status?.running) return "";
+  const parts = ["备份进行中"];
+  if (status.stage) parts.push(String(status.stage));
+  if (typeof status.progress === "number" && status.progress > 0) parts.push(`${status.progress}%`);
+  if (status.message) parts.push(String(status.message));
+  return parts.join(" · ");
+}
+
+function renderBackupProgress(status) {
+  const node = document.getElementById("backup-progress");
+  if (!node) return;
+  const text = backupProgressText(status);
+  node.hidden = !text;
+  node.textContent = text;
+}
+
+function stopBackupPolling() {
+  if (backupPoller) { window.clearInterval(backupPoller); backupPoller = null; }
+}
+
+function startBackupPolling() {
+  if (backupPoller) return;
+  backupPoller = window.setInterval(async () => {
+    try {
+      const status = await get("backup/status");
+      state.backup = { ...(state.backup || {}), status };
+      // 只更新进度行，避免整页重绘打断用户正在输入的目录
+      renderBackupProgress(status);
+      if (!status?.running) stopBackupPolling();
+    } catch (error) {
+      // 官方导出器占住事件循环时轮询可能失败，等下一轮
+    }
+  }, 3000);
+}
+
+async function refreshBackup() {
+  try {
+    const [status, listing] = await Promise.all([get("backup/status"), get("backup/list")]);
+    state.backup = { status, listing };
+    renderBackupProgress(status);
+    if (status?.running) startBackupPolling();
+  } catch (error) {
+    state.backup = { status: { success: false, error: error.message }, listing: { success: false, files: [], total_bytes: 0 } };
+  }
+  if (state.view === "settings") dashboard();
+}
+
+async function runBackupNow() {
+  if (state.backupBusy) return;
+  if (!(await confirmDialog("将调用 AstrBot 官方导出器生成完整备份；备份期间 AstrBot 会短暂变慢，可能写入数 GB 文件。继续？", { title: "立即备份", confirmText: "开始备份", danger: false }))) return;
+  state.backupBusy = true;
+  dashboard();
+  renderBackupProgress({ running: true, message: "备份中…" });
+  startBackupPolling();
+  try {
+    const result = await post("backup/run", {});
+    if (result?.success) notify(`备份完成：${result.filename || ""}（${formatBytes(result.size_bytes || 0)}）`);
+    else if (result?.skipped) notify("已有备份在运行，本次跳过");
+    else notify(`备份失败：${result?.error || "未知错误"}`, true);
+  } catch (error) {
+    notify(`备份失败：${error.message}`, true);
+  } finally {
+    stopBackupPolling();
+    state.backupBusy = false;
+    await refreshBackup();
+  }
+}
+
+async function deleteBackupFile(name) {
+  if (state.backupBusy) return;
+  if (!(await confirmDialog(`确定删除备份「${name}」？该文件会被永久删除，且不可恢复。`, { title: "删除备份", confirmText: "删除", danger: true }))) return;
+  state.backupBusy = true;
+  try {
+    const result = await post("backup/delete", { filename: name });
+    if (result?.success) notify("备份已删除");
+    else if (result?.error === "BACKUP_ALREADY_RUNNING") notify("备份进行中，暂不能删除备份文件", true);
+    else notify(`删除失败：${result?.error || "未知错误"}`, true);
+  } catch (error) {
+    notify(`删除失败：${error.message}`, true);
+  } finally {
+    state.backupBusy = false;
+    await refreshBackup();
+  }
+}
+
 function controlCatalog() {
   const catalog = state.control?.capabilities;
   if (!catalog || !Array.isArray(catalog.domains) || !Array.isArray(catalog.capabilities)) return { domains: [], capabilities: [] };
@@ -1037,6 +1159,9 @@ function bindDashboard() {
   document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings());
   document.getElementById("route-reset-all")?.addEventListener("click", resetAllRoutes);
   document.getElementById("route-test-all")?.addEventListener("click", () => runModelTest());
+  document.getElementById("backup-run")?.addEventListener("click", runBackupNow);
+  document.getElementById("backup-refresh")?.addEventListener("click", refreshBackup);
+  document.querySelectorAll("[data-backup-delete]").forEach(node => node.addEventListener("click", () => deleteBackupFile(node.dataset.backupDelete)));
   document.querySelectorAll("[data-route-test]").forEach(node => node.addEventListener("click", () => runModelTest([node.dataset.routeTest])));
   document.getElementById("route-export")?.addEventListener("click", exportRoutes); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl({ force: true })); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
   document.getElementById("rules-reload")?.addEventListener("click", () => loadRules()); document.getElementById("save-rule")?.addEventListener("click", () => saveRule()); document.getElementById("mirrors-reload")?.addEventListener("click", () => loadMirrors()); document.getElementById("save-mirror")?.addEventListener("click", () => saveMirror()); document.getElementById("benchmark-mirrors")?.addEventListener("click", () => benchmarkMirrors()); document.getElementById("check-recommendations")?.addEventListener("click", () => checkRecommendations()); document.getElementById("apply-recommendations")?.addEventListener("click", () => applyAllRecommendations()); document.getElementById("admins-reload")?.addEventListener("click", () => loadAdmins()); document.getElementById("admin-create")?.addEventListener("click", () => createAdmin()); document.querySelectorAll("[data-admin-update]").forEach(node => node.addEventListener("click", () => updateAdmin(node.dataset.adminUpdate)));
@@ -1260,6 +1385,14 @@ async function loadSettings() {
     state.settingsData = await get("settings");
     try { state.modelOptions = await get("model-options"); } catch (error) { state.modelOptions = null; }
     try { state.routes = await get("model-routing"); } catch (error) { state.routes = null; }
+    try {
+      const [backupStatus, backupListing] = await Promise.all([get("backup/status"), get("backup/list")]);
+      state.backup = { status: backupStatus, listing: backupListing };
+      renderBackupProgress(backupStatus);
+      if (backupStatus?.running) startBackupPolling();
+    } catch (error) {
+      state.backup = { status: { success: false, error: error.message }, listing: { success: false, files: [], total_bytes: 0 } };
+    }
     if (state.view === "settings") dashboard();
   } catch (error) { notify(error.message, true); }
 }

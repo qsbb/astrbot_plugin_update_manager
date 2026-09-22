@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="title">凝心溯溪-核 · 模块运营中心</title>
-  <link rel="stylesheet" href="./style.css?v=0.19.14-1" />
-    <link rel="stylesheet" href="./series-ui.css?v=0.19.14-1" />
+  <link rel="stylesheet" href="./style.css?v=0.19.15-1" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.19.15-1" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -93,6 +93,7 @@
       <nav class="si-subnav" role="tablist" aria-label="设置分区">
         <button type="button" role="tab" data-si-tab="config" data-i18n="settingsConfigTab">运行配置</button>
         <button type="button" role="tab" data-si-tab="auto" data-i18n="settingsAutoTab">自动更新</button>
+        <button type="button" role="tab" data-si-tab="backup" data-i18n="settingsBackupTab">备份</button>
         <button type="button" role="tab" data-si-tab="accounts" data-i18n="settingsAccountsTab">控制中心账户</button>
         <button type="button" role="tab" data-si-tab="mirrors" data-i18n="settingsMirrorsTab">镜像与网络</button>
       </nav>
@@ -119,6 +120,29 @@
         <fieldset class="plugin-picker"><legend data-i18n="selectPlugins">选择插件</legend><div id="rule-plugins"></div></fieldset>
         <p class="next-run"><span data-i18n="nextRun">下次运行</span>：<strong id="rule-next-run">—</strong></p>
       </form>
+      </div>
+      <div data-si-panel="backup" hidden>
+      <form id="backup-form" class="card">
+        <div class="section-heading"><div><h2 data-i18n="backupTitle">自动备份</h2><p data-i18n="backupHint">走 AstrBot 官方导出器生成完整备份（含主库、知识库、插件与数据目录、配置）；只做备份，不含恢复。</p></div><button type="submit" data-i18n="save">保存</button></div>
+        <div class="rule-grid">
+          <label class="switch"><input id="backup-enabled" type="checkbox" role="switch" /><span data-i18n="backupEnabled">启用自动备份</span></label>
+          <label><span data-i18n="backupTime">备份时间</span><input id="backup-time" type="time" required /></label>
+          <label><span data-i18n="backupTimezone">时区</span><input id="backup-timezone" type="text" required /></label>
+          <label><span data-i18n="backupDir">保存目录</span><input id="backup-dir" type="text" placeholder="data/backups" /><small data-i18n="backupDirHint">留空 = AstrBot 官方默认目录；必须是绝对路径、可创建可写，且不能落在插件/数据目录内部。</small></label>
+        </div>
+        <p class="next-run"><span data-i18n="backupNextRun">下次备份</span>：<strong id="backup-next-run">—</strong></p>
+        <p class="next-run"><span data-i18n="backupEffectiveDir">实际目录</span>：<strong id="backup-effective-dir">—</strong></p>
+        <p class="field-hint" id="backup-schedule-error" hidden></p>
+        <div class="section-actions"><button type="button" id="backup-run" data-i18n="backupRun">立即备份</button><button type="button" id="backup-refresh" data-i18n="refresh">刷新</button></div>
+        <p class="field-hint" id="backup-progress" hidden></p>
+        <p class="field-hint" id="backup-last-result" hidden></p>
+        <p class="field-hint" data-i18n="backupSlowHint">备份期间 AstrBot 会短暂变慢（官方导出器没有异步打包），默认时间放在凌晨。</p>
+        <p class="field-hint" data-i18n="backupNoCleanupHint">核不会自动清理备份文件；请留意占用，在下方手动删除。</p>
+      </form>
+      <article class="card">
+        <div class="section-heading"><div><h2 data-i18n="backupListTitle">备份文件</h2><p><span data-i18n="backupTotal">合计占用</span>：<strong id="backup-total">—</strong></p></div></div>
+        <div id="backup-list" class="admin-list"><p data-i18n="loading">加载中…</p></div>
+      </article>
       </div>
       <div data-si-panel="accounts" hidden>
       <article class="card" id="webui-admins">
@@ -181,8 +205,8 @@
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js?v=0.19.14-1"></script>
-  <script src="./series-kernel.js?v=0.19.14-1"></script>
-  <script type="module" src="./app.js?v=0.19.14-1"></script>
+  <script src="./series-ui.js?v=0.19.15-1"></script>
+  <script src="./series-kernel.js?v=0.19.15-1"></script>
+  <script type="module" src="./app.js?v=0.19.15-1"></script>
 </body>
 </html>

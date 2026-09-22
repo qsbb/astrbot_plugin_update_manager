@@ -78,6 +78,13 @@
 .model-test-details{display:grid;gap:6px;margin-top:10px}
 .model-test-detail{padding:7px 9px;border-radius:7px;background:#f7f9ff;color:var(--si-muted);font-size:.88rem;line-height:1.5;overflow-wrap:anywhere}
 .model-test-detail.failed{background:#fff0f2;color:#b42318}
+.backup-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 11px;border:1px solid var(--si-line-solid);border-radius:var(--si-radius-sm);background:rgba(255,255,255,.55);margin-bottom:8px}
+.backup-row b{display:block;font-size:.92rem;overflow-wrap:anywhere}
+.backup-row small{display:block;margin-top:2px;color:var(--si-muted);font-size:.8rem}
+.backup-size{color:var(--si-muted);font-size:.85rem;white-space:nowrap}
+.backup-row button{min-height:30px;padding:0 10px}
+#backup-form .next-run{margin:6px 0}
+#backup-form .field-hint{margin:4px 0}
 @media(max-width:760px){.model-route-row{grid-template-columns:1fr}.model-routing-field{padding:12px}.model-route-spacer{display:none}}
 
 .webui-manual {

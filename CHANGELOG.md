@@ -1,4 +1,29 @@
 ## [Unreleased]
+
+## 0.19.15 - 2026-09-22
+
+### 新增
+
+- 自动备份（走 AstrBot 官方备份链路）：核 Page 的新「备份」页签与核 WebUI 的新「备份」子页都能独立开关、独立时间、独立时区调度，用 AstrBot 官方导出器 `AstrBotExporter.export_all(output_dir=…)` 生成完整备份 zip（主库、知识库、插件与数据目录、配置等），支持指定保存目录（留空 = 官方默认 `data/backups`），并提供「立即备份」、进度、备份列表与占用、手动删除（二次确认）。核不会自动清理备份文件；备份期间 AstrBot 事件循环会短暂变慢（官方导出器没有异步打包），默认时间 03:30。
+- 新增配置键 `auto_backup_enabled` / `auto_backup_local_time` / `auto_backup_timezone` / `auto_backup_dir`（与更新事务的 `backup_*` 键相互独立）。
+- 新增 Page 接口 `backup/status`、`backup/run`、`backup/list`、`backup/delete` 与 WebUI 接口 `/api/backup/status`、`/api/backup/run`、`/api/backup/list`、`/api/backup/delete`（WebUI 侧需 admin 及以上）。
+
+### 变更
+
+- 备份目录必须是绝对路径、可创建可写，且不能落在官方备份源目录（plugins/plugin_data/config/t2i_templates/webchat/temp/skills）内部，避免备份套娃；保存时即校验，非法直接拒绝。
+
+
+### 新增（随发布补充）
+
+- 备份运行中的实时进度（阶段 + 百分比 + 当前步骤），打开页面或刷新时会自动恢复轮询；进度不会整页重绘，避免打断正在输入的目录。
+
+### 修复
+
+- 备份运行中禁止删除备份文件：官方导出器直接写最终文件名，运行中删除会删掉正在写入的那个文件，导致这一轮备份白跑（返回 `BACKUP_ALREADY_RUNNING`，两端给专门文案）。
+- 中断残留识别：列表用 `zipfile.is_zipfile()` 校验完整性，被中断的截断文件标记「可能不完整（中断）」；运行期间显示「可能正在写入」，避免误报。
+- 备份状态文件（`backup-state.json`）损坏不再影响核加载；路径含非法字符时 fail-closed 并新增错误码 `BACKUP_DIR_INVALID`。
+- 定时备份处理函数绝不外抛：异常记 `schedule.backup.failed`（reason `SCHEDULED_BACKUP_FAILED`）后干净结束；到点时若配置已被关掉则不执行。
+
 ## 0.19.14 - 2026-09-22
 
 ### 新增

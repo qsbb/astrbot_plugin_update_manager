@@ -66,5 +66,9 @@
       "tts": "语音合成/TTS"
     }
   },
-  "log_level": {"type": "string", "description": "插件日志级别", "default": "INFO", "options": ["DEBUG", "INFO", "WARNING", "ERROR"], "labels": ["调试", "信息", "警告", "错误"]}
+  "log_level": {"type": "string", "description": "插件日志级别", "default": "INFO", "options": ["DEBUG", "INFO", "WARNING", "ERROR"], "labels": ["调试", "信息", "警告", "错误"]},
+  "auto_backup_enabled": {"type": "bool", "description": "启用自动备份：按独立时间用 AstrBot 官方导出器生成完整备份 zip（只做备份，不含恢复）", "default": false},
+  "auto_backup_local_time": {"type": "string", "description": "自动备份的本地时间（HH:MM）；默认凌晨 03:30，与每日更新任务错开", "default": "03:30"},
+  "auto_backup_timezone": {"type": "string", "description": "自动备份使用的时区，例如 Asia/Shanghai", "default": "Asia/Shanghai"},
+  "auto_backup_dir": {"type": "string", "description": "备份保存目录（必须是绝对路径）；留空则使用 AstrBot 官方默认目录 data/backups", "default": ""}
 }

@@ -161,6 +161,85 @@ def test_model_routing_test_route_requires_admin_and_uses_callback(tmp_path):
     assert calls == [{"kinds": ["fast"]}]
 
 
+def test_backup_routes_require_admin_and_use_callbacks(tmp_path):
+    """备份端点：状态/列表登录可读，立即备份与删除必须 admin。"""
+    (tmp_path / "index.html").write_text("standalone", encoding="utf-8")
+    auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
+    auth.create_admin("owner", "owner-pass", "owner")
+    auth.create_admin("viewer", "viewer-pass", "viewer")
+
+    calls: list[str] = []
+
+    async def backup_status():
+        calls.append("status")
+        return {"success": True, "running": False, "enabled": False, "target_dir": "/tmp/backups"}
+
+    async def backup_run():
+        calls.append("run")
+        return {"success": True, "filename": "astrbot_backup_20260922_033000.zip", "size_bytes": 10}
+
+    async def backup_list():
+        calls.append("list")
+        return {"success": True, "files": [], "total_bytes": 0}
+
+    async def backup_delete(payload=None):
+        calls.append(f"delete:{payload.get('filename') if isinstance(payload, dict) else ''}")
+        return {"success": True, "name": "astrbot_backup_old.zip"}
+
+    server = WebUIServer(
+        auth,
+        static_root=tmp_path,
+        host="127.0.0.1",
+        port=free_port(),
+        modules=lambda: asyncio.sleep(0, result={}),
+        diagnostics=lambda: asyncio.sleep(0, result={}),
+        backup_status=backup_status,
+        backup_run=backup_run,
+        backup_list=backup_list,
+        backup_delete=backup_delete,
+    )
+
+    async def exercise():
+        await server.start()
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.get(server.url + "/api/backup/status") as response:
+                assert response.status == 401
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "viewer", "password": "viewer-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.get(server.url + "/api/backup/status") as response:
+                assert response.status == 200
+            async with client.get(server.url + "/api/backup/list") as response:
+                assert response.status == 200
+            async with client.post(server.url + "/api/backup/run") as response:
+                assert response.status == 403
+            async with client.post(
+                server.url + "/api/backup/delete", json={"filename": "x.zip"}
+            ) as response:
+                assert response.status == 403
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "owner", "password": "owner-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.post(server.url + "/api/backup/run") as response:
+                assert response.status == 200
+                assert (await response.json())["filename"].endswith(".zip")
+            async with client.post(
+                server.url + "/api/backup/delete",
+                json={"filename": "astrbot_backup_old.zip"},
+            ) as response:
+                assert response.status == 200
+        await server.stop()
+
+    asyncio.run(exercise())
+    assert calls == ["status", "list", "run", "delete:astrbot_backup_old.zip"]
+
+
 def test_wildcard_webui_url_uses_dashboard_host_without_wildcard(tmp_path):
     auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
     server = WebUIServer(

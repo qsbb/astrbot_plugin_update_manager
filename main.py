@@ -34,6 +34,13 @@ from .core.diagnostics import (
     diagnose_series,
     read_series_runtime_snapshot,
 )
+from .core.backup_runner import (
+    BackupRunner,
+    delete_backup as delete_official_backup,
+    list_backups as list_official_backups,
+    validate_dir as validate_backup_dir,
+)
+from .core.backup_scheduler import BackupScheduleService, BackupSettings
 from .core.health import HealthChecker
 from .core.mirrors import resolve_mirror
 from .core.model_probe import (
@@ -81,7 +88,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.14"
+__version__ = "0.19.15"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -197,6 +204,12 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         )
         self.scheduler = ScheduleService(
             getattr(context, "cron_manager", None), self.store, self._scheduled_run
+        )
+        self.backup_runner = BackupRunner(self.context, store=self.store)
+        self.backup_scheduler = BackupScheduleService(
+            getattr(context, "cron_manager", None),
+            self._backup_settings,
+            self._scheduled_backup,
         )
         pages_registered = self._register_pages_web_api()
         interrupted = self.coordinator.recover_interrupted()
@@ -669,6 +682,10 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             settings_save=self._webui_settings_save,
             model_options=self._webui_model_options,
             model_test=self._webui_model_test,
+            backup_status=self._webui_backup_status,
+            backup_run=self._webui_backup_run,
+            backup_list=self._webui_backup_list,
+            backup_delete=self._webui_backup_delete,
             rules_get=self._webui_rules_get,
             rules_save=self._webui_rules_save,
             mirrors_get=self._webui_mirrors_get,
@@ -1144,6 +1161,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 await self.scheduler.rebuild()
             else:
                 await self.scheduler.remove_job()
+            await self._refresh_backup_schedule()
             self.transaction.cleanup(
                 keep_success=max(1, int(self._get("backup_keep_success", 3))),
                 failed_days=max(0, int(self._get("backup_failed_days", 7))),
@@ -1536,6 +1554,110 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             )
         yield event.plain_result("\n".join(lines))
 
+    # ---------------------------------------------------------------- 自动备份
+
+    def _backup_settings(self) -> BackupSettings:
+        return BackupSettings.from_config(self._get)
+
+    def _backup_dir_config(self) -> str:
+        return str(self._get("auto_backup_dir", "") or "")
+
+    def backup_target_dir(self) -> str:
+        """当前配置解析后的备份目录；解析失败返回空串（UI 只做展示）。"""
+        check = validate_backup_dir(self._backup_dir_config())
+        return str(check.get("path") or "") if check.get("ok") else ""
+
+    async def backup_status_payload(self) -> dict[str, Any]:
+        status = self.backup_runner.status()
+        try:
+            settings = self._backup_settings()
+        except Exception:  # noqa: BLE001 - 状态查询不允许抛
+            settings = BackupSettings()
+        payload: dict[str, Any] = {
+            **status,
+            "enabled": settings.enabled,
+            "local_time": settings.local_time,
+            "timezone": settings.timezone,
+            "configured_dir": self._backup_dir_config(),
+            "target_dir": self.backup_target_dir(),
+            "schedule_error": self.backup_scheduler.last_error,
+            "job_id": "astrbot_plugin_update_manager_backup",
+            "next_run": "",
+            "blocking_note": "备份期间 AstrBot 事件循环会短暂变慢（官方导出器无异步打包）",
+        }
+        try:
+            upcoming = self.backup_scheduler.next_run(settings)
+            payload["next_run"] = upcoming.isoformat(timespec="seconds") if upcoming else ""
+        except Exception:  # noqa: BLE001
+            payload["next_run"] = ""
+        return payload
+
+    async def run_backup(self, *, trigger: str = "manual") -> dict[str, Any]:
+        return await self.backup_runner.run(
+            target_dir=self._backup_dir_config(), trigger=trigger
+        )
+
+    async def _scheduled_backup(self, settings: BackupSettings) -> None:
+        tracker = diagnostic_operation(
+            "schedule",
+            "backup",
+            "定时自动备份",
+            details={"local_time": settings.local_time, "timezone": settings.timezone},
+        )
+        try:
+            result = await self.run_backup(trigger="schedule")
+        except Exception as exc:  # noqa: BLE001 - cron 处理函数绝不外抛
+            tracker.fail(exc, reason="SCHEDULED_BACKUP_FAILED")
+            logger.warning("[update-manager] scheduled backup failed: %s", type(exc).__name__)
+            return
+        if result.get("success"):
+            tracker.finish(
+                details={
+                    "filename": str(result.get("filename") or ""),
+                    "size_bytes": int(result.get("size_bytes") or 0),
+                }
+            )
+        elif result.get("skipped"):
+            tracker.finish(outcome="skipped", level="WARNING", summary="备份已在运行，本次跳过")
+        else:
+            tracker.fail(
+                RuntimeError(str(result.get("error") or "BACKUP_FAILED")),
+                reason=str(result.get("error") or "BACKUP_FAILED"),
+            )
+
+    async def _refresh_backup_schedule(self) -> None:
+        try:
+            await self.backup_scheduler.rebuild()
+        except Exception as exc:  # noqa: BLE001 - 调度重建失败不影响插件运行
+            logger.warning(
+                "[update-manager] backup schedule rebuild failed: %s", type(exc).__name__
+            )
+
+    async def _webui_backup_status(self) -> dict[str, Any]:
+        return await self.backup_status_payload()
+
+    async def _webui_backup_run(self) -> dict[str, Any]:
+        return await self.run_backup(trigger="manual")
+
+    async def _webui_backup_list(self) -> dict[str, Any]:
+        return list_official_backups(self._backup_dir_config())
+
+    async def _webui_backup_delete(
+        self, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        return self._delete_backup_file(str(data.get("filename") or ""))
+
+    def _delete_backup_file(self, filename: str) -> dict[str, Any]:
+        """删除备份文件；备份进行中一律拒绝（避免删掉正在写入的那个文件）。"""
+        if self.backup_runner.running:
+            return {
+                "success": False,
+                "error": "BACKUP_ALREADY_RUNNING",
+                "detail": "备份进行中，暂不能删除备份文件",
+            }
+        return delete_official_backup(self._backup_dir_config(), filename)
+
     async def _scheduled_run(self, rule: UpdateRule) -> None:
         tracker = diagnostic_operation(
             "schedule",
@@ -1662,6 +1784,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             if self.webui_server is not None:
                 await self.webui_server.stop()
             await self.scheduler.close()
+            await self.backup_scheduler.close()
         finally:
             try:
                 await self.registry.close()

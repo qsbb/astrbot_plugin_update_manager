@@ -380,19 +380,19 @@ def test_recommendations_tab_does_not_start_implicit_network_check():
     assert "autoCheckRecommendations()" not in tab_handler
 
 
-def test_manager_settings_area_uses_four_sub_tabs():
+def test_manager_settings_area_uses_five_sub_tabs():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
 
     assert 'id="tab-settings"' in html
     assert 'id="settings" class="panel" role="tabpanel"' in html
-    assert html.count("data-si-tab=") == 4
-    for tab in ("config", "auto", "accounts", "mirrors"):
+    assert html.count("data-si-tab=") == 5
+    for tab in ("config", "auto", "backup", "accounts", "mirrors"):
         assert f'data-si-tab="{tab}"' in html
         assert f'data-si-panel="{tab}"' in html
-    # 四个分区各自保留原有表单与列表 id，不改变保存/加载接口
-    for element_id in ("config-form", "rule-form", "webui-admins", "mirror-list", "mirror-add-form"):
+    # 五个分区各自保留原有表单与列表 id，不改变保存/加载接口
+    for element_id in ("config-form", "rule-form", "backup-form", "backup-list", "webui-admins", "mirror-list", "mirror-add-form"):
         assert f'id="{element_id}"' in html
     # 旧顶层 tab 已合并
     assert 'data-tab="config"' not in html
@@ -906,6 +906,48 @@ def test_manager_page_exposes_unified_model_routing_fields():
         assert f'["{kind}", ' in js
 
 
+def test_manager_backup_tab_wires_official_backup_endpoints():
+    """Page 备份页签：只用官方备份端点，删除/立即备份都必须二次确认，不碰原生弹窗。"""
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+
+    # 面板控件
+    for element_id in ("backup-enabled", "backup-time", "backup-timezone", "backup-dir", "backup-run", "backup-refresh", "backup-total", "backup-next-run", "backup-effective-dir", "backup-progress"):
+        assert f'id="{element_id}"' in html
+    # 备份进行中要能看到阶段/百分比（并在跑的时候轮询）
+    assert "function renderBackupProgress(" in js
+    assert "function startBackupPolling(" in js and "function stopBackupPolling(" in js
+    assert "}, 3000);" in js
+    # 打开页面/刷新时若备份仍在跑，要自动恢复轮询（否则进度会停住）
+    assert "if (status?.running) startBackupPolling();" in js
+    # 4 个配置键改由备份页签维护，不再出现在通用配置表单里
+    assert 'const BACKUP_SETTING_KEYS = ["auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"];' in js
+    assert "filter(([key]) => !BACKUP_SETTING_KEYS.includes(key))" in js
+    # 端点
+    for endpoint in ('apiGet("backup/status")', 'apiGet("backup/list")', 'apiPost("backup/run", {})', 'apiPost("backup/delete"'):
+        assert endpoint in js
+    # 立即备份 / 删除都要走 SeriesUI 确认
+    assert "async function runBackupNow()" in js and "async function deleteBackupFile(name)" in js
+    assert js.count("window.SeriesUI.confirm({") >= 2
+    # 备份运行中禁止删除（后端守卫 + 前端文案）
+    assert "backupDeleteBusy" in js
+    assert 'result?.error === "BACKUP_ALREADY_RUNNING"' in js
+    # 中断留下的截断文件要标"可能不完整"，别当恢复点用；运行中则说"可能正在写入"
+    assert "backupIncomplete" in js and "backupWriting" in js and 'item.valid === false' in js
+    # 备份表单也纳入未保存改动守卫（改完目录/时间切页签不会静默丢失）
+    assert "let backupFormBaseline = null;" in js
+    assert 'formHasUnsavedChanges(document.getElementById("backup-form"), backupFormBaseline)' in js
+    assert 'restoreFormState(document.getElementById("backup-form"), backupFormBaseline);' in js
+    # 两条必须出现的提示
+    assert "backupNoCleanupHint" in js and "backupSlowHint" in js
+    # 「已有备份在运行」要走"跳过"文案而不是显示成失败
+    assert "backupAlreadyRunning" in js
+    assert "} else if (result?.skipped) {" in js
+    # 中英双语词条都在
+    assert js.count("backupTitle:") >= 2
+    assert js.count("backupInvalidSetting:") >= 2
+
+
 def test_manager_page_never_navigates_into_standalone_webui_from_sandbox():
     """AstrBot Plugin Page 沙箱里不能跳独立 WebUI：必须在沙箱内改为复制引导。"""
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
@@ -948,6 +990,40 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     # 模块列表不再伪造检查结果
     assert 'id="check"' in js
     assert "version_status === \"not_checked\"" in js
+
+
+def test_standalone_webui_backup_tab_and_endpoints():
+    """核 WebUI 备份页签：官方备份端点 + 立即备份 + 列表 + 删除（二次确认）。"""
+    js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
+    css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
+
+    assert 'data-si-tab="backup"' in js
+    assert 'data-si-panel="backup">${backupPanel()}' in js
+    assert "function backupPanel()" in js
+    for element_id in ("backup-run", "backup-refresh"):
+        assert f'id="{element_id}"' in js
+    for key in ("auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"):
+        assert f'data-setting-key="{key}"' in js
+    # 通用配置里不再重复渲染这 4 个键
+    assert '"auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"]);' in js
+    for endpoint in ('get("backup/status")', 'get("backup/list")', 'post("backup/run", {})', 'post("backup/delete"'):
+        assert endpoint in js
+    # 进度显示 + 轮询
+    assert 'id="backup-progress"' in js
+    assert "function renderBackupProgress(" in js
+    assert "function startBackupPolling(" in js and "function stopBackupPolling(" in js
+    assert "}, 3000);" in js
+    # 进设置页或点刷新时若备份仍在跑，也要自动恢复轮询
+    assert "if (backupStatus?.running) startBackupPolling();" in js
+    assert "if (status?.running) startBackupPolling();" in js
+    assert "async function runBackupNow()" in js and "async function deleteBackupFile(name)" in js
+    assert js.count("await confirmDialog(") >= 3  # 路由回退 + 备份 + 删除
+    assert "function formatBytes(" in js
+    assert ".backup-meta" in css
+    # 已在运行时提示"跳过"，不冒充失败
+    assert 'else if (result?.skipped) notify("已有备份在运行，本次跳过");' in js
+    assert 'item.valid === false' in js and "可能不完整" in js and "可能正在写入" in js
+    assert 'result?.error === "BACKUP_ALREADY_RUNNING"' in js
 
 
 def test_series_control_is_capability_first_not_plugin_cards():
@@ -1207,7 +1283,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.14-1" in html
+    assert "?v=0.19.15-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1242,4 +1318,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.14-1" in webui_html
+    assert "?v=0.19.15-1" in webui_html
