@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..series_diagnostics import _safe_text, diagnostic_operation
+from ..series_diagnostics import _safe_text, diagnostic_event, diagnostic_operation
 
 #: 官方导出器的文件命名：astrbot_backup_<YYYYmmdd_HHMMSS>.zip
 BACKUP_FILE_PREFIX = "astrbot_backup_"
@@ -89,6 +89,25 @@ def _inside(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
+def volume_root(path: Path, *, ismount: Any = os.path.ismount) -> Path:
+    """向上找到 path 所在的"最外层挂载卷"；返回 "/" 表示落在容器文件系统里。
+
+    Container 里只有 bind mount 出来的目录是持久卷（例如 AstrBot 的 data 目录）；
+    其它路径虽然看着像宿主目录，其实写在容器可写层，容器重建/升级就没了。
+    """
+    current = path if path.is_dir() else path.parent
+    while current != current.parent:
+        try:
+            if ismount(str(current)):
+                return current
+        except OSError:
+            break
+        current = current.parent
+    return current
+
+
+
+
 def resolve_target_dir(raw: str, paths: BackupPaths) -> tuple[str, str]:
     """留空 → 官方默认目录；非空必须是绝对路径。返回 (绝对目录, 错误码)。"""
     text = str(raw or "").strip()
@@ -112,14 +131,14 @@ def validate_dir(raw: str, *, paths: BackupPaths | None = None) -> dict[str, Any
     try:
         resolved_paths = paths or official_paths()
     except OfficialBackupUnavailable:
-        return {"ok": False, "path": "", "error": ERROR_EXPORTER_UNAVAILABLE}
+        return {"ok": False, "path": "", "error": ERROR_EXPORTER_UNAVAILABLE, "ephemeral": False, "volume": ""}
     target, error = resolve_target_dir(raw, resolved_paths)
     if error:
-        return {"ok": False, "path": "", "error": error}
+        return {"ok": False, "path": "", "error": error, "ephemeral": False, "volume": ""}
     resolved = Path(target)
     for source in resolved_paths.source_dirs:
         if _inside(resolved, Path(source)):
-            return {"ok": False, "path": target, "error": ERROR_DIR_INSIDE_SOURCE}
+            return {"ok": False, "path": target, "error": ERROR_DIR_INSIDE_SOURCE, "ephemeral": False, "volume": ""}
     try:
         resolved.mkdir(parents=True, exist_ok=True)
         probe = resolved / WRITE_PROBE_NAME
@@ -127,8 +146,16 @@ def validate_dir(raw: str, *, paths: BackupPaths | None = None) -> dict[str, Any
         probe.unlink()
     except (OSError, ValueError):
         # ValueError：路径里含空字节等非法字符（Path.mkdir 不抛 OSError）
-        return {"ok": False, "path": target, "error": ERROR_DIR_NOT_WRITABLE}
-    return {"ok": True, "path": str(resolved), "error": ""}
+        return {"ok": False, "path": target, "error": ERROR_DIR_NOT_WRITABLE, "ephemeral": False, "volume": ""}
+    volume = volume_root(resolved)
+    return {
+        "ok": True,
+        "path": str(resolved),
+        "error": "",
+        #: 落在容器文件系统里（非挂载卷）：容器重建/升级后备份会丢，UI 要告警
+        "ephemeral": str(volume) == os.sep,
+        "volume": str(volume),
+    }
 
 
 def _is_complete_zip(target: Path) -> bool:
@@ -324,6 +351,15 @@ class BackupRunner:
                 "error": check["error"],
                 "dir": check["path"],
             }
+
+        if check.get("ephemeral"):
+            # 看着像宿主目录、其实是容器可写层：容器重建/升级就丢，必须留痕
+            diagnostic_event(
+                "backup.run.warning",
+                f"备份目录不在挂载卷上（容器文件系统内），容器重建后备份会丢失：{check['path']}",
+                level="WARNING",
+                details={"dir": check["path"], "volume": str(check.get("volume") or os.sep)},
+            )
 
         main_db = self._main_db()
         if main_db is None:

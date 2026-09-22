@@ -106,6 +106,33 @@ def test_validate_dir_rejects_illegal_characters(paths):
     assert result["error"] == br.ERROR_DIR_INVALID
 
 
+def test_volume_root_walks_up_to_outermost_mount():
+    """向上找到最外层挂载卷：非挂载路径最终落在 "/"，即容器文件系统。"""
+    from astrbot_plugin_update_manager.core.backup_runner import volume_root
+
+    def fake_ismount(path):
+        return path in {"/", "/AstrBot/data"}
+
+    assert str(volume_root(pathlib.Path("/mnt/nas/x/y"), ismount=fake_ismount)) == "/"
+    assert str(volume_root(pathlib.Path("/AstrBot/data/backups"), ismount=fake_ismount)) == "/AstrBot/data"
+    assert str(volume_root(pathlib.Path("/"), ismount=fake_ismount)) == "/"
+
+
+def test_validate_dir_flags_container_layer_directory(paths, tmp_path, monkeypatch):
+    """容器层目录（非挂载卷）必须标 ephemeral，供 UI 告警。"""
+    monkeypatch.setattr(br, "volume_root", lambda p, **kw: pathlib.Path("/"))
+    result = validate_dir(str(tmp_path / "container-layer"), paths=paths)
+    assert result["ok"] is True
+    assert result["ephemeral"] is True
+    assert result["volume"] == "/"
+
+    monkeypatch.setattr(br, "volume_root", lambda p, **kw: pathlib.Path(paths.data_dir))
+    mounted = validate_dir("", paths=paths)
+    assert mounted["ok"] is True
+    assert mounted["ephemeral"] is False
+    assert mounted["volume"] == paths.data_dir
+
+
 def test_validate_dir_without_official_chain_is_fail_closed(monkeypatch):
     def missing():
         raise OfficialBackupUnavailable("no module")

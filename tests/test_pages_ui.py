@@ -932,6 +932,9 @@ def test_manager_backup_tab_wires_official_backup_endpoints():
     # 备份运行中禁止删除（后端守卫 + 前端文案）
     assert "backupDeleteBusy" in js
     assert 'result?.error === "BACKUP_ALREADY_RUNNING"' in js
+    # 目录落在容器文件系统（非挂载卷）时必须告警
+    assert 'id="backup-ephemeral-warning"' in html
+    assert "backupEphemeralWarning" in js and "status.dir_ephemeral" in js
     # 中断留下的截断文件要标"可能不完整"，别当恢复点用；运行中则说"可能正在写入"
     assert "backupIncomplete" in js and "backupWriting" in js and 'item.valid === false' in js
     # 备份表单也纳入未保存改动守卫（改完目录/时间切页签不会静默丢失）
@@ -1024,6 +1027,7 @@ def test_standalone_webui_backup_tab_and_endpoints():
     assert 'else if (result?.skipped) notify("已有备份在运行，本次跳过");' in js
     assert 'item.valid === false' in js and "可能不完整" in js and "可能正在写入" in js
     assert 'result?.error === "BACKUP_ALREADY_RUNNING"' in js
+    assert "status.dir_ephemeral" in js and "不在挂载卷上" in js
 
 
 def test_series_control_is_capability_first_not_plugin_cards():
@@ -1283,7 +1287,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.15-1" in html
+    assert "?v=0.19.16-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1318,4 +1322,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.15-1" in webui_html
+    assert "?v=0.19.16-1" in webui_html

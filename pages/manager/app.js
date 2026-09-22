@@ -160,6 +160,7 @@ Object.assign(messages["zh-CN"], {
   backupIncomplete: "可能不完整（备份被中断，别当恢复点用）",
   backupWriting: "可能正在写入（备份进行中）",
   backupDeleteBusy: "备份进行中，暂不能删除备份文件",
+  backupEphemeralWarning: "该目录不在挂载卷上（在容器文件系统内）：容器重建/升级后备份会丢失。建议留空使用官方默认目录，或改到宿主机已挂载进容器的路径。",
   backupFailed: "备份失败：{error}",
   backupListTitle: "备份文件",
   backupTotal: "合计占用",
@@ -197,6 +198,7 @@ Object.assign(messages["en-US"], {
   backupIncomplete: "May be incomplete (interrupted backup; do not use as a restore point)",
   backupWriting: "May still be writing (backup in progress)",
   backupDeleteBusy: "Cannot delete while a backup is running",
+  backupEphemeralWarning: "This directory is not on a mounted volume (it lives in the container filesystem); backups are lost when the container is recreated. Leave it blank to use the default directory, or point it at a host path mounted into the container.",
   backupFailed: "Backup failed: {error}",
   backupListTitle: "Backup files",
   backupTotal: "Total size",
@@ -1264,6 +1266,11 @@ async function loadBackup() {
   if (scheduleError) {
     scheduleError.hidden = !status.schedule_error;
     scheduleError.textContent = status.schedule_error ? `${t("backupScheduleError")}: ${status.schedule_error}` : "";
+  }
+  const ephemeral = document.getElementById("backup-ephemeral-warning");
+  if (ephemeral) {
+    ephemeral.hidden = !status.dir_ephemeral;
+    ephemeral.textContent = status.dir_ephemeral ? `⚠️ ${t("backupEphemeralWarning")}` : "";
   }
   const last = document.getElementById("backup-last-result");
   if (last) {

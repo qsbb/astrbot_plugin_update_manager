@@ -1250,6 +1250,21 @@ def test_pages_backup_list_and_delete_use_official_directory(monkeypatch, tmp_pa
     assert not (target / "astrbot_backup_20260920_030000.zip").exists()
 
 
+def test_backup_status_exposes_container_layer_flag(monkeypatch, tmp_path):
+    """状态必须带 dir_ephemeral/dir_volume，UI 才能对"容器层目录"告警。"""
+    module = import_main(monkeypatch)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {"auto_backup_dir": "/mnt/nas/x"})
+    monkeypatch.setattr(
+        module,
+        "validate_backup_dir",
+        lambda value: {"ok": True, "path": "/mnt/nas/x", "error": "", "ephemeral": True, "volume": "/"},
+    )
+    payload = asyncio.run(plugin.backup_status_payload())
+    assert payload["dir_ephemeral"] is True
+    assert payload["dir_volume"] == "/"
+    assert payload["target_dir"] == "/mnt/nas/x"
+
+
 def test_backup_delete_is_blocked_while_backup_runs(monkeypatch, tmp_path):
     """备份进行中禁止删除：否则可能删掉正在写入的那个文件，白跑一轮。"""
     import astrbot_plugin_update_manager.core.backup_runner as backup_runner

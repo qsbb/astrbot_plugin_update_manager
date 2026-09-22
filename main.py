@@ -88,7 +88,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.15"
+__version__ = "0.19.16"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -1564,8 +1564,11 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
 
     def backup_target_dir(self) -> str:
         """当前配置解析后的备份目录；解析失败返回空串（UI 只做展示）。"""
-        check = validate_backup_dir(self._backup_dir_config())
-        return str(check.get("path") or "") if check.get("ok") else ""
+        return str(self.backup_dir_check().get("path") or "")
+
+    def backup_dir_check(self) -> dict[str, Any]:
+        """当前配置的目录校验结果（含是否落在挂载卷上）。"""
+        return validate_backup_dir(self._backup_dir_config())
 
     async def backup_status_payload(self) -> dict[str, Any]:
         status = self.backup_runner.status()
@@ -1585,6 +1588,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             "next_run": "",
             "blocking_note": "备份期间 AstrBot 事件循环会短暂变慢（官方导出器无异步打包）",
         }
+        check = self.backup_dir_check()
+        payload["dir_ephemeral"] = bool(check.get("ephemeral"))
+        payload["dir_volume"] = str(check.get("volume") or "")
         try:
             upcoming = self.backup_scheduler.next_run(settings)
             payload["next_run"] = upcoming.isoformat(timespec="seconds") if upcoming else ""
