@@ -88,7 +88,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.19.18"
+__version__ = "0.19.19"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -1655,14 +1655,37 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         return self._delete_backup_file(str(data.get("filename") or ""))
 
     def _delete_backup_file(self, filename: str) -> dict[str, Any]:
-        """删除备份文件；备份进行中一律拒绝（避免删掉正在写入的那个文件）。"""
+        """删除备份文件；备份进行中一律拒绝（避免删掉正在写入的那个文件）。
+
+        删除是不可恢复的，必须留审计痕迹（否则"备份怎么没了"无从查证）。
+        """
         if self.backup_runner.running:
+            diagnostic_event(
+                "backup.delete.blocked",
+                f"备份进行中，拒绝删除 {filename}",
+                level="WARNING",
+                details={"filename": filename},
+            )
             return {
                 "success": False,
                 "error": "BACKUP_ALREADY_RUNNING",
                 "detail": "备份进行中，暂不能删除备份文件",
             }
-        return delete_official_backup(self._backup_dir_config(), filename)
+        result = delete_official_backup(self._backup_dir_config(), filename)
+        if result.get("success"):
+            diagnostic_event(
+                "backup.delete.done",
+                f"已删除备份 {filename}",
+                details={"filename": filename, "dir": result.get("dir", "")},
+            )
+        else:
+            diagnostic_event(
+                "backup.delete.failed",
+                f"删除备份失败：{result.get('error') or '未知错误'}",
+                level="WARNING",
+                details={"filename": filename, "error": str(result.get("error") or "")},
+            )
+        return result
 
     async def _scheduled_run(self, rule: UpdateRule) -> None:
         tracker = diagnostic_operation(

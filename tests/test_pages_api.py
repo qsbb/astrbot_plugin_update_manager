@@ -1303,6 +1303,43 @@ def test_backup_delete_is_blocked_while_backup_runs(monkeypatch, tmp_path):
     assert not victim.exists()
 
 
+def test_backup_delete_is_audited(monkeypatch, tmp_path):
+    """删除不可恢复，必须留诊断痕迹（成功 / 被拒）。"""
+    import astrbot_plugin_update_manager.core.backup_runner as backup_runner
+    from astrbot_plugin_update_manager.series_diagnostics import (
+        diagnostic_clear,
+        diagnostic_events,
+    )
+
+    module = import_main(monkeypatch)
+    data = tmp_path / "data"
+    target = data / "backups"
+    target.mkdir(parents=True)
+    victim = target / "astrbot_backup_20260920_030000.zip"
+    victim.write_bytes(b"x")
+    paths = backup_runner.BackupPaths(
+        data_dir=str(data), default_dir=str(target), source_dirs=(str(data / "plugins"),)
+    )
+    monkeypatch.setattr(backup_runner, "official_paths", lambda: paths)
+    plugin = module.UpdateManagerPlugin(context(tmp_path), {"auto_backup_dir": str(target)})
+
+    diagnostic_clear()
+    assert plugin._delete_backup_file(victim.name)["success"] is True
+    codes = [e["code"] for e in diagnostic_events(limit=50)["events"]]
+    assert "backup.delete.done" in codes
+
+    # 运行中被拒也要留痕
+    diagnostic_clear()
+    plugin.backup_runner._lock._locked = True
+    try:
+        blocked = plugin._delete_backup_file("astrbot_backup_whatever.zip")
+        assert blocked["error"] == "BACKUP_ALREADY_RUNNING"
+    finally:
+        plugin.backup_runner._lock._locked = False
+    blocked_codes = [e["code"] for e in diagnostic_events(limit=50)["events"]]
+    assert "backup.delete.blocked" in blocked_codes
+
+
 def test_backup_config_fields_are_validated_on_save(monkeypatch, tmp_path):
     import astrbot_plugin_update_manager.core.backup_runner as backup_runner
 
