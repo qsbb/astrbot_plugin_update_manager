@@ -37,6 +37,7 @@ def test_manager_page_has_bridge_tabs_and_i18n():
     assert 'data-tab="modules"' in html
     assert 'data-tab="recommendations"' not in html
     assert 'data-tab="settings"' in html
+    assert 'data-tab="backup"' in html
     assert 'data-tab="config"' not in html
     assert 'data-tab="mirrors"' not in html
     assert 'data-tab="catalog"' not in html
@@ -380,18 +381,24 @@ def test_recommendations_tab_does_not_start_implicit_network_check():
     assert "autoCheckRecommendations()" not in tab_handler
 
 
-def test_manager_settings_area_uses_five_sub_tabs():
+def test_manager_settings_area_uses_four_sub_tabs_and_backup_is_top_level():
+    """备份是「设置 / 日志」同级的顶层页签，不再藏在设置里。"""
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
 
     assert 'id="tab-settings"' in html
     assert 'id="settings" class="panel" role="tabpanel"' in html
-    assert html.count("data-si-tab=") == 5
-    for tab in ("config", "auto", "backup", "accounts", "mirrors"):
+    assert html.count("data-si-tab=") == 4
+    for tab in ("config", "auto", "accounts", "mirrors"):
         assert f'data-si-tab="{tab}"' in html
         assert f'data-si-panel="{tab}"' in html
-    # 五个分区各自保留原有表单与列表 id，不改变保存/加载接口
+    assert 'data-si-tab="backup"' not in html
+    # 备份：与「设置 / 日志」同级，且顺序在两者之间
+    assert 'id="backup" class="panel" role="tabpanel" aria-labelledby="tab-backup"' in html
+    assert 'aria-controls="backup"' in html
+    assert html.index('data-tab="settings"') < html.index('data-tab="backup"') < html.index('data-tab="logs"')
+    # 各分区保留原有表单与列表 id，不改变保存/加载接口
     for element_id in ("config-form", "rule-form", "backup-form", "backup-list", "webui-admins", "mirror-list", "mirror-add-form"):
         assert f'id="{element_id}"' in html
     # 旧顶层 tab 已合并
@@ -404,6 +411,10 @@ def test_manager_settings_area_uses_five_sub_tabs():
     assert 'settings: { targetId: "config-fields", labelKey: "settings", load: loadSettingsPanel },' in js
     assert 'if (button.dataset.tab === "settings" && !state.settingsLoaded) {' in js
     assert 'settings: "设置"' in js
+    # 备份页签有自己的加载入口（设置不再连带把备份接口打一遍）
+    assert 'backup: { targetId: "backup-list", labelKey: "backupTab", load: () => loadOnce("backup", loadBackup) }' in js
+    assert 'if (button.dataset.tab === "backup") {' in js
+    assert 'loadOnce("backup", loadBackup),\n' not in js
     assert "#settings [data-si-panel] > * + *" in css
     assert "#settings [data-si-panel][hidden]" in css
 
@@ -912,8 +923,16 @@ def test_manager_backup_tab_wires_official_backup_endpoints():
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
 
     # 面板控件
-    for element_id in ("backup-enabled", "backup-time", "backup-timezone", "backup-dir", "backup-run", "backup-refresh", "backup-total", "backup-next-run", "backup-effective-dir", "backup-progress"):
+    for element_id in ("backup-enabled", "backup-time", "backup-timezone", "backup-dir", "backup-run", "backup-refresh", "backup-total", "backup-next-run", "backup-effective-dir", "backup-progress", "backup-last-success", "backup-last-result"):
         assert f'id="{element_id}"' in html
+    # 上次备份成功时间要单独显示（失败也不能把成功记录抹掉）
+    assert "function formatBackupTime(" in js
+    assert "status.last_success" in js
+    assert js.count("{time}") >= 4
+    # 失败行只报失败，成功信息由上一行单独承载
+    assert "backupLastSuccessNone" in js
+    # 状态文件里没有成功记录时，用目录里最新的完整备份兜底（旧版本升级上来也能看到时间）
+    assert "backupFiles.find((item) => item.valid !== false)" in js
     # 备份进行中要能看到阶段/百分比（并在跑的时候轮询）
     assert "function renderBackupProgress(" in js
     assert "function startBackupPolling(" in js and "function stopBackupPolling(" in js
@@ -1000,9 +1019,20 @@ def test_standalone_webui_backup_tab_and_endpoints():
     js = (PLUGIN_ROOT / "webui" / "app.js").read_text(encoding="utf-8")
     css = (PLUGIN_ROOT / "webui" / "style.css").read_text(encoding="utf-8")
 
-    assert 'data-si-tab="backup"' in js
-    assert 'data-si-panel="backup">${backupPanel()}' in js
+    # 备份是一级视图（与「诊断与日志 / 设置与安全」同级），不再是设置里的子页签
+    assert 'data-si-tab="backup"' not in js
+    assert 'backup: { icon:' in js
+    assert "backup: backupView" in js and "backup: loadBackupView" in js
+    assert "function backupView()" in js
     assert "function backupPanel()" in js
+    assert 'id="save-settings"' in js
+    # 备份页没有路由/运行项控件：保存时不能把它们一起提交（空对象会清掉模型路由）
+    assert 'if (document.querySelector("[data-route-provider]")) payload.model_routing = routes;' in js
+    assert 'if (autoUpdateNode) payload.auto_update_enabled' in js
+    assert 'if (logLevelNode) payload.log_level' in js
+    # 上次成功时间：失败也不能把它顶掉；状态文件没记录时用目录里最新的完整备份兜底
+    assert "status.last_success" in js and "item.valid !== false" in js
+    assert "function formatBackupTime(" in js
     for element_id in ("backup-run", "backup-refresh"):
         assert f'id="{element_id}"' in js
     for key in ("auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"):
@@ -1287,7 +1317,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.19.19-1" in html
+    assert "?v=0.20.0-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1322,4 +1352,4 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.19.19-1" in webui_html
+    assert "?v=0.20.0-1" in webui_html

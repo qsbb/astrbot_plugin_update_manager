@@ -138,7 +138,7 @@ Object.assign(messages["en-US"], {
 });
 
 Object.assign(messages["zh-CN"], {
-  settingsBackupTab: "备份",
+  backupTab: "备份",
   backupTitle: "自动备份",
   backupHint: "走 AstrBot 官方导出器生成完整备份（含主库、知识库、插件与数据目录、配置）；只做备份，不含恢复。",
   backupEnabled: "启用自动备份",
@@ -169,14 +169,15 @@ Object.assign(messages["zh-CN"], {
   backupDeleteConfirmTitle: "删除备份",
   backupDeleteConfirm: "确定删除备份「{name}」？该文件会被永久删除，且不可恢复。",
   backupDeleted: "备份已删除",
-  backupLastSuccess: "上次备份成功：{name}（{size}）",
-  backupLastFailed: "上次备份失败：{error}",
+  backupLastSuccess: "上次备份成功：{time} · {name}（{size}）",
+  backupLastSuccessNone: "还没有成功备份过",
+  backupLastFailed: "上次备份失败（{time}）：{error}",
   backupInvalidSetting: "备份设置校验失败：请检查时间/时区/目录（目录必须绝对路径、可写，且不能落在插件或数据目录内部）",
   backupSlowHint: "备份期间 AstrBot 会短暂变慢（官方导出器没有异步打包），默认时间放在凌晨。",
   backupNoCleanupHint: "核不会自动清理备份文件；请留意占用，在下方手动删除。"
 });
 Object.assign(messages["en-US"], {
-  settingsBackupTab: "Backup",
+  backupTab: "Backup",
   backupTitle: "Automatic backup",
   backupHint: "Generates a full backup via AstrBot's official exporter (main DB, knowledge base, plugins & data dirs, config); backup only, no restore.",
   backupEnabled: "Enable automatic backup",
@@ -207,8 +208,9 @@ Object.assign(messages["en-US"], {
   backupDeleteConfirmTitle: "Delete backup",
   backupDeleteConfirm: "Delete backup “{name}”? The file is removed permanently.",
   backupDeleted: "Backup deleted",
-  backupLastSuccess: "Last backup succeeded: {name} ({size})",
-  backupLastFailed: "Last backup failed: {error}",
+  backupLastSuccess: "Last backup succeeded: {time} · {name} ({size})",
+  backupLastSuccessNone: "No successful backup yet",
+  backupLastFailed: "Last backup failed ({time}): {error}",
   backupInvalidSetting: "Backup settings rejected: check time/timezone/directory (absolute, writable, outside plugin & data directories)",
   backupSlowHint: "AstrBot slows down briefly during backup (the official exporter has no async packing); the default time is early morning.",
   backupNoCleanupHint: "The core never auto-deletes backups; watch disk usage and delete manually below."
@@ -919,7 +921,6 @@ async function loadSettingsPanel() {
     loadOnce("config", loadConfig),
     loadOnce("rule", loadRule),
     loadOnce("mirrors", loadMirrors),
-    loadOnce("backup", loadBackup),
   ]);
   state.settingsLoaded = true;
 }
@@ -1187,6 +1188,13 @@ function formatBytes(value) {
   return `${current >= 10 || index === 0 ? Math.round(current) : current.toFixed(1)} ${units[index]}`;
 }
 
+function formatBackupTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "—";
+  // 后端给的是带时区的 ISO 本地时间（2026-09-23T04:50:12+08:00），截到分钟即可。
+  return raw.replace("T", " ").slice(0, 16);
+}
+
 function renderBackupList(payload) {
   const node = document.getElementById("backup-list");
   const total = document.getElementById("backup-total");
@@ -1272,15 +1280,44 @@ async function loadBackup() {
     ephemeral.hidden = !status.dir_ephemeral;
     ephemeral.textContent = status.dir_ephemeral ? `⚠️ ${t("backupEphemeralWarning")}` : "";
   }
+  const result = status.last_result;
+  // 最近一次成功单独一行：后面即使失败，也还能看到"上次成功是什么时候"。
+  // 状态文件里没有记录（旧版本升级上来 / 状态被清空）时，退回目录里最新的完整备份文件。
+  const backupFiles = Array.isArray(listing?.files) ? listing.files : [];
+  const newestFile = backupFiles.find((item) => item.valid !== false) || null;
+  const success = status.last_success
+    || (result?.success ? result : null)
+    || (!status.running && newestFile
+      ? { filename: newestFile.name, size_bytes: newestFile.size, finished_at: newestFile.modified_at }
+      : null);
+  const successLine = document.getElementById("backup-last-success");
+  if (successLine) {
+    if (success) {
+      successLine.hidden = false;
+      successLine.textContent = t("backupLastSuccess")
+        .replace("{time}", formatBackupTime(success.finished_at))
+        .replace("{name}", success.filename || "")
+        .replace("{size}", formatBytes(success.size_bytes || 0));
+    } else if (result) {
+      // 有尝试但从来没成功过：也要说清楚，别让人以为"没这回事"。
+      successLine.hidden = false;
+      successLine.textContent = t("backupLastSuccessNone");
+    } else {
+      successLine.hidden = true;
+      successLine.textContent = "";
+    }
+  }
   const last = document.getElementById("backup-last-result");
   if (last) {
-    const result = status.last_result;
-    if (!result) { last.hidden = true; last.textContent = ""; }
-    else {
+    if (!result || result.success) {
+      // 成功那一行已经显示过时间/名称/大小，这里不再重复一遍。
+      last.hidden = true;
+      last.textContent = "";
+    } else {
       last.hidden = false;
-      last.textContent = result.success
-        ? t("backupLastSuccess").replace("{name}", result.filename || "").replace("{size}", formatBytes(result.size_bytes || 0))
-        : t("backupLastFailed").replace("{error}", result.error || "");
+      last.textContent = t("backupLastFailed")
+        .replace("{time}", formatBackupTime(result.finished_at))
+        .replace("{error}", result.error || "");
     }
   }
   renderBackupProgress(status);
@@ -2357,7 +2394,8 @@ const sectionLoaders = {
   rule: { targetId: "rule-plugins", labelKey: "ruleTitle", load: () => loadOnce("rule", loadRule) },
 
   catalog: { targetId: "catalog-list", labelKey: "catalog", load: () => loadOnce("catalog", loadCatalog) },
-  diagnostics: { targetId: "diagnostic-log-list", labelKey: "diagnosticTitle", load: () => loadDiagnostics(true) }
+  diagnostics: { targetId: "diagnostic-log-list", labelKey: "diagnosticTitle", load: () => loadDiagnostics(true) },
+  backup: { targetId: "backup-list", labelKey: "backupTab", load: () => loadOnce("backup", loadBackup) }
 };
 
 function renderSectionLoadError(name, error) {
@@ -2436,6 +2474,9 @@ async function activateTab(button, focus = false) {
   }
   if (button.dataset.tab === "settings" && !state.settingsLoaded) {
     loadSettingsPanel().catch((error) => renderSectionLoadError("settings", error));
+  }
+  if (button.dataset.tab === "backup") {
+    loadOnce("backup", loadBackup).catch((error) => renderSectionLoadError("backup", error));
   }
   if (button.dataset.tab === "logs") {
     loadDiagnostics(!state.diagnosticLoaded).catch((error) => renderSectionLoadError("diagnostics", error));

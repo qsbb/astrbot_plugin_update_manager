@@ -269,6 +269,8 @@ class BackupRunner:
             "message": "",
             "started_at": "",
             "last_result": None,
+            #: 最近一次「成功」的备份：后面即使失败，也能回答"上次成功是什么时候"。
+            "last_success": None,
         }
         if store is not None:
             # 状态文件损坏（截断/手改）不能影响插件启动：读失败就当没有历史结果。
@@ -276,8 +278,16 @@ class BackupRunner:
                 saved = store.read(self.STATE_FILE, None)
             except Exception:  # noqa: BLE001
                 saved = None
-            if isinstance(saved, dict) and isinstance(saved.get("last_result"), dict):
-                self._state["last_result"] = saved["last_result"]
+            if isinstance(saved, dict):
+                last_result = saved.get("last_result")
+                if isinstance(last_result, dict):
+                    self._state["last_result"] = last_result
+                last_success = saved.get("last_success")
+                if isinstance(last_success, dict):
+                    self._state["last_success"] = last_success
+                elif isinstance(last_result, dict) and last_result.get("success"):
+                    # 旧状态文件只存了 last_result；成功的那个结果本身就是上次成功。
+                    self._state["last_success"] = last_result
 
     @property
     def running(self) -> bool:
@@ -317,10 +327,18 @@ class BackupRunner:
 
     def _persist(self, result: dict[str, Any]) -> None:
         self._state["last_result"] = result
+        if result.get("success"):
+            self._state["last_success"] = result
         if self.store is None:
             return
         try:
-            self.store.write(self.STATE_FILE, {"last_result": result})
+            self.store.write(
+                self.STATE_FILE,
+                {
+                    "last_result": self._state["last_result"],
+                    "last_success": self._state["last_success"],
+                },
+            )
         except Exception:  # noqa: BLE001 - 持久化失败不影响备份本身
             pass
 

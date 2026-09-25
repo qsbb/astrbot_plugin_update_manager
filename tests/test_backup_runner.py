@@ -421,6 +421,62 @@ def test_runner_persists_last_result_to_store(monkeypatch, paths, tmp_path):
     assert restored.status()["last_result"]["success"] is True
 
 
+def test_runner_keeps_last_success_after_a_later_failure(monkeypatch, paths, tmp_path):
+    """状态栏要能回答"上次成功是什么时候"：后续失败不能把成功记录顶掉。"""
+    _settings_paths(monkeypatch, paths)
+
+    class Store:
+        def __init__(self):
+            self.data = {}
+
+        def read(self, key, default=None):
+            return self.data.get(key, default)
+
+        def write(self, key, value):
+            self.data[key] = value
+
+    store = Store()
+    runner = BackupRunner(_context(), store=store)
+    ok = asyncio.run(runner.run(target_dir=str(tmp_path / "b"), trigger="manual"))
+    assert runner.status()["last_success"]["filename"] == ok["filename"]
+    assert runner.status()["last_success"]["finished_at"]
+
+    class BrokenExporter(FakeExporter):
+        async def export_all(self, *, output_dir, progress_callback=None):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(br, "load_exporter", lambda: BrokenExporter)
+    failed = asyncio.run(runner.run(target_dir=str(tmp_path / "b"), trigger="manual"))
+    assert failed["success"] is False
+
+    status = runner.status()
+    assert status["last_result"]["success"] is False
+    assert status["last_success"]["filename"] == ok["filename"]
+    assert store.data["backup-state.json"]["last_success"]["filename"] == ok["filename"]
+    # 重启后仍记得上次成功
+    assert BackupRunner(_context(), store=store).status()["last_success"]["filename"] == ok["filename"]
+
+
+def test_runner_recovers_last_success_from_legacy_state_file():
+    """旧状态文件只有 last_result：成功的那次算上次成功，失败的不能冒充。"""
+
+    class Store:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self, key, default=None):
+            return self.payload
+
+        def write(self, key, value):
+            self.payload = value
+
+    legacy = Store({"last_result": {"success": True, "filename": "astrbot_backup_old.zip"}})
+    assert BackupRunner(_context(), store=legacy).status()["last_success"]["filename"] == "astrbot_backup_old.zip"
+
+    failed_only = Store({"last_result": {"success": False, "error": "BACKUP_FAILED"}})
+    assert BackupRunner(_context(), store=failed_only).status()["last_success"] is None
+
+
 # ------------------------------------------------------------------ 调度
 
 

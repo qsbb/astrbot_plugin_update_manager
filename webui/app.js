@@ -67,6 +67,7 @@ const VIEWS = {
   rules: { icon: "▤", label: "每日规则", group: "operations", inSuite: "updates" },
   mirrors: { icon: "⇄", label: "镜像加速", group: "operations", inSuite: "updates" },
   diagnostics: { icon: "⌁", label: "诊断与日志", tabLabel: "日志", group: "operations", suite: ["diagnostics", "modules"] },
+  backup: { icon: "⤓", label: "备份", group: "operations" },
   settings: { icon: "⚙", label: "设置与安全", group: "operations" },
   security: { icon: "◇", label: "账户与安全", group: "operations", hidden: true },
 };
@@ -586,7 +587,7 @@ function settingsView() {
     const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="backup">备份</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>${state.modelTestRunning ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="backup">${backupPanel()}</section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>${state.modelTestRunning ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
 }
 function formatBytes(value) {
   const size = Number(value || 0);
@@ -595,6 +596,11 @@ function formatBytes(value) {
   let index = 0; let current = size;
   while (current >= 1024 && index < units.length - 1) { current /= 1024; index += 1; }
   return `${current >= 10 || index === 0 ? Math.round(current) : current.toFixed(1)} ${units[index]}`;
+}
+
+function backupView() {
+  const canWrite = state.session?.role === "owner" || state.session?.role === "admin";
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 数据安全</div><h1>备份</h1><p>走 AstrBot 官方导出器生成完整备份（含主库、知识库、插件与数据目录、配置）；可指定保存目录，核不会自动清理备份文件。</p></div><div class="actions"><button class="btn" id="backup-view-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><section class="workspace">${backupPanel()}</section>`;
 }
 
 function backupPanel() {
@@ -608,11 +614,17 @@ function backupPanel() {
     ? files.map(item => `<tr><td><code>${esc(item.name)}</code>${item.valid === false ? ` <span class="pill managed">${status.running ? "可能正在写入（备份进行中）" : "可能不完整（中断）"}</span>` : ""}</td><td>${esc(item.modified_at || "")}</td><td>${formatBytes(item.size)}</td><td><button class="link" data-backup-delete="${esc(item.name)}" ${canWrite && !busy ? "" : "disabled"}>删除</button></td></tr>`).join("")
     : `<tr><td colspan="4" class="empty-cell">目标目录里还没有核生成的备份。</td></tr>`;
   const last = status.last_result;
-  const lastText = !last
-    ? "尚无备份记录"
-    : last.success
-      ? `上次备份成功：${esc(last.filename || "")}（${formatBytes(last.size_bytes || 0)}）`
-      : `上次备份失败：${esc(last.error || "")}`;
+  // 最近一次成功：优先状态文件；旧版本升级上来 / 状态被清空时退回目录里最新的完整备份文件。
+  const newestFile = files.find(item => item.valid !== false) || null;
+  const lastSuccess = status.last_success
+    || (last?.success ? last : null)
+    || (!status.running && newestFile ? { filename: newestFile.name, size_bytes: newestFile.size, finished_at: newestFile.modified_at } : null);
+  const lastText = lastSuccess
+    ? `上次备份成功：${formatBackupTime(lastSuccess.finished_at)} · ${esc(lastSuccess.filename || "")}（${formatBytes(lastSuccess.size_bytes || 0)}）`
+      + (last && !last.success ? `<br />上次备份失败（${formatBackupTime(last.finished_at)}）：${esc(last.error || "")}` : "")
+    : last
+      ? `上次备份失败（${formatBackupTime(last.finished_at)}）：${esc(last.error || "")}`
+      : "尚无备份记录";
   const scheduleError = status.schedule_error
     ? `<p class="form-hint" style="color:var(--orange)">计划未生效：${esc(status.schedule_error)}</p>`
     : "";
@@ -621,6 +633,12 @@ function backupPanel() {
 }
 
 let backupPoller = null;
+
+function formatBackupTime(value) {
+  const raw = String(value || "").trim();
+  // 后端给的是带时区的 ISO 本地时间（2026-09-23T04:50:12+08:00），截到分钟即可。
+  return raw ? raw.replace("T", " ").slice(0, 16) : "—";
+}
 
 function backupProgressText(status) {
   if (!status?.running) return "";
@@ -667,7 +685,7 @@ async function refreshBackup() {
   } catch (error) {
     state.backup = { status: { success: false, error: error.message }, listing: { success: false, files: [], total_bytes: 0 } };
   }
-  if (state.view === "settings") dashboard();
+  if (state.view === "settings" || state.view === "backup") dashboard();
 }
 
 async function runBackupNow() {
@@ -1083,8 +1101,8 @@ function securityPanel() {
 function securityView() {
   return `<div class="page-head"><div><div class="eyebrow">系列治理 / 访问控制</div><h1>安全与账户</h1><p>控制中心管理员与核 Page 共用同一份本地账户；登录状态有时效，过期后需重新登录。</p></div><div class="actions"><button class="btn" id="admins-reload">刷新账户</button><button class="btn danger" id="security-logout">退出登录</button></div></div>${securityPanel()}`;
 }
-const VIEW_RENDERERS = { modules: modulesView, control: controlView, updates: updatesView, recommendations: recommendationsView, rules: rulesView, mirrors: mirrorsView, diagnostics: diagnosticsView, settings: settingsView, security: securityView };
-const VIEW_ENTERS = { control: loadControl, updates: async () => { dashboard(); await loadTransactions(); }, recommendations: loadRecommendations, rules: loadRules, mirrors: loadMirrors, diagnostics: loadDiagnostics, settings: loadSettings, security: loadAdmins };
+const VIEW_RENDERERS = { modules: modulesView, control: controlView, updates: updatesView, recommendations: recommendationsView, rules: rulesView, mirrors: mirrorsView, diagnostics: diagnosticsView, backup: backupView, settings: settingsView, security: securityView };
+const VIEW_ENTERS = { control: loadControl, updates: async () => { dashboard(); await loadTransactions(); }, recommendations: loadRecommendations, rules: loadRules, mirrors: loadMirrors, diagnostics: loadDiagnostics, backup: loadBackupView, settings: loadSettings, security: loadAdmins };
 async function enterView(view) {
   const id = VIEWS[view] ? view : "control";
   state.view = id;
@@ -1156,7 +1174,7 @@ function bindDashboard() {
   bindSettingsTabs();
   document.getElementById("logout")?.addEventListener("click", logout); document.getElementById("rail-logout")?.addEventListener("click", logout); document.getElementById("mobile-logout")?.addEventListener("click", logout);
   document.getElementById("refresh")?.addEventListener("click", loadDashboard); document.getElementById("check")?.addEventListener("click", () => checkUpdates()); document.getElementById("export")?.addEventListener("click", exportSummary);
-  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings());
+  document.getElementById("refresh-logs")?.addEventListener("click", () => loadDiagnosticLogs(true)); document.getElementById("clear-logs")?.addEventListener("click", () => clearDiagnosticLogs()); document.getElementById("log-auto")?.addEventListener("change", () => toggleLogAuto()); document.getElementById("log-pause")?.addEventListener("click", toggleLogPause); document.getElementById("log-autoscroll")?.addEventListener("click", toggleLogAutoScroll); document.getElementById("log-export")?.addEventListener("click", exportDiagnosticLogs); document.getElementById("log-level")?.addEventListener("change", event => { state.logThreshold = event.target.value || ""; dashboard(); }); document.getElementById("log-range")?.addEventListener("change", event => { state.logRange = event.target.value || "all"; dashboard(); }); document.getElementById("settings-reload")?.addEventListener("click", () => loadSettings()); document.getElementById("backup-view-reload")?.addEventListener("click", () => loadBackupView());
   document.getElementById("route-reset-all")?.addEventListener("click", resetAllRoutes);
   document.getElementById("route-test-all")?.addEventListener("click", () => runModelTest());
   document.getElementById("backup-run")?.addEventListener("click", runBackupNow);
@@ -1385,16 +1403,20 @@ async function loadSettings() {
     state.settingsData = await get("settings");
     try { state.modelOptions = await get("model-options"); } catch (error) { state.modelOptions = null; }
     try { state.routes = await get("model-routing"); } catch (error) { state.routes = null; }
-    try {
-      const [backupStatus, backupListing] = await Promise.all([get("backup/status"), get("backup/list")]);
-      state.backup = { status: backupStatus, listing: backupListing };
-      renderBackupProgress(backupStatus);
-      if (backupStatus?.running) startBackupPolling();
-    } catch (error) {
-      state.backup = { status: { success: false, error: error.message }, listing: { success: false, files: [], total_bytes: 0 } };
-    }
     if (state.view === "settings") dashboard();
   } catch (error) { notify(error.message, true); }
+}
+
+async function loadBackupView() {
+  try {
+    const [backupStatus, backupListing] = await Promise.all([get("backup/status"), get("backup/list")]);
+    state.backup = { status: backupStatus, listing: backupListing };
+    renderBackupProgress(backupStatus);
+    if (backupStatus?.running) startBackupPolling();
+  } catch (error) {
+    state.backup = { status: { success: false, error: error.message }, listing: { success: false, files: [], total_bytes: 0 } };
+  }
+  if (state.view === "backup") dashboard();
 }
 async function resetAllRoutes() {
   if (!(await confirmDialog("把所有职责恢复为「跟随 AstrBot 原生」？插件自己的显式配置不受影响。"))) return;
@@ -1426,7 +1448,14 @@ async function saveSettings() {
     const [kind, field] = String(node.dataset.settingRoute).split(".");
     if (!routes[kind] && node.value.trim()) routes[kind] = { [field]: node.value.trim() };
   });
-  const payload = { model_routing: routes, auto_update_enabled: !!document.getElementById("setting-auto-update")?.checked, log_level: document.getElementById("setting-log-level")?.value || "INFO" };
+  // 只提交当前视图里真实存在的字段：备份页没有路由 / 自动更新 / 日志级别控件，
+  // 无条件兜底会把模型路由清空、把自动更新写成 false、把日志级别写成 INFO。
+  const payload = {};
+  if (document.querySelector("[data-route-provider]")) payload.model_routing = routes;
+  const autoUpdateNode = document.getElementById("setting-auto-update");
+  if (autoUpdateNode) payload.auto_update_enabled = !!autoUpdateNode.checked;
+  const logLevelNode = document.getElementById("setting-log-level");
+  if (logLevelNode) payload.log_level = logLevelNode.value || "INFO";
   const host = document.getElementById("setting-webui-host")?.value.trim() || "";
   const portRaw = document.getElementById("setting-webui-port")?.value.trim() || "";
   const publicUrl = document.getElementById("setting-webui-url")?.value.trim() || "";
