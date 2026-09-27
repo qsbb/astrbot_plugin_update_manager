@@ -301,11 +301,11 @@ def test_snapshot_repairs_invalid_runtime_version_from_metadata(monkeypatch, tmp
 
 def test_module_discovery_prefers_real_unicode_directory_path(monkeypatch, tmp_path):
     install_shared_preferences(monkeypatch, {})
-    plugin = tmp_path / "凝心溯溪-声"
+    plugin = tmp_path / "声"
     plugin.mkdir()
     (plugin / "metadata.yaml").write_text(
         "name: astrbot_plugin_voice_hub\n"
-        "display_name: 凝心溯溪-声\n"
+        "display_name: 声\n"
         "version: 1.2.3\n",
         encoding="utf-8",
     )
@@ -320,8 +320,8 @@ def test_module_discovery_prefers_real_unicode_directory_path(monkeypatch, tmp_p
     snapshots = asyncio.run(AstrBotAdapter(FakeContext([], manager)).snapshot_plugins())
     assert len(snapshots) == 1
     assert snapshots[0].name == "astrbot_plugin_voice_hub"
-    assert snapshots[0].display_name == "凝心溯溪-声"
-    assert snapshots[0].root_dir_name == "凝心溯溪-声"
+    assert snapshots[0].display_name == "声"
+    assert snapshots[0].root_dir_name == "声"
 
 
 def test_snapshot_falls_back_to_installed_metadata_when_runtime_empty(

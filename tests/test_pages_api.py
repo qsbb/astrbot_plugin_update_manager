@@ -649,7 +649,7 @@ def test_series_diagnostics_reads_legacy_embodiment_disabled_contract_without_bl
             SimpleNamespace(
                 name="astrbot_plugin_quest_avatar_bridge",
                 root_dir_name="astrbot_plugin_quest_avatar_bridge",
-                display_name="凝心溯溪-临",
+                display_name="临",
                 repo=("https://github.com/qsbb/astrbot_plugin_quest_avatar_bridge"),
                 loaded=True,
             ),
@@ -666,7 +666,7 @@ def test_series_diagnostics_reads_legacy_embodiment_disabled_contract_without_bl
         if item["plugin_id"] == "astrbot_plugin_embodiment_bridge"
     )
     assert member["plugin_name"] == "临"
-    assert member["display_name"] == "凝心溯溪-临"
+    assert member["display_name"] == "临"
     assert member["status"] == "disabled"
     assert member["reason"] == "DIAGNOSTIC_DISABLED"
     assert not any(
@@ -2203,7 +2203,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         for item in payload["items"]
         if item["plugin_id"] == "astrbot_plugin_relationship"
     )
-    assert relationship["name"] == "凝心溯溪-情"
+    assert relationship["name"] == "情"
     assert (
         relationship["repo_url"]
         == "https://github.com/qsbb/astrbot_plugin_relationship"
@@ -2213,7 +2213,7 @@ def test_recommendations_are_fixed_and_self_actions_are_blocked(monkeypatch, tmp
         for item in payload["items"]
         if item["plugin_id"] == "astrbot_plugin_environment_awareness"
     )
-    assert environment["name"] == "凝心溯溪-境"
+    assert environment["name"] == "境"
     assert environment["repo_url"] == (
         "https://github.com/qsbb/astrbot_plugin_environment_awareness"
     )
@@ -2254,7 +2254,7 @@ def test_self_update_check_reports_repository_update_without_self_action(
         return (
             SimpleNamespace(
                 name=module.PLUGIN_NAME,
-                root_dir_name="凝心溯溪-核",
+                root_dir_name="核",
                 version="0.1.0",
                 loaded=True,
                 activated=True,

@@ -1,4 +1,4 @@
-"""凝心溯溪-核：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
+"""核：安全、串行、可回滚的 AstrBot 插件自动更新器。"""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.20.0"
+__version__ = "0.21.0"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -125,7 +125,7 @@ WEBUI_SETTINGS_KEYS = frozenset(
 @register(
     PLUGIN_NAME,
     "凌溪",
-    "凝心溯溪-核，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
+    "核，安全管理 AstrBot 插件更新、备份、回滚与每日规则",
     __version__,
 )
 class UpdateManagerPlugin(PagesAPIMixin, Star):
@@ -1191,7 +1191,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         """插件被配置为禁用时，返回统一提示；否则返回 None。"""
         if self.enabled:
             return None
-        return "凝心溯溪-核 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
+        return "核 已被配置禁用（enabled=false）：管理命令与调度均不执行。"
 
     @filter.command_group("aup")
     def aup_group(self) -> None:
@@ -1206,7 +1206,7 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             return
         report = self.adapter.probe_capabilities()
         lines = [
-            "凝心溯溪-核 / 能力探针",
+            "核 / 能力探针",
             f"PluginManager: {self._yn(report.plugin_manager)}",
             f"插件目录: {self._yn(report.list_plugins)}",
             f"安装来源: {self._yn(report.install_sources)}",

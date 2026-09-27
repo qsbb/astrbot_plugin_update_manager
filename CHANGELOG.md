@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## 0.21.0 - 2026-09-28
+
+### 变更
+
+- 展示名去掉系列前缀：`metadata.yaml` 的 `display_name` 由「凝心溯溪-核」改为单字 **核**；核的可信登记、页面标题、`desc` 前缀与文档同步（系列归属仍由 `desc` / `short_desc` 里的「凝心溯溪系列」措辞承载）。
+- `core/scheduler.py` 补 `from typing import Any`（ruff `F821`），并更新 `CONVENTIONS.md` §2.1 的展示名规则。
+
+
 ## 0.20.0 - 2026-09-25
 
 ### 变更
