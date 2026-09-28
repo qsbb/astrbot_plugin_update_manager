@@ -171,3 +171,48 @@ def test_series_ui_interaction_audit_accepts_shared_series_ui(tmp_path):
     finally:
         module.TARGETS = original
     assert result == {"errors": [], "warnings": []}
+
+
+def test_series_ui_header_surface_does_not_clip_dropdowns():
+    """页头通用面必须让下拉菜单能完整显示。
+
+    两个条件缺一不可（实拍回归：知的「更多 ▾」只露出第一项）：
+    1) overflow: visible —— 面板用绝对定位展开，被祖先裁切就只剩一条；
+    2) 页头自带层叠上下文（z-index + isolation）—— 页面外壳 .shell 常带
+       backdrop-filter，会把同级 <main> 画在页头之上，面板即便没被裁也会被盖住。
+    """
+    root = Path(__file__).resolve().parents[1]
+    css = (root / "ui" / "series-ui.css").read_text(encoding="utf-8")
+
+    start = css.index(":where(body[data-series-ui] .hero)")
+    header_rule = css[start : css.index("}", start)]
+    assert "overflow: visible" in header_rule, "页头不能裁掉下拉菜单"
+    assert "overflow: hidden" not in header_rule
+    assert "z-index: 1" in header_rule, "页头需要层叠上下文，否则被 <main> 盖住"
+    assert "isolation: isolate" in header_rule
+
+    # 面板层级要高于页头自身，且低于弹窗层（1200+）
+    panel_rule_start = css.index(".topbar-inner .more-panel")
+    panel_rule = css[panel_rule_start : css.index("}", panel_rule_start)]
+    assert "z-index: 60" in panel_rule
+    assert "z-index: 1200" not in css and "z-index: 1300" not in css
+
+
+def test_series_ui_header_clipping_override_is_page_owned():
+    """需要裁剪溢出装饰的页面必须自己声明 overflow: hidden。
+
+    核仓库只放规范与正本，其它插件是同级目录（CI 上可能不在场），
+    因此这里在缺失时跳过，只在同仓布局下做断言。
+    """
+    import pytest
+
+    root = Path(__file__).resolve().parents[1]
+    voice_css = root.parent / "astrbot_plugin_voice_hub" / "pages" / "settings" / "style.css"
+    if not voice_css.is_file():
+        pytest.skip("声仓库不在同仓布局，跳过页面级裁剪断言")
+    text = voice_css.read_text(encoding="utf-8")
+    marker = "body[data-series-ui] .studio-hero {"
+    assert marker in text
+    hero_block = text[text.index(marker) :]
+    hero_block = hero_block[: hero_block.index("}")]
+    assert "overflow: hidden" in hero_block, "声的 hero 光斑依赖自身裁剪"
