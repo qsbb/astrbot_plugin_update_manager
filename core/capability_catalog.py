@@ -183,6 +183,21 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "current_channel_context",
+        "domain": "message",
+        "title": "当前身份与聊天场景",
+        "description": "让她知道本轮来自哪个渠道，以及平台可提供的 Bot 昵称、当前群名和群名片。",
+        "providers": [
+            {
+                "plugin_id": _CF,
+                "fields": ["current_channel_context_enabled"],
+                "switch_field": "current_channel_context_enabled",
+                "switch_label": "当前身份与聊天场景",
+                "hint": "只作本轮对话背景：说明 QQ、微信、临的具身、电话等渠道，并在可获取时附上 Bot 昵称、当前群名和群名片；不主动播报、不改变唤醒规则。",
+            }
+        ],
+    },
+    {
         "id": "conversation_style",
         "domain": "message",
         "title": "回复风格与收尾",

@@ -83,6 +83,7 @@ def test_switch_field_is_declared_on_boolean_master_switch_capabilities():
         "interrupt": "interrupt_enabled",
         "context_bridge": "private_context_bridge_enabled",
         "group_context": "group_context_enabled",
+        "current_channel_context": "current_channel_context_enabled",
         "context_budget": "context_budget_enforce",
         "mood": "mood_enabled",
         "retrieval": "embedding_enabled",
@@ -95,6 +96,8 @@ def test_switch_field_is_declared_on_boolean_master_switch_capabilities():
         "delivery_rhythm": "segment_enabled",
         "bridge_diagnostics": "diagnostic_log_enabled",
     }
+    assert caps["current_channel_context"]["title"] == "当前身份与聊天场景"
+    assert "群名" in caps["current_channel_context"]["description"]
     for capability_id, field in expected.items():
         provider = caps[capability_id]["providers"][0]
         assert provider["switch_field"] == field, capability_id
