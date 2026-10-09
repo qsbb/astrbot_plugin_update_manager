@@ -292,3 +292,5 @@ body[data-series-ui] .version-badge.check_failed { color: var(--si-danger); back
 }
 body[data-series-ui] .pill.warn { color: var(--si-warning); background: var(--si-warning-soft); }
 body[data-series-ui] .pill.danger { color: var(--si-danger); background: var(--si-danger-soft); }
+
+.form-grid label[hidden],.rule-grid label[hidden]{display:none}

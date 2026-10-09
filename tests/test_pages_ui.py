@@ -1317,7 +1317,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.21.2-1" in html
+    assert "?v=0.21.3-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1352,4 +1352,36 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.21.2-1" in webui_html
+    assert "?v=0.21.3-1" in webui_html
+
+
+def test_settings_conditional_rows_for_dependent_toggles():
+    """条件展示：依赖开关关闭时收起从属设置行（仅展示层，不改配置语义）。"""
+    webui_dir = PLUGIN_ROOT / "webui"
+    js = (webui_dir / "app.js").read_text(encoding="utf-8")
+    css = (webui_dir / "style.css").read_text(encoding="utf-8")
+    assert "function syncConditionalRows(" in js
+    assert 'data-cond-dep="webui_enabled"' in js
+    assert 'data-cond-dep="auto_backup_enabled"' in js
+    assert 'data-cond-field="webui_host"' in js
+    assert 'data-cond-field="auto_backup_local_time"' in js
+    assert "syncConditionalRows();\n  document.querySelectorAll" in js
+    sync = js.split("function syncConditionalRows() {", 1)[1].split("\nfunction bindDashboard()", 1)[0]
+    assert ".disabled =" not in sync, "显隐逻辑不能覆盖角色权限设置的 disabled 状态"
+    assert ".form-row[hidden]" in css
+
+
+def test_manager_page_hides_webui_and_backup_details_when_disabled():
+    """核 Page：监听参数和备份计划字段随各自总开关收起，保留值且不改权限态。"""
+    pages_dir = PLUGIN_ROOT / "pages" / "manager"
+    js = (pages_dir / "app.js").read_text(encoding="utf-8")
+    html = (pages_dir / "index.html").read_text(encoding="utf-8")
+    css = (pages_dir / "style.css").read_text(encoding="utf-8")
+    assert 'webui_host: { key: "webui_enabled", on: true }' in js
+    assert 'webui_public_url: { key: "webui_enabled", on: true }' in js
+    assert "applyConfigFieldVisibility();\n  bindModelRoutingControls();" in js
+    assert 'addEventListener("change", applyConfigFieldVisibility)' in js
+    assert 'data-backup-dependent' in html
+    assert "function applyBackupFieldVisibility()" in js
+    assert 'addEventListener("change", applyBackupFieldVisibility)' in js
+    assert ".form-grid label[hidden]" in css

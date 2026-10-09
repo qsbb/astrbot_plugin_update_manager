@@ -896,24 +896,50 @@ function bindModelRoutingControls() {
   form.querySelectorAll("[data-route-test]").forEach((node) => node.addEventListener("click", () => runModelTest([node.dataset.routeTest])));
 }
 
+const CONFIG_FIELD_DEPENDENCIES = {
+  webui_host: { key: "webui_enabled", on: true },
+  webui_port: { key: "webui_enabled", on: true },
+  webui_public_url: { key: "webui_enabled", on: true },
+};
+
+function applyConfigFieldVisibility() {
+  const form = document.getElementById("config-form");
+  if (!form) return;
+  const enabled = form.querySelector('[name="webui_enabled"]')?.checked === true;
+  form.querySelectorAll("[data-config-key]").forEach((field) => {
+    const dep = CONFIG_FIELD_DEPENDENCIES[field.dataset.configKey];
+    if (dep) field.hidden = enabled !== dep.on;
+  });
+}
+
+function applyBackupFieldVisibility() {
+  const enabled = document.getElementById("backup-enabled")?.checked === true;
+  document.querySelectorAll("[data-backup-dependent]").forEach((field) => {
+    field.hidden = !enabled;
+  });
+}
+
 function makeField(key, field, value) {
   const label = escapeHtml(field.description || key);
+  const visibilityAttr = CONFIG_FIELD_DEPENDENCIES[key]
+    ? `data-config-key="${escapeHtml(key)}"`
+    : "";
   if (field.write_only) {
     const configured = Boolean(value?.configured);
     return `<label><span>${label}</span><input name="${key}" type="password" autocomplete="new-password" placeholder="${configured ? t("configured") : t("notConfigured")}" /><small>${t("writeOnly")}</small></label>`;
   }
-  if (field.type === "bool") return `<label class="switch"><input name="${key}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
+  if (field.type === "bool") return `<label class="switch" ${visibilityAttr}><input name="${key}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
   if (key === "model_routing" && field.type === "object") {
     const routes = value && typeof value === "object" ? value : {};
     const kinds = modelRouteKinds(field);
     const rows = kinds.map(([kind, kindLabel]) => renderModelRouteRow(kind, kindLabel, routes[kind] || {})).join("");
     return `<fieldset class="model-routing-field"><legend>${label}</legend><p class="field-hint">${t("modelRoutingHint")}</p>${rows}${modelTestDetailsHtml()}<div class="model-route-actions"><button type="button" class="btn primary" id="model-test-all" ${state.modelTestRunning ? "disabled" : ""}>${t(state.modelTestRunning ? "modelTesting" : "modelTestAll")}</button><span class="model-test-summary" id="model-test-summary">${modelTestSummaryHtml()}</span></div></fieldset>`;
   }
-  if (field.options) return `<label><span>${label}</span><select name="${key}">${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
+  if (field.options) return `<label ${visibilityAttr}><span>${label}</span><select name="${key}">${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
   const type = field.type === "int" || field.type === "float" ? "number" : "text";
   const step = field.type === "float" ? "any" : "1";
   const disabled = ["data_dir", "plugin_root"].includes(key) ? "disabled" : "";
-  return `<label><span>${label}</span><input name="${key}" type="${type}" step="${step}" value="${escapeHtml(value)}" ${disabled}/></label>`;
+  return `<label ${visibilityAttr}><span>${label}</span><input name="${key}" type="${type}" step="${step}" value="${escapeHtml(value)}" ${disabled}/></label>`;
 }
 
 async function loadSettingsPanel() {
@@ -971,6 +997,7 @@ async function loadConfig() {
   state.config = data;
   state.modelOptions = options;
   document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).filter(([key]) => !BACKUP_SETTING_KEYS.includes(key)).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  applyConfigFieldVisibility();
   bindModelRoutingControls();
   configFormBaseline = captureFormState(document.getElementById("config-form"));
   await loadWebUiAddress();
@@ -1266,6 +1293,7 @@ async function loadBackup() {
   setValue("backup-time", status.local_time || "03:30");
   setValue("backup-timezone", status.timezone || "Asia/Shanghai");
   setValue("backup-dir", status.configured_dir || "");
+  applyBackupFieldVisibility();
   const next = document.getElementById("backup-next-run");
   if (next) next.textContent = status.next_run ? status.next_run.replace("T", " ").slice(0, 16) : t("backupDisabled");
   const effective = document.getElementById("backup-effective-dir");
@@ -2557,7 +2585,9 @@ function bindEvents() {
     if (!await openExternalUrl(url)) notify(t("operationFailed"), true);
   });
   document.getElementById("config-form").addEventListener("submit", saveConfig);
+  document.getElementById("config-form").addEventListener("change", applyConfigFieldVisibility);
   document.getElementById("backup-form")?.addEventListener("submit", saveBackupSettings);
+  document.getElementById("backup-enabled")?.addEventListener("change", applyBackupFieldVisibility);
   document.getElementById("backup-run")?.addEventListener("click", runBackupNow);
   document.getElementById("backup-refresh")?.addEventListener("click", () => { loadBackup().catch((error) => notify(`${t("loadFailed")}: ${error.message}`, true)); });
   document.getElementById("webui-admin-create-form")?.addEventListener("submit", createWebUiAdmin);
