@@ -201,12 +201,13 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "id": "conversation_style",
         "domain": "message",
         "title": "回复风格与收尾",
-        "description": "纯文本、场景感知与不追问的服务式收尾控制。",
+        "description": "纯文本、工具调用表达纪律、场景感知与不追问的服务式收尾控制。",
         "providers": [
             {
                 "plugin_id": _CF,
                 "fields": [
                     "plain_text_mode",
+                    "natural_tool_call_enabled",
                     "followup_guard_enabled",
                     "followup_streak_limit",
                     "followup_window_seconds",
@@ -214,6 +215,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
                 ],
                 "switch_field": "followup_guard_enabled",
                 "switch_label": "追问护栏",
+                "hint": "「自然工具调用」约束工具过程的表达：需要时可按人设自然短接话，但不机械逐步播报、不暴露工具名/JSON/报错；详见「言 → 设置中心 → 工具调用」。",
             }
         ],
     },
