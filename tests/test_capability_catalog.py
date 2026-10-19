@@ -26,6 +26,28 @@ def test_catalog_validates_clean():
     assert validate_catalog() == []
 
 
+def test_mute_recovery_maps_all_five_fields_to_existing_control_form():
+    capability = next(
+        item for item in catalog_payload()["capabilities"] if item["id"] == "mute_recovery"
+    )
+    assert capability["domain"] == "message"
+    assert capability["title"] == "解禁后自然接话"
+    assert capability["views"] == []
+    assert len(capability["providers"]) == 1
+    provider = capability["providers"][0]
+    assert provider["plugin_id"] == "astrbot_plugin_conversation_flow"
+    assert provider["switch_field"] == "mute_recovery_enabled"
+    assert provider["switch_label"] == capability["title"]
+    assert provider["fields"] == [
+        "mute_recovery_enabled",
+        "mute_recovery_start_before_count",
+        "mute_recovery_start_after_count",
+        "mute_recovery_end_before_count",
+        "mute_recovery_end_after_count",
+    ]
+    assert coverage_gaps({provider["plugin_id"]: provider["fields"]}) == {}
+
+
 def test_payload_is_json_serializable_and_domains_have_capabilities():
     payload = catalog_payload()
     json.dumps(payload, ensure_ascii=False)

@@ -183,6 +183,27 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "mute_recovery",
+        "domain": "message",
+        "title": "解禁后自然接话",
+        "description": "被禁言后，结合附近聊天和当前人设，决定恢复发言时是否接话。",
+        "providers": [
+            {
+                "plugin_id": _CF,
+                "fields": [
+                    "mute_recovery_enabled",
+                    "mute_recovery_start_before_count",
+                    "mute_recovery_start_after_count",
+                    "mute_recovery_end_before_count",
+                    "mute_recovery_end_after_count",
+                ],
+                "switch_field": "mute_recovery_enabled",
+                "switch_label": "解禁后自然接话",
+                "hint": "四项消息条数均为上限，范围 0-30；不等待凑齐，解禁后观察设为 0 时关闭后续观察。",
+            }
+        ],
+    },
+    {
         "id": "current_channel_context",
         "domain": "message",
         "title": "当前身份与聊天场景",
