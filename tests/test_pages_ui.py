@@ -381,16 +381,16 @@ def test_recommendations_tab_does_not_start_implicit_network_check():
     assert "autoCheckRecommendations()" not in tab_handler
 
 
-def test_manager_settings_area_uses_four_sub_tabs_and_backup_is_top_level():
-    """备份是「设置 / 日志」同级的顶层页签，不再藏在设置里。"""
+def test_manager_settings_area_uses_five_sub_tabs_and_backup_is_top_level():
+    """备份是「设置 / 日志」同级的顶层页签；模型路由是设置里的独立二级菜单。"""
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
     css = (PAGES_DIR / "style.css").read_text(encoding="utf-8")
 
     assert 'id="tab-settings"' in html
     assert 'id="settings" class="panel" role="tabpanel"' in html
-    assert html.count("data-si-tab=") == 4
-    for tab in ("config", "auto", "accounts", "mirrors"):
+    assert html.count("data-si-tab=") == 5
+    for tab in ("config", "model", "auto", "accounts", "mirrors"):
         assert f'data-si-tab="{tab}"' in html
         assert f'data-si-panel="{tab}"' in html
     assert 'data-si-tab="backup"' not in html
@@ -399,8 +399,12 @@ def test_manager_settings_area_uses_four_sub_tabs_and_backup_is_top_level():
     assert 'aria-controls="backup"' in html
     assert html.index('data-tab="settings"') < html.index('data-tab="backup"') < html.index('data-tab="logs"')
     # 各分区保留原有表单与列表 id，不改变保存/加载接口
-    for element_id in ("config-form", "rule-form", "backup-form", "backup-list", "webui-admins", "mirror-list", "mirror-add-form"):
+    for element_id in ("config-form", "model-form", "model-route-fields", "model-test-all", "model-reset-all", "model-route-resolved", "rule-form", "backup-form", "backup-list", "webui-admins", "mirror-list", "mirror-add-form"):
         assert f'id="{element_id}"' in html
+    # 模型路由不再渲染进「运行配置」表单
+    assert 'key !== "model_routing"' in js
+    assert "function renderModelRouting()" in js
+    assert 'data-si-panel="model"' in html
     # 旧顶层 tab 已合并
     assert 'data-tab="config"' not in html
     assert 'data-tab="mirrors"' not in html
@@ -896,20 +900,27 @@ def test_webui_control_plugin_loads_panels_independently():
 def test_manager_page_exposes_unified_model_routing_fields():
     html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
     js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
-    assert 'id="config-fields"' in html
-    assert 'key === "model_routing" && field.type === "object"' in js
-    assert "data-model-kind" in js
-    # 模型路由升级为「服务商下拉 + 模型下拉/自定义 + 音色」并带官方自检
-    assert "function modelProviderSelect(" in js
-    assert "function modelModelControl(" in js
-    assert "function renderModelRouteRow(" in js
-    assert 'data-route-test=' in js
-    assert 'id="model-test-all"' in js
-    assert 'apiPost("model-routing/test"' in js
+    assert 'id="model-route-fields"' in html
+    assert 'id="model-test-all"' in html
+    assert 'id="model-route-resolved"' in html
+    assert 'data-si-tab="model"' in html
+    # 模型管理是设置里的独立二级菜单，运行配置不再渲染模型路由
+    assert 'key !== "model_routing"' in js
+    assert "function renderModelRouting()" in js
+    # 一个职责一个下拉框：选项编码「服务商 + 模型」，不再先选服务商再选模型
+    assert "function modelRouteControl(" in js
+    assert "function modelRouteSelectOptions(" in js
+    assert "data-model-route" in js
+    assert "data-route-test=" in js
+    assert 'apiPost("model-routing/test/start"' in js
+    assert 'apiGet("model-routing/test/status"' in js
+    assert "function startModelTestPolling()" in js
     assert 'apiGet("model-options")' in js
     # 中英文词条都要有（同名 key 出现两次：zh-CN 与 en-US）
     assert js.count("modelRoutingHint") >= 2
+    assert js.count("settingsModelTab") >= 2
     assert "modelTestConfirm" in js and "modelTestAll" in js
+    assert js.count("modelTestQueued") >= 2
     # Page 必须渲染全部 7 个职责：schema 的 kinds 只有 5 项，只按它渲染会丢 fast/reasoning
     assert "const MODEL_ROUTE_KIND_LABELS = [" in js
     assert "const kinds = modelRouteKinds(field);" in js
@@ -941,7 +952,7 @@ def test_manager_backup_tab_wires_official_backup_endpoints():
     assert "if (status?.running) startBackupPolling();" in js
     # 4 个配置键改由备份页签维护，不再出现在通用配置表单里
     assert 'const BACKUP_SETTING_KEYS = ["auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"];' in js
-    assert "filter(([key]) => !BACKUP_SETTING_KEYS.includes(key))" in js
+    assert 'filter(([key]) => key !== "model_routing" && !BACKUP_SETTING_KEYS.includes(key))' in js
     # 端点
     for endpoint in ('apiGet("backup/status")', 'apiGet("backup/list")', 'apiPost("backup/run", {})', 'apiPost("backup/delete"'):
         assert endpoint in js
@@ -994,11 +1005,14 @@ def test_standalone_webui_has_working_diagnostics_updates_settings():
     assert "diagnostic-event" in js and "log-detail-list" in js
     assert "data-log-module" in js and "data-log-problem" in js
     assert 'get("model-options")' in js
-    assert "data-route-provider" in js and "data-route-model" in js
+    assert "data-route-select" in js and "data-route-custom" in js
+    assert 'post("model-routing/test/start"' in js
+    assert 'get("model-routing/test/status"' in js
+    assert "function startModelTestPolling()" in js
     assert "kind === \"tts\"" in js
-    # 切换服务商只允许替换模型控件本身：整块清空 .route-inputs 会连同服务商下拉、TTS 音色一起删掉
+    # 只替换下拉框所在的 .route-pick，整块清空 .route-inputs 会连同 TTS 音色一起删掉
     assert "wrapper.innerHTML" not in js
-    assert "model.replaceWith(" in js
+    assert 'select.closest(".route-pick")' in js
     # 更新：真实检查更新 + 恢复点回滚
     assert "updates/check" in js
     assert "updates/transactions" in js
@@ -1027,7 +1041,7 @@ def test_standalone_webui_backup_tab_and_endpoints():
     assert "function backupPanel()" in js
     assert 'id="save-settings"' in js
     # 备份页没有路由/运行项控件：保存时不能把它们一起提交（空对象会清掉模型路由）
-    assert 'if (document.querySelector("[data-route-provider]")) payload.model_routing = routes;' in js
+    assert 'if (document.querySelector("[data-route-select]")) payload.model_routing = routes;' in js
     assert 'if (autoUpdateNode) payload.auto_update_enabled' in js
     assert 'if (logLevelNode) payload.log_level' in js
     # 上次成功时间：失败也不能把它顶掉；状态文件没记录时用目录里最新的完整备份兜底
@@ -1317,7 +1331,7 @@ def test_manager_overview_is_compact_and_consumes_commit_fields():
     assert "overview-queue-item" in js
     assert "content-visibility:auto" in css
     # 静态资源 N+1，不改版本号。
-    assert "?v=0.22.2-1" in html
+    assert "?v=0.23.1-1" in html
 
 
 def test_log_views_are_problem_first_with_cursor_catchup_and_export():
@@ -1352,7 +1366,7 @@ def test_log_views_are_problem_first_with_cursor_catchup_and_export():
     assert "level-chip.level-error" in webui_css
     assert "level-chip.level-critical" in webui_css
     assert "max-height:62vh" in webui_css
-    assert "?v=0.22.2-1" in webui_html
+    assert "?v=0.23.1-1" in webui_html
 
 
 def test_settings_conditional_rows_for_dependent_toggles():
@@ -1379,9 +1393,36 @@ def test_manager_page_hides_webui_and_backup_details_when_disabled():
     css = (pages_dir / "style.css").read_text(encoding="utf-8")
     assert 'webui_host: { key: "webui_enabled", on: true }' in js
     assert 'webui_public_url: { key: "webui_enabled", on: true }' in js
-    assert "applyConfigFieldVisibility();\n  bindModelRoutingControls();" in js
+    assert "applyConfigFieldVisibility();\n  renderModelRouting();" in js
     assert 'addEventListener("change", applyConfigFieldVisibility)' in js
     assert 'data-backup-dependent' in html
     assert "function applyBackupFieldVisibility()" in js
     assert 'addEventListener("change", applyBackupFieldVisibility)' in js
     assert ".form-grid label[hidden]" in css
+
+
+def test_manager_model_panel_saves_routes_in_isolation_and_tests_per_kind():
+    """模型管理独立保存：运行配置不再提交 model_routing，模型页只提交 model_routing。"""
+    js = (PAGES_DIR / "app.js").read_text(encoding="utf-8")
+    html = (PAGES_DIR / "index.html").read_text(encoding="utf-8")
+    # 保存运行配置时必须跳过 model_routing，否则会用空对象清空路由
+    assert 'if (key === "model_routing") continue;' in js
+    assert "async function saveModelRoutes(event)" in js
+    assert 'await apiPost("config", { model_routing: routes });' in js
+    assert "function collectModelRoutes()" in js
+    # 未保存提示覆盖模型页
+    assert "modelRoutesDirty()" in js
+    # 一个职责一个下拉框：不再渲染独立的服务商下拉
+    assert 'data-model-field="provider_id"' not in js
+    assert "function modelRouteSelectOptions(" in js
+    # 逐项测试状态：排队中/测试中/完成
+    assert "function startModelTestPolling()" in js
+    assert "function stopModelTestPolling()" in js
+    assert '}, 1000);' in js
+    assert "modelTestQueued" in js
+    assert "modelTestProgress" in js
+    # 全部跟随原生 + 解析快照
+    assert "async function resetModelRoutes()" in js
+    assert "function renderModelRouteSnapshot()" in js
+    assert 'id="model-reset-all"' in html
+    assert 'id="model-route-refresh"' in html

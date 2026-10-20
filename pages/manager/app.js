@@ -62,10 +62,35 @@ const messages = {
 // 方案1（紧凑总览 / 问题优先）新增文案；Object.assign 只追加新 key。
 Object.assign(messages["zh-CN"], {
   modelRoutingHint: "每项留空 = 跟随 AstrBot 原生；这里保存的是核的统一路由，插件显式配置仍然优先。",
+  settingsModelTab: "模型管理",
+  modelPanelTitle: "模型管理",
+  modelPanelHint: "统一模型路由：每项留空 = 跟随 AstrBot 原生；这里保存的是核的统一路由，插件显式配置仍然优先。",
+  saveModelRoutes: "保存模型路由",
   modelFollowNative: "回退 AstrBot 原生 Provider",
   modelNameHint: "模型名（可自定义）",
   modelPickHint: "选择模型…",
   modelCustomOption: "自定义输入…",
+  modelRouteDefault: "跟随服务商默认",
+  modelRouteCustom: "自定义模型…",
+  modelRouteCustomNative: "自定义模型（跟随原生服务商）",
+  modelRouteSynthetic: "当前配置",
+  modelResetAll: "全部跟随原生",
+  modelResetConfirm: "把所有职责恢复为「跟随 AstrBot 原生」？插件自己的显式配置不受影响。",
+  modelResetDone: "已全部改为跟随原生",
+  modelRouteSnapshotTitle: "当前路由解析快照",
+  modelRouteSnapshotHint: "「已解析」表示配置已解析到 provider，不代表 API 一定可调用。",
+  modelRouteKind: "能力",
+  modelRouteProvider: "模型服务商",
+  modelRouteModel: "模型",
+  modelRouteSource: "来源",
+  modelRouteStatus: "状态",
+  modelRouteResolved: "已解析",
+  modelRouteUnresolved: "未解析",
+  modelRouteUnconfigured: "未配置",
+  modelRouteAuto: "自动",
+  modelTestQueued: "排队中",
+  modelTestBusy: "已有模型自检在运行，正在接入进度…",
+  modelTestProgress: "测试中 · 已完成 {done}/{total} · 通过 {ok} · 失败 {failed}",
   modelVoiceHint: "音色（可选）",
   modelTestOne: "测试",
   modelTestAll: "测试全部模型",
@@ -100,10 +125,35 @@ Object.assign(messages["zh-CN"], {
 });
 Object.assign(messages["en-US"], {
   modelRoutingHint: "Leave blank to follow AstrBot native providers; this saves the core route, plugin-explicit settings still win.",
+  settingsModelTab: "Model management",
+  modelPanelTitle: "Model management",
+  modelPanelHint: "Unified model routing: leave a row blank to follow AstrBot native providers. This saves the core route; plugin-explicit settings still win.",
+  saveModelRoutes: "Save model routing",
   modelFollowNative: "Fall back to AstrBot native provider",
   modelNameHint: "Model name (custom allowed)",
   modelPickHint: "Pick a model…",
   modelCustomOption: "Custom input…",
+  modelRouteDefault: "provider default",
+  modelRouteCustom: "Custom model…",
+  modelRouteCustomNative: "Custom model (native provider)",
+  modelRouteSynthetic: "Current setting",
+  modelResetAll: "Follow native for all",
+  modelResetConfirm: "Reset every role to follow AstrBot native providers? Plugin-explicit settings are not affected.",
+  modelResetDone: "All roles now follow native providers",
+  modelRouteSnapshotTitle: "Resolved routing snapshot",
+  modelRouteSnapshotHint: "“Resolved” means the config resolved to a provider; it does not guarantee the API is callable.",
+  modelRouteKind: "Role",
+  modelRouteProvider: "Provider",
+  modelRouteModel: "Model",
+  modelRouteSource: "Source",
+  modelRouteStatus: "Status",
+  modelRouteResolved: "Resolved",
+  modelRouteUnresolved: "Unresolved",
+  modelRouteUnconfigured: "Not configured",
+  modelRouteAuto: "auto",
+  modelTestQueued: "Queued",
+  modelTestBusy: "A model self-test is already running; attaching to its progress…",
+  modelTestProgress: "Testing · {done}/{total} done · {ok} passed · {failed} failed",
   modelVoiceHint: "Voice (optional)",
   modelTestOne: "Test",
   modelTestAll: "Test all models",
@@ -238,7 +288,10 @@ const state = {
   config: null,
   modelOptions: null,
   modelTest: null,
-  modelTestRunning: false,
+  modelTestJob: null,
+  modelTestPoller: null,
+  modelTestFailures: 0,
+  modelRoutes: null,
   rule: null,
   mirrors: null,
   // 测速结果按加速站 URL 缓存，切换语言或重载列表都不用重新测速。
@@ -285,6 +338,7 @@ const t = (key) => messages[state.locale][key] || key;
 let configFormBaseline = null;
 let ruleFormBaseline = null;
 let backupFormBaseline = null;
+let modelRoutesBaseline = "{}";
 const showUnsavedConfirm = window.SeriesUI.confirm;
 
 function captureFormState(form) {
@@ -307,7 +361,8 @@ function formHasUnsavedChanges(form, baseline) {
 function hasUnsavedChanges() {
   return formHasUnsavedChanges(document.getElementById("config-form"), configFormBaseline) ||
     formHasUnsavedChanges(document.getElementById("rule-form"), ruleFormBaseline) ||
-    formHasUnsavedChanges(document.getElementById("backup-form"), backupFormBaseline);
+    formHasUnsavedChanges(document.getElementById("backup-form"), backupFormBaseline) ||
+    modelRoutesDirty();
 }
 
 async function confirmDiscardChanges() {
@@ -338,6 +393,7 @@ function discardUnsavedChanges() {
   restoreFormState(document.getElementById("config-form"), configFormBaseline);
   restoreFormState(document.getElementById("rule-form"), ruleFormBaseline);
   restoreFormState(document.getElementById("backup-form"), backupFormBaseline);
+  renderModelRouting();
   const policy = document.getElementById("rule-policy");
   const note = document.getElementById("check-only-note");
   if (policy && note) note.hidden = policy.value !== "check_only";
@@ -749,54 +805,171 @@ function modelOptionsForKind(kind) {
   return Array.isArray(list) ? list : [];
 }
 
-function modelProviderSelect(kind, selected) {
-  const options = modelOptionsForKind(kind);
-  const prepared = [...options];
-  if (selected && !prepared.some((item) => item.provider_id === selected)) {
-    prepared.unshift({ provider_id: selected, display_name: selected, in_use: true });
-  }
-  const body = [
-    `<option value="">${escapeHtml(t("modelFollowNative"))}</option>`,
-    ...prepared.map((item) => `<option value="${escapeHtml(item.provider_id)}" ${item.provider_id === selected ? "selected" : ""}>${escapeHtml(item.display_name || item.provider_id)} · ${escapeHtml(item.provider_id)}${item.in_use ? "（使用中）" : ""}</option>`),
-  ].join("");
-  return `<select data-model-kind="${escapeHtml(kind)}" data-model-field="provider_id">${body}</select>`;
+// 一个职责只用一个下拉框：选项值编码「服务商 + 模型」组合，避免先选服务商再选模型。
+function modelRouteValue(providerId, model) {
+  return JSON.stringify({ p: String(providerId || ""), m: String(model || "") });
 }
 
-function modelModelControl(kind, providerId, selected) {
-  const provider = modelOptionsForKind(kind).find((item) => item.provider_id === providerId);
-  const models = provider?.models || [];
-  const hasSelected = models.includes(selected);
-  if (!providerId || !models.length || (selected && !hasSelected)) {
-    return `<input data-model-kind="${escapeHtml(kind)}" data-model-field="model" placeholder="${escapeHtml(t("modelNameHint"))}" value="${escapeHtml(selected)}"/>`;
+function parseModelRouteValue(value) {
+  const text = String(value ?? "");
+  if (!text) return { provider_id: "", model: "" };
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      provider_id: String(parsed?.p || ""),
+      model: String(parsed?.m || ""),
+    };
+  } catch (error) {
+    return { provider_id: "", model: "" };
   }
-  return `<select data-model-kind="${escapeHtml(kind)}" data-model-field="model"><option value="">${escapeHtml(t("modelPickHint"))}</option>${models.map((model) => `<option value="${escapeHtml(model)}" ${model === selected ? "selected" : ""}>${escapeHtml(model)}</option>`).join("")}<option value="__custom__">${escapeHtml(t("modelCustomOption"))}</option></select>`;
+}
+
+function modelRouteSelectOptions(kind, pair) {
+  pair = {
+    provider_id: String(pair?.provider_id || ""),
+    model: String(pair?.model || ""),
+  };
+  const items = [{ value: "", label: t("modelFollowNative") }];
+  const providers = modelOptionsForKind(kind);
+  const isCustom = (value) => value === "__custom__";
+  let customModel = "";
+  let customSelected = false;
+  let matched = pair.provider_id === "" && pair.model === "";
+  for (const provider of providers) {
+    const providerId = String(provider?.provider_id || "");
+    if (!providerId) continue;
+    const name = String(provider.display_name || providerId);
+    const models = Array.isArray(provider.models)
+      ? provider.models.map((item) => String(item || "")).filter(Boolean)
+      : [];
+    items.push({ value: modelRouteValue(providerId, ""), label: `${name} · ${t("modelRouteDefault")}` });
+    for (const model of models) {
+      items.push({ value: modelRouteValue(providerId, model), label: `${name} · ${model}` });
+    }
+    items.push({ value: modelRouteValue(providerId, "__custom__"), label: `${name} · ${t("modelRouteCustom")}` });
+    if (pair.provider_id !== providerId) continue;
+    if (pair.model === "") matched = true;
+    else if (isCustom(pair.model)) {
+      matched = true;
+      customSelected = true;
+    } else if (models.includes(pair.model)) matched = true;
+    else {
+      matched = true;
+      customSelected = true;
+      customModel = pair.model;
+    }
+  }
+  items.push({ value: modelRouteValue("", "__custom__"), label: t("modelRouteCustomNative") });
+  if (pair.provider_id === "") {
+    if (pair.model === "") matched = true;
+    else if (isCustom(pair.model)) {
+      matched = true;
+      customSelected = true;
+    } else {
+      matched = true;
+      customSelected = true;
+      customModel = pair.model;
+    }
+  }
+  if (!matched) {
+    items.push({
+      value: modelRouteValue(pair.provider_id, "__custom__"),
+      label: `${t("modelRouteSynthetic")}：${pair.provider_id || t("modelRouteFollowNative")} · ${pair.model || t("modelRouteAuto")}`,
+    });
+    customSelected = true;
+    customModel = pair.model;
+  }
+  const selected = customSelected
+    ? modelRouteValue(pair.provider_id, "__custom__")
+    : pair.provider_id
+      ? modelRouteValue(pair.provider_id, pair.model)
+      : "";
+  return { items, selected, customModel, customSelected };
+}
+
+function modelRouteControl(kind, route) {
+  const pair = {
+    provider_id: String(route?.provider_id || ""),
+    model: String(route?.model || ""),
+  };
+  const options = modelRouteSelectOptions(kind, pair);
+  const select = `<select data-model-route="${escapeHtml(kind)}">${options.items.map((item) => `<option value="${escapeHtml(item.value)}" ${item.value === options.selected ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}</select>`;
+  const input = options.customSelected
+    ? `<input data-model-kind="${escapeHtml(kind)}" data-model-field="model" placeholder="${escapeHtml(t("modelNameHint"))}" value="${escapeHtml(options.customModel)}" />`
+    : "";
+  return `${select}${input}`;
 }
 
 function renderModelRouteRow(kind, kindLabel, route) {
-  const providerId = String(route.provider_id || "");
   const voice = kind === "tts"
     ? `<input data-model-kind="${escapeHtml(kind)}" data-model-field="voice" placeholder="${escapeHtml(t("modelVoiceHint"))}" value="${escapeHtml(route.voice || "")}"/>`
     : `<span class="model-route-spacer"></span>`;
-  return `<div class="model-route-row" data-model-row="${escapeHtml(kind)}"><strong>${escapeHtml(kindLabel)}</strong>${modelProviderSelect(kind, providerId)}${modelModelControl(kind, providerId, String(route.model || ""))}${voice}<button type="button" class="btn model-test-btn" data-route-test="${escapeHtml(kind)}" ${state.modelTestRunning ? "disabled" : ""}>${t("modelTestOne")}</button><span class="model-test-state" data-route-test-state="${escapeHtml(kind)}">${modelTestStateHtml(kind)}</span></div>`;
+  return `<div class="model-route-row" data-model-row="${escapeHtml(kind)}"><strong>${escapeHtml(kindLabel)}</strong><div class="model-route-control" data-model-control="${escapeHtml(kind)}">${modelRouteControl(kind, route)}</div>${voice}<button type="button" class="btn model-test-btn" data-route-test="${escapeHtml(kind)}">${t("modelTestOne")}</button><span class="model-test-state" data-route-test-state="${escapeHtml(kind)}">${modelTestStateHtml(kind)}</span></div>`;
+}
+
+function collectModelRoutes() {
+  const form = document.getElementById("model-form");
+  const routes = {};
+  if (!form) return routes;
+  form.querySelectorAll("[data-model-route]").forEach((select) => {
+    const kind = select.dataset.modelRoute;
+    const pair = parseModelRouteValue(select.value);
+    let model = pair.model;
+    if (model === "__custom__") {
+      const input = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="model"]`);
+      model = input ? String(input.value || "").trim() : "";
+    }
+    const voiceNode = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="voice"]`);
+    const voice = voiceNode ? String(voiceNode.value || "").trim() : "";
+    if (!pair.provider_id && !model && !voice) return;
+    routes[kind] = { provider_id: pair.provider_id, model };
+    if (kind === "tts" && voice) routes[kind].voice = voice;
+  });
+  return routes;
+}
+
+function modelRoutesDirty() {
+  return JSON.stringify(collectModelRoutes()) !== (modelRoutesBaseline || "{}");
 }
 
 function modelTestEntry(kind) {
+  const job = state.modelTestJob;
+  if (job && Array.isArray(job.results)) {
+    const entry = job.results.find((item) => item.kind === kind);
+    if (entry) return entry;
+  }
   const results = state.modelTest?.results || [];
   return results.find((item) => item.kind === kind) || null;
 }
 
-function modelTestStateHtml(kind) {
-  if (state.modelTestRunning) return `<span class="pill">${t("modelTesting")}</span>`;
-  const entry = modelTestEntry(kind);
-  if (!entry) return "";
+function modelTestResultHtml(entry) {
   if (entry.state === "ok") return `<span class="pill native">${t("modelTestPassed")} ${escapeHtml(String(entry.latency_ms ?? 0))}ms</span>`;
   if (entry.state === "failed") return `<span class="pill managed" title="${escapeHtml(entry.error || "")}">${t("modelTestFailed")}</span>`;
   if (entry.state === "unsupported") return `<span class="pill">${t("modelTestUnsupported")}</span>`;
   return `<span class="pill">${t("modelTestUnavailable")}</span>`;
 }
 
+function modelTestStateHtml(kind) {
+  const job = state.modelTestJob;
+  if (job?.running) {
+    const entry = (job.results || []).find((item) => item.kind === kind);
+    if (!entry || entry.state === "pending") return `<span class="pill">${t("modelTestQueued")}</span>`;
+    if (entry.state === "running") return `<span class="pill">${t("modelTesting")}</span>`;
+    return modelTestResultHtml(entry);
+  }
+  const entry = modelTestEntry(kind);
+  return entry ? modelTestResultHtml(entry) : "";
+}
+
 function modelTestSummaryHtml() {
-  if (state.modelTestRunning) return t("modelTesting");
+  const job = state.modelTestJob;
+  if (job?.running) {
+    return t("modelTestProgress")
+      .replace("{ok}", String(job.ok ?? 0))
+      .replace("{failed}", String(job.failed ?? 0))
+      .replace("{done}", String(job.done ?? 0))
+      .replace("{total}", String(job.total ?? 0));
+  }
   if (!state.modelTest) return t("modelTestIdle");
   const results = state.modelTest.results || [];
   const ok = results.filter((item) => item.state === "ok").length;
@@ -808,39 +981,78 @@ function modelTestSummaryHtml() {
 }
 
 function modelTestDetailsHtml() {
-  const results = state.modelTest?.results || [];
-  const problems = results.filter((item) => item.state !== "ok");
+  const results = (state.modelTestJob?.running ? state.modelTestJob.results : state.modelTest?.results) || [];
+  // 排队中/测试中的条目不是“问题”，只在完成后列出失败/不支持/未配置
+  const problems = results.filter((item) => ["failed", "unsupported", "unavailable"].includes(item.state));
   if (!problems.length) return "";
-  const rows = problems.map((item) => {
+  return problems.map((item) => {
     const reused = item.reused_from ? `（复用 ${escapeHtml(item.reused_from)}）` : "";
     return `<div class="model-test-detail${item.state === "failed" ? " failed" : ""}"><b>${escapeHtml(item.kind)}</b> · ${escapeHtml(item.state)}${item.error ? ` · ${escapeHtml(item.error)}` : ""}${reused}</div>`;
   }).join("");
-  return `<div class="model-test-details" id="model-test-details">${rows}</div>`;
 }
 
-function refreshModelTestState() {
+function renderModelTestState() {
   document.querySelectorAll("[data-route-test-state]").forEach((node) => {
     node.innerHTML = modelTestStateHtml(node.dataset.routeTestState);
   });
   const summary = document.getElementById("model-test-summary");
   if (summary) summary.innerHTML = modelTestSummaryHtml();
+  const busy = Boolean(state.modelTestJob?.running);
   const button = document.getElementById("model-test-all");
   if (button) {
-    button.disabled = Boolean(state.modelTestRunning);
-    button.textContent = t(state.modelTestRunning ? "modelTesting" : "modelTestAll");
+    button.disabled = busy;
+    button.textContent = busy ? t("modelTesting") : t("modelTestAll");
   }
-  document.querySelectorAll("[data-route-test]").forEach((node) => { node.disabled = Boolean(state.modelTestRunning); });
-  const fieldset = document.querySelector(".model-routing-field");
-  if (fieldset) {
-    const existing = document.getElementById("model-test-details");
-    const html = modelTestDetailsHtml();
-    if (existing) existing.remove();
-    if (html) fieldset.insertAdjacentHTML("beforeend", html);
+  document.querySelectorAll("[data-route-test]").forEach((node) => { node.disabled = busy; });
+  const details = document.getElementById("model-test-details");
+  if (details) details.innerHTML = modelTestDetailsHtml();
+}
+
+function stopModelTestPolling() {
+  if (state.modelTestPoller) {
+    window.clearInterval(state.modelTestPoller);
+    state.modelTestPoller = null;
   }
 }
 
+function startModelTestPolling() {
+  if (state.modelTestPoller) return;
+  state.modelTestPoller = window.setInterval(async () => {
+    try {
+      const payload = await apiGet("model-routing/test/status");
+      state.modelTestFailures = 0;
+      const job = payload?.job;
+      if (!job) {
+        stopModelTestPolling();
+        state.modelTestJob = null;
+        renderModelTestState();
+        return;
+      }
+      if (job.running) {
+        state.modelTestJob = job;
+        renderModelTestState();
+        return;
+      }
+      state.modelTestJob = null;
+      state.modelTest = {
+        results: job.results || [],
+        testedAt: job.tested_at || "",
+        durationMs: job.duration_ms || 0,
+      };
+      stopModelTestPolling();
+      renderModelTestState();
+      const failed = (job.results || []).filter((item) => item.state === "failed").length;
+      notify(failed ? t("modelTestDoneFailed").replace("{failed}", String(failed)) : t("modelTestDone"), failed > 0);
+    } catch (error) {
+      // 轮询失败等下一轮；连续失败太多就停掉，避免页面离开后无限重试
+      state.modelTestFailures = (state.modelTestFailures || 0) + 1;
+      if (state.modelTestFailures >= 10) stopModelTestPolling();
+    }
+  }, 1000);
+}
+
 async function runModelTest(kinds) {
-  if (state.modelTestRunning) return;
+  if (state.modelTestJob?.running) return;
   const list = Array.isArray(kinds) && kinds.length ? kinds : ["conversation", "fast", "reasoning", "embedding", "vision", "stt", "tts"];
   const scope = list.length === 1 ? `「${list[0]}」` : `${list.length} 个职责`;
   const confirmed = await window.SeriesUI.confirm({
@@ -851,49 +1063,123 @@ async function runModelTest(kinds) {
     danger: false,
   });
   if (!confirmed) return;
-  state.modelTestRunning = true;
-  refreshModelTestState();
   try {
-    const payload = await apiPost("model-routing/test", { kinds: list });
-    state.modelTest = { results: payload.results || [], testedAt: payload.tested_at || "", durationMs: payload.duration_ms || 0 };
-    const failed = state.modelTest.results.filter((item) => item.state === "failed").length;
-    notify(failed ? t("modelTestDoneFailed").replace("{failed}", String(failed)) : t("modelTestDone"), failed > 0);
+    const payload = await apiPost("model-routing/test/start", { kinds: list });
+    if (!payload.success) {
+      if (payload.job) {
+        state.modelTestJob = payload.job;
+        renderModelTestState();
+        startModelTestPolling();
+        notify(t("modelTestBusy"));
+      } else {
+        notify(t("modelTestError").replace("{message}", payload.error || ""), true);
+      }
+      return;
+    }
+    state.modelTestJob = payload.job;
+    renderModelTestState();
+    startModelTestPolling();
   } catch (error) {
     notify(t("modelTestError").replace("{message}", error.message), true);
-  } finally {
-    state.modelTestRunning = false;
-    refreshModelTestState();
   }
 }
 
-function bindModelRoutingControls() {
-  const form = document.getElementById("config-form");
-  if (!form) return;
-  const swapModelControl = (kind) => {
-    const providerNode = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="provider_id"]`);
-    const modelNode = form.querySelector(`[data-model-kind="${CSS.escape(kind)}"][data-model-field="model"]`);
-    if (!providerNode || !modelNode) return;
-    const holder = document.createElement("div");
-    holder.innerHTML = modelModelControl(kind, providerNode.value, "");
-    const replacement = holder.firstElementChild;
-    if (!replacement) return;
-    modelNode.replaceWith(replacement);
-    bindModelNode(replacement);
-  };
-  const bindModelNode = (node) => node.addEventListener("change", () => {
-    if (node.tagName !== "SELECT" || node.value !== "__custom__") return;
-    const input = document.createElement("input");
-    input.dataset.modelKind = node.dataset.modelKind;
-    input.dataset.modelField = "model";
-    input.placeholder = t("modelNameHint");
-    input.value = "";
-    node.replaceWith(input);
-    input.focus();
+function renderModelRouteSnapshot() {
+  const tbody = document.getElementById("model-route-resolved");
+  if (!tbody) return;
+  const routes = state.modelRoutes?.routes || {};
+  tbody.innerHTML = MODEL_ROUTE_KIND_LABELS.map(([kind, label]) => {
+    const item = routes[kind] || {};
+    const available = Boolean(item.available);
+    return `<tr><td>${escapeHtml(label)}</td><td><code>${escapeHtml(item.provider_id || t("modelRouteUnconfigured"))}</code></td><td>${escapeHtml(item.model || t("modelRouteAuto"))}</td><td>${escapeHtml(item.source || "unavailable")}</td><td><span class="pill ${available ? "native" : ""}">${available ? t("modelRouteResolved") : t("modelRouteUnresolved")}</span></td></tr>`;
+  }).join("");
+}
+
+async function loadModelRoutes() {
+  try {
+    state.modelRoutes = await apiGet("model-routing");
+  } catch (error) {
+    state.modelRoutes = null;
+  }
+  renderModelRouteSnapshot();
+}
+
+function renderModelRouting() {
+  const node = document.getElementById("model-route-fields");
+  if (!node) return;
+  const field = state.config?.schema?.model_routing;
+  const routes = state.config?.config?.model_routing || {};
+  const kinds = modelRouteKinds(field);
+  node.innerHTML = kinds.map(([kind, label]) => renderModelRouteRow(kind, label, routes[kind] || {})).join("");
+  bindModelRouteControls(node);
+  modelRoutesBaseline = JSON.stringify(collectModelRoutes());
+  renderModelTestState();
+}
+
+function bindModelRouteControls(root = document) {
+  root.querySelectorAll("[data-model-route]").forEach((select) => {
+    if (select.dataset.bound === "1") return;
+    select.dataset.bound = "1";
+    select.addEventListener("change", () => {
+      const kind = select.dataset.modelRoute;
+      const control = select.closest(".model-route-control");
+      if (!control) return;
+      control.innerHTML = modelRouteControl(kind, parseModelRouteValue(select.value));
+      bindModelRouteControls(control);
+    });
   });
-  form.querySelectorAll('[data-model-field="model"]').forEach(bindModelNode);
-  form.querySelectorAll('[data-model-field="provider_id"]').forEach((node) => node.addEventListener("change", () => swapModelControl(node.dataset.modelKind)));
+  root.querySelectorAll("[data-route-test]").forEach((node) => {
+    if (node.dataset.bound === "1") return;
+    node.dataset.bound = "1";
+    node.addEventListener("click", () => runModelTest([node.dataset.routeTest]));
+  });
+}
+
+async function saveModelRoutes(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById("model-form");
+  if (!form) return;
+  setFormBusy(form, true);
+  try {
+    const routes = collectModelRoutes();
+    await apiPost("config", { model_routing: routes });
+    notify(t("saved"));
+    await Promise.allSettled([loadConfig(), loadModelRoutes()]);
+  } catch (error) {
+    notify(`${t("saveFailed")}: ${error.message}`, true);
+  } finally {
+    setFormBusy(form, false);
+  }
+}
+
+async function resetModelRoutes() {
+  const confirmed = await window.SeriesUI.confirm({
+    title: t("modelResetAll"),
+    message: t("modelResetConfirm"),
+    confirmText: t("modelResetAll"),
+    cancelText: t("cancel"),
+    danger: true,
+  });
+  if (!confirmed) return;
+  document.querySelectorAll("#model-form .model-route-control").forEach((control) => {
+    const kind = control.dataset.modelControl;
+    control.innerHTML = modelRouteControl(kind, {});
+    bindModelRouteControls(control);
+  });
+  document.querySelectorAll("#model-form [data-model-kind][data-model-field='voice']").forEach((node) => { node.value = ""; });
+  await saveModelRoutes();
+}
+
+function bindModelRoutingControls() {
+  const form = document.getElementById("model-form");
+  if (!form) return;
+  bindModelRouteControls(form);
+  if (form.dataset.bound === "1") return;
+  form.dataset.bound = "1";
+  form.addEventListener("submit", saveModelRoutes);
   document.getElementById("model-test-all")?.addEventListener("click", () => runModelTest());
-  form.querySelectorAll("[data-route-test]").forEach((node) => node.addEventListener("click", () => runModelTest([node.dataset.routeTest])));
+  document.getElementById("model-reset-all")?.addEventListener("click", resetModelRoutes);
+  document.getElementById("model-route-refresh")?.addEventListener("click", () => loadModelRoutes());
 }
 
 const CONFIG_FIELD_DEPENDENCIES = {
@@ -929,12 +1215,6 @@ function makeField(key, field, value) {
     return `<label><span>${label}</span><input name="${key}" type="password" autocomplete="new-password" placeholder="${configured ? t("configured") : t("notConfigured")}" /><small>${t("writeOnly")}</small></label>`;
   }
   if (field.type === "bool") return `<label class="switch" ${visibilityAttr}><input name="${key}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
-  if (key === "model_routing" && field.type === "object") {
-    const routes = value && typeof value === "object" ? value : {};
-    const kinds = modelRouteKinds(field);
-    const rows = kinds.map(([kind, kindLabel]) => renderModelRouteRow(kind, kindLabel, routes[kind] || {})).join("");
-    return `<fieldset class="model-routing-field"><legend>${label}</legend><p class="field-hint">${t("modelRoutingHint")}</p>${rows}${modelTestDetailsHtml()}<div class="model-route-actions"><button type="button" class="btn primary" id="model-test-all" ${state.modelTestRunning ? "disabled" : ""}>${t(state.modelTestRunning ? "modelTesting" : "modelTestAll")}</button><span class="model-test-summary" id="model-test-summary">${modelTestSummaryHtml()}</span></div></fieldset>`;
-  }
   if (field.options) return `<label ${visibilityAttr}><span>${label}</span><select name="${key}">${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
   const type = field.type === "int" || field.type === "float" ? "number" : "text";
   const step = field.type === "float" ? "any" : "1";
@@ -990,16 +1270,37 @@ function bindSettingsSubnav() {
 }
 
 async function loadConfig() {
-  const [data, options] = await Promise.all([
+  const [data, options, routes] = await Promise.all([
     apiGet("config"),
     apiGet("model-options").catch(() => null),
+    apiGet("model-routing").catch(() => null),
   ]);
   state.config = data;
   state.modelOptions = options;
-  document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).filter(([key]) => !BACKUP_SETTING_KEYS.includes(key)).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
+  state.modelRoutes = routes;
+  document.getElementById("config-fields").innerHTML = Object.entries(data.schema || {}).filter(([key]) => key !== "model_routing" && !BACKUP_SETTING_KEYS.includes(key)).map(([key, field]) => makeField(key, field, data.config?.[key])).join("");
   applyConfigFieldVisibility();
+  renderModelRouting();
+  renderModelRouteSnapshot();
   bindModelRoutingControls();
   configFormBaseline = captureFormState(document.getElementById("config-form"));
+  try {
+    const status = await apiGet("model-routing/test/status");
+    if (status?.job?.running) {
+      state.modelTestJob = status.job;
+      renderModelTestState();
+      startModelTestPolling();
+    } else if (status?.job) {
+      state.modelTest = {
+        results: status.job.results || [],
+        testedAt: status.job.tested_at || "",
+        durationMs: status.job.duration_ms || 0,
+      };
+    }
+    renderModelTestState();
+  } catch (error) {
+    // 首次加载时作业状态读取失败不影响配置展示
+  }
   await loadWebUiAddress();
   try { await loadWebUiAdmins(); } catch (error) { renderSectionLoadError("settings", error); }
 }
@@ -1506,13 +1807,10 @@ async function saveConfig(event) {
   setFormBusy(form, true);
   const payload = {};
   for (const [key, field] of Object.entries(state.config?.schema || {})) {
+    // 模型路由已迁到「设置 / 模型管理」的独立表单，这里必须跳过；
+    // 否则保存运行配置时会用空对象把路由整段清空。
+    if (key === "model_routing") continue;
     const input = event.currentTarget.elements.namedItem(key);
-    if (key === "model_routing" && field.type === "object") {
-      const routes = {};
-      form.querySelectorAll(`[data-model-kind][data-model-field]`).forEach((node) => { const kind = node.dataset.modelKind; const fieldName = node.dataset.modelField; const text = String(node.value || "").trim(); if (text) (routes[kind] ||= {})[fieldName] = text; });
-      payload[key] = routes;
-      continue;
-    }
     if (!input || input.disabled) continue;
     if (field.write_only && !input.value) continue;
     if (field.type === "bool") payload[key] = input.checked;

@@ -254,3 +254,83 @@ def test_wildcard_webui_url_uses_dashboard_host_without_wildcard(tmp_path):
     assert server.url_for_host("192.168.5.88:25520") == "http://192.168.5.88:25528"
     assert server.url_for_host("[::1]:25520") == "http://[::1]:25528"
     assert "0.0.0.0" not in server.url_for_host("192.168.5.88:25520")
+
+
+def test_model_test_job_routes_require_admin_and_use_callbacks(tmp_path):
+    """模型自检作业端点：start 需 admin、status 登录可读，且只透传回调结果。"""
+    (tmp_path / "index.html").write_text("standalone", encoding="utf-8")
+    auth = WebUIAuth(AtomicJsonStore(tmp_path / "data"))
+    auth.create_admin("owner", "owner-pass", "owner")
+    auth.create_admin("viewer", "viewer-pass", "viewer")
+
+    calls: list[dict] = []
+    snapshot = {
+        "job_id": "job-1",
+        "running": True,
+        "total": 2,
+        "done": 1,
+        "ok": 1,
+        "failed": 0,
+        "results": [
+            {"kind": "conversation", "state": "ok"},
+            {"kind": "fast", "state": "pending"},
+        ],
+    }
+
+    async def model_test_start(payload=None):
+        calls.append(payload or {})
+        return {"success": True, "job": snapshot}
+
+    async def model_test_status():
+        return {"success": True, "job": snapshot}
+
+    server = WebUIServer(
+        auth,
+        static_root=tmp_path,
+        host="127.0.0.1",
+        port=free_port(),
+        modules=lambda: asyncio.sleep(0, result={}),
+        diagnostics=lambda: asyncio.sleep(0, result={}),
+        model_test_start=model_test_start,
+        model_test_status=model_test_status,
+    )
+
+    async def exercise():
+        await server.start()
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/model-routing/test/start", json={}
+            ) as response:
+                assert response.status == 401
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "viewer", "password": "viewer-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.post(
+                server.url + "/api/model-routing/test/start", json={}
+            ) as response:
+                assert response.status == 403
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as client:
+            async with client.post(
+                server.url + "/api/login",
+                json={"username": "owner", "password": "owner-pass"},
+            ) as response:
+                assert response.status == 200
+            async with client.post(
+                server.url + "/api/model-routing/test/start",
+                json={"kinds": ["conversation"]},
+            ) as response:
+                assert response.status == 200
+                body = await response.json()
+                assert body["job"]["results"][1]["state"] == "pending"
+            async with client.get(
+                server.url + "/api/model-routing/test/status"
+            ) as response:
+                assert response.status == 200
+                assert (await response.json())["job"]["job_id"] == "job-1"
+        await server.stop()
+
+    asyncio.run(exercise())
+    assert calls == [{"kinds": ["conversation"]}]

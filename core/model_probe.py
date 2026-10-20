@@ -164,17 +164,33 @@ def _timeout_for(kind: str, timeouts: Mapping[str, Any] | None) -> float:
     return KIND_TIMEOUTS.get(kind, DEFAULT_TIMEOUT)
 
 
+def _notify(callback: Callable[[Any], None] | None, payload: Any) -> None:
+    """调用进度回调；回调异常绝不能打断自检本身。"""
+    if callback is None:
+        return
+    try:
+        callback(payload)
+    except Exception:  # noqa: BLE001 - 进度回调只是旁路观察者
+        pass
+
+
 async def probe_routes(
     kinds: Iterable[str],
     resolver: Callable[[str], Any],
     *,
     timeouts: Mapping[str, Any] | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
+    on_group_start: Callable[[list[str]], None] | None = None,
+    on_group_done: Callable[[dict[str, dict[str, Any]]], None] | None = None,
 ) -> dict[str, Any]:
     """并发自检多个职责；``resolver`` 可返回 ``ResolvedProvider`` 或 awaitable。
 
     同一个 provider 实例（例如 fast/reasoning 都继承对话路由）只真调一次，
     其余职责复用结果并标记 ``reused_from``，避免重复计费。
+
+    ``on_group_start`` / ``on_group_done`` 是可选的同步进度回调：每个分组
+    开始与结束时各调一次，供上层页面展示“逐项测试状态”。回调异常会被吞掉，
+    不影响自检结果。
     """
     wanted = [str(kind) for kind in kinds]
     limit = max(1, int(concurrency or DEFAULT_CONCURRENCY))
@@ -209,6 +225,7 @@ async def probe_routes(
     async def run_group(kind_list: list[str]) -> dict[str, dict[str, Any]]:
         primary = kind_list[0]
         timeout = max(_timeout_for(kind, timeouts) for kind in kind_list)
+        _notify(on_group_start, list(kind_list))
         result = await probe_kind(primary, resolved.get(primary), timeout=timeout)
         entries: dict[str, dict[str, Any]] = {}
         for kind in kind_list:
@@ -218,6 +235,7 @@ async def probe_routes(
             if kind != primary:
                 entry["reused_from"] = primary
             entries[kind] = entry
+        _notify(on_group_done, entries)
         return entries
 
     grouped = await bounded_gather(

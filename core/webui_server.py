@@ -54,6 +54,8 @@ class WebUIServer:
         settings_save: Callable[..., Awaitable[dict[str, Any]]] | None = None,
         model_options: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         model_test: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        model_test_start: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        model_test_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         backup_status: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         backup_run: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         backup_list: Callable[[], Awaitable[dict[str, Any]]] | None = None,
@@ -101,6 +103,8 @@ class WebUIServer:
         self.settings_save = settings_save
         self.model_options = model_options
         self.model_test = model_test
+        self.model_test_start = model_test_start
+        self.model_test_status = model_test_status
         self.backup_status = backup_status
         self.backup_run = backup_run
         self.backup_list = backup_list
@@ -191,6 +195,12 @@ class WebUIServer:
             app.router.add_post("/api/settings", self._settings_save)
             app.router.add_get("/api/model-options", self._model_options)
             app.router.add_post("/api/model-routing/test", self._model_test)
+            app.router.add_post(
+                "/api/model-routing/test/start", self._model_test_start
+            )
+            app.router.add_get(
+                "/api/model-routing/test/status", self._model_test_status
+            )
             app.router.add_get("/api/backup/status", self._backup_status_route)
             app.router.add_post("/api/backup/run", self._backup_run_route)
             app.router.add_get("/api/backup/list", self._backup_list_route)
@@ -858,6 +868,14 @@ class WebUIServer:
         return await self._call_capability(
             request, "model_test", body=True, role_required="admin"
         )
+
+    async def _model_test_start(self, request: web.Request) -> web.Response:
+        return await self._call_capability(
+            request, "model_test_start", body=True, role_required="admin"
+        )
+
+    async def _model_test_status(self, request: web.Request) -> web.Response:
+        return await self._call_capability(request, "model_test_status")
 
     async def _backup_status_route(self, request: web.Request) -> web.Response:
         return await self._call_capability(request, "backup_status")

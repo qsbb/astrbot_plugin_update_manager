@@ -41,6 +41,8 @@ def test_pages_routes_are_runtime_detected(monkeypatch, tmp_path):
         (f"/{module.PLUGIN_NAME}/model-routing", ("GET",)),
         (f"/{module.PLUGIN_NAME}/model-options", ("GET",)),
         (f"/{module.PLUGIN_NAME}/model-routing/test", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/model-routing/test/start", ("POST",)),
+        (f"/{module.PLUGIN_NAME}/model-routing/test/status", ("GET",)),
         (f"/{module.PLUGIN_NAME}/backup/status", ("GET",)),
         (f"/{module.PLUGIN_NAME}/backup/run", ("POST",)),
         (f"/{module.PLUGIN_NAME}/backup/list", ("GET",)),
@@ -3220,3 +3222,57 @@ def test_install_persists_remote_head_when_git_is_unavailable(monkeypatch, tmp_p
 
     assert result["success"] is True
     assert plugin._persisted_installed_commit(plugin_id) == COMMIT_SHA
+
+
+def test_model_test_start_and_status_expose_per_kind_progress(monkeypatch, tmp_path):
+    """模型自检作业：start 立即返回逐项 pending，status 轮询到每个职责独立结果。"""
+    module = import_main(monkeypatch)
+    calls: list[str] = []
+
+    class Provider:
+        provider_config = {"id": "chat", "type": "openai", "model": "chat-current"}
+
+        async def test(self, timeout: float = 45.0) -> None:
+            calls.append("chat")
+
+    provider = Provider()
+    ctx = context(tmp_path)
+    ctx.get_using_provider = lambda: provider
+    ctx.provider_manager = SimpleNamespace(
+        provider_insts=[provider],
+        embedding_provider_insts=[],
+        stt_provider_insts=[],
+        tts_provider_insts=[],
+    )
+    plugin = module.UpdateManagerPlugin(ctx, {})
+    pages_api = sys.modules[plugin.__class__.__mro__[1].__module__]
+    monkeypatch.setattr(pages_api, "request", None)
+
+    async def exercise():
+        started = unwrap(plugin.start_model_probe(["conversation", "fast", "tts"]))
+        assert started["success"] is True
+        assert started["job"]["running"] is True
+        assert {item["kind"] for item in started["job"]["results"]} == {
+            "conversation",
+            "fast",
+            "tts",
+        }
+        assert all(item["state"] == "pending" for item in started["job"]["results"])
+        # 同一时间只允许一个作业，忙时返回当前快照而不是再发一次真实请求
+        busy = unwrap(plugin.start_model_probe(["conversation"]))
+        assert busy["success"] is False
+        assert busy["error"] == "MODEL_PROBE_BUSY"
+        assert busy["job"]["running"] is True
+        await plugin._model_probe_task
+        status = unwrap(plugin.model_probe_status())
+        assert status["job"]["running"] is False
+        by_kind = {item["kind"]: item for item in status["job"]["results"]}
+        assert by_kind["conversation"]["state"] == "ok"
+        assert by_kind["fast"]["state"] == "ok"
+        assert by_kind["fast"]["reused_from"] == "conversation"
+        assert by_kind["tts"]["state"] == "unavailable"
+        # 快照必须是纯 JSON（不能把 provider 实例带出去）
+        json.dumps(status, ensure_ascii=False)
+        assert calls == ["chat"]
+
+    asyncio.run(exercise())

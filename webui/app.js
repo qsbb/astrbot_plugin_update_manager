@@ -35,7 +35,9 @@ let state = {
   settingsData: null,
   modelOptions: null,
   modelTest: null,
-  modelTestRunning: false,
+  modelTestJob: null,
+  modelTestPoller: null,
+  modelTestFailures: 0,
   backup: null,
   backupBusy: false,
   logModules: [],
@@ -489,11 +491,23 @@ function modelOptionsFor(kind) {
   return (state.settingsData?.providers || []).map(item => ({ ...item, display_name: item.display_name || item.provider_id, models: [] }));
 }
 function modelTestEntry(kind) {
+  const job = state.modelTestJob;
+  if (job && Array.isArray(job.results)) {
+    const entry = job.results.find(item => item.kind === kind);
+    if (entry) return entry;
+  }
   const results = state.modelTest?.results || [];
   return results.find(item => item.kind === kind) || null;
 }
+function modelTestResultChip(entry) {
+  if (entry.state === "ok") return `<span class="pill native">通过 ${esc(String(entry.latency_ms ?? 0))}ms</span>`;
+  if (entry.state === "failed") return `<span class="pill managed">失败</span>`;
+  if (entry.state === "unsupported") return `<span class="pill">不支持自检</span>`;
+  return `<span class="pill">未配置</span>`;
+}
 function modelTestSummary() {
-  if (state.modelTestRunning) return "正在按职责调用官方自检 provider.test()，异常会给出原因；期间不要重复点击。";
+  const job = state.modelTestJob;
+  if (job?.running) return `测试中 · 已完成 ${job.done ?? 0}/${job.total ?? 0} · 通过 ${job.ok ?? 0} · 失败 ${job.failed ?? 0}`;
   if (!state.modelTest) return "尚未测试：点「测试全部模型」会按 AstrBot 官方自检真调一次（对话类只发一次极小请求）。";
   const results = state.modelTest.results || [];
   const ok = results.filter(item => item.state === "ok").length;
@@ -502,17 +516,20 @@ function modelTestSummary() {
   return `上次测试 ${esc(state.modelTest.testedAt || "")} · 通过 ${ok} · 失败 ${failed}${other ? ` · 未配置/不支持 ${other}` : ""}`;
 }
 function modelTestChip(kind) {
-  if (state.modelTestRunning) return `<span class="pill">测试中</span>`;
+  const job = state.modelTestJob;
+  if (job?.running) {
+    const entry = (job.results || []).find(item => item.kind === kind);
+    if (!entry || entry.state === "pending") return `<span class="pill">排队中</span>`;
+    if (entry.state === "running") return `<span class="pill">测试中</span>`;
+    return modelTestResultChip(entry);
+  }
   const entry = modelTestEntry(kind);
-  if (!entry) return "";
-  if (entry.state === "ok") return `<span class="pill native">通过 ${esc(String(entry.latency_ms ?? 0))}ms</span>`;
-  if (entry.state === "failed") return `<span class="pill managed">失败</span>`;
-  if (entry.state === "unsupported") return `<span class="pill">不支持自检</span>`;
-  return `<span class="pill">未配置</span>`;
+  return entry ? modelTestResultChip(entry) : "";
 }
 function modelTestDetail(kind) {
-  if (state.modelTestRunning) return "";
+  const job = state.modelTestJob;
   const entry = modelTestEntry(kind);
+  if (job?.running && (!entry || entry.state === "pending" || entry.state === "running")) return "";
   if (!entry) return "";
   const reused = entry.reused_from ? `（复用「${esc(entry.reused_from)}」的结果，同一个模型服务商只真调一次）` : "";
   if (entry.state === "ok") return `<div class="route-test-detail ok">官方自检通过 · ${esc(String(entry.latency_ms ?? 0))}ms${reused}</div>`;
@@ -520,38 +537,161 @@ function modelTestDetail(kind) {
   if (entry.state === "unsupported") return `<div class="route-test-detail">该模型服务商没有实现官方自检，无法自动判断可用性。</div>`;
   return `<div class="route-test-detail">未解析到可用的模型服务商${entry.error ? `：${esc(entry.error)}` : ""}</div>`;
 }
+function stopModelTestPolling() {
+  if (state.modelTestPoller) {
+    clearInterval(state.modelTestPoller);
+    state.modelTestPoller = null;
+  }
+}
+function startModelTestPolling() {
+  if (state.modelTestPoller) return;
+  state.modelTestPoller = setInterval(async () => {
+    try {
+      const payload = await get("model-routing/test/status");
+      state.modelTestFailures = 0;
+      const job = payload?.job;
+      if (!job) {
+        stopModelTestPolling();
+        state.modelTestJob = null;
+        if (state.view === "settings") dashboard();
+        return;
+      }
+      if (job.running) {
+        state.modelTestJob = job;
+        if (state.view === "settings") dashboard();
+        return;
+      }
+      state.modelTestJob = null;
+      state.modelTest = { results: job.results || [], testedAt: job.tested_at || "", durationMs: job.duration_ms || 0 };
+      stopModelTestPolling();
+      if (state.view === "settings") dashboard();
+      const failed = (job.results || []).filter(item => item.state === "failed").length;
+      notify(failed ? `模型自检完成：${failed} 个职责失败` : "模型自检完成：全部通过", failed > 0);
+    } catch (error) {
+      // 轮询失败等下一轮；连续失败太多就停掉，避免会话失效后无限重试
+      state.modelTestFailures = (state.modelTestFailures || 0) + 1;
+      if (state.modelTestFailures >= 10) stopModelTestPolling();
+    }
+  }, 1000);
+}
 async function runModelTest(kinds) {
-  if (state.modelTestRunning) return;
+  if (state.modelTestJob?.running) return;
   const list = Array.isArray(kinds) && kinds.length ? kinds : ["conversation", "fast", "reasoning", "embedding", "vision", "stt", "tts"];
   const scope = list.length === 1 ? `「${list[0]}」` : `${list.length} 个职责`;
   if (!(await confirmDialog(`会对 ${scope} 调用 AstrBot 官方自检（provider.test）：对话类会真发一次极小请求、向量/语音/识图按官方实现真调，可能产生极少量费用。继续？`, { title: "测试全部模型", confirmText: "开始测试", danger: false }))) return;
-  state.modelTestRunning = true;
-  dashboard();
   try {
-    const payload = await post("model-routing/test", { kinds: list });
-    state.modelTest = { results: payload.results || [], testedAt: payload.tested_at || "", durationMs: payload.duration_ms || 0 };
-    const results = state.modelTest.results;
-    const failed = results.filter(item => item.state === "failed").length;
-    notify(failed ? `模型自检完成：${failed} 个职责失败` : "模型自检完成：全部通过", failed > 0);
+    const payload = await post("model-routing/test/start", { kinds: list });
+    if (!payload.success) {
+      if (payload.job) {
+        state.modelTestJob = payload.job;
+        startModelTestPolling();
+        dashboard();
+        notify("已有模型自检在运行，正在接入进度…");
+      } else {
+        notify(`模型自检失败：${payload.error || ""}`, true);
+      }
+      return;
+    }
+    state.modelTestJob = payload.job;
+    startModelTestPolling();
+    dashboard();
   } catch (error) {
     notify(`模型自检失败：${error.message}`, true);
-  } finally {
-    state.modelTestRunning = false;
-    dashboard();
   }
 }
-function providerSelect(kind, selected, canWrite) {
-  const options = [...modelOptionsFor(kind)];
-  if (selected && !options.some(item => item.provider_id === selected)) options.unshift({ provider_id: selected, display_name: selected, models: [], in_use: true });
-  const body = [`<option value="">回退 AstrBot 原生 Provider</option>`, ...options.map(item => `<option value="${esc(item.provider_id)}" ${item.provider_id === selected ? "selected" : ""}>${esc(item.display_name || item.provider_id)} · ${esc(item.provider_id)}${item.in_use ? "（使用中）" : ""}</option>`)].join("");
-  return `<select class="select route-provider" data-route-provider="${esc(kind)}" ${canWrite ? "" : "disabled"}>${body}</select>`;
+// 一个职责只用一个下拉框：选项值编码「服务商 + 模型」组合，避免先选服务商再选模型。
+function modelRouteValue(providerId, model) {
+  return JSON.stringify({ p: String(providerId || ""), m: String(model || "") });
 }
-function modelSelect(kind, providerId, selected, canWrite) {
-  const provider = modelOptionsFor(kind).find(item => item.provider_id === providerId);
-  const models = provider?.models || [];
-  const hasSelected = models.includes(selected);
-  if (!providerId || !models.length || (selected && !hasSelected)) return `<input class="route-model" data-route-model="${esc(kind)}" type="text" value="${esc(selected)}" placeholder="模型名（可自定义）" ${canWrite ? "" : "disabled"} />`;
-  return `<select class="select route-model" data-route-model="${esc(kind)}" ${canWrite ? "" : "disabled"}><option value="">选择模型…</option>${models.map(model => `<option value="${esc(model)}" ${model === selected ? "selected" : ""}>${esc(model)}</option>`).join("")}<option value="__custom__">自定义输入…</option></select>`;
+function parseModelRouteValue(value) {
+  const text = String(value ?? "");
+  if (!text) return { provider_id: "", model: "" };
+  try {
+    const parsed = JSON.parse(text);
+    return { provider_id: String(parsed?.p || ""), model: String(parsed?.m || "") };
+  } catch (error) {
+    return { provider_id: "", model: "" };
+  }
+}
+function routeSelectOptions(kind, pair) {
+  pair = {
+    provider_id: String(pair?.provider_id || ""),
+    model: String(pair?.model || ""),
+  };
+  const items = [{ value: "", label: "回退 AstrBot 原生 Provider" }];
+  const providers = modelOptionsFor(kind);
+  const isCustom = (value) => value === "__custom__";
+  let customModel = "";
+  let customSelected = false;
+  let matched = pair.provider_id === "" && pair.model === "";
+  for (const provider of providers) {
+    const providerId = String(provider?.provider_id || "");
+    if (!providerId) continue;
+    const name = String(provider.display_name || providerId);
+    const models = Array.isArray(provider.models) ? provider.models.map(item => String(item || "")).filter(Boolean) : [];
+    items.push({ value: modelRouteValue(providerId, ""), label: `${name} · 跟随服务商默认` });
+    for (const model of models) items.push({ value: modelRouteValue(providerId, model), label: `${name} · ${model}` });
+    items.push({ value: modelRouteValue(providerId, "__custom__"), label: `${name} · 自定义模型…` });
+    if (pair.provider_id !== providerId) continue;
+    if (pair.model === "") matched = true;
+    else if (isCustom(pair.model)) {
+      matched = true;
+      customSelected = true;
+    } else if (models.includes(pair.model)) matched = true;
+    else {
+      matched = true;
+      customSelected = true;
+      customModel = pair.model;
+    }
+  }
+  items.push({ value: modelRouteValue("", "__custom__"), label: "自定义模型（跟随原生服务商）" });
+  if (pair.provider_id === "") {
+    if (pair.model === "") matched = true;
+    else if (isCustom(pair.model)) {
+      matched = true;
+      customSelected = true;
+    } else {
+      matched = true;
+      customSelected = true;
+      customModel = pair.model;
+    }
+  }
+  if (!matched) {
+    items.push({
+      value: modelRouteValue(pair.provider_id, "__custom__"),
+      label: `当前配置：${pair.provider_id || "跟随原生"} · ${pair.model || "自动"}`,
+    });
+    customSelected = true;
+    customModel = pair.model;
+  }
+  const selected = customSelected
+    ? modelRouteValue(pair.provider_id, "__custom__")
+    : pair.provider_id
+      ? modelRouteValue(pair.provider_id, pair.model)
+      : "";
+  return { items, selected, customModel, customSelected };
+}
+function bindRouteSelects(root = document) {
+  root.querySelectorAll("[data-route-select]").forEach(select => {
+    if (select.dataset.bound === "1") return;
+    select.dataset.bound = "1";
+    select.addEventListener("change", () => {
+      const kind = select.dataset.routeSelect;
+      const holder = select.closest(".route-pick");
+      if (!holder) return;
+      holder.innerHTML = routeSelect(kind, parseModelRouteValue(select.value), !select.disabled);
+      bindRouteSelects(holder);
+    });
+  });
+}
+function routeSelect(kind, route, canWrite) {
+  const pair = { provider_id: String(route?.provider_id || ""), model: String(route?.model || "") };
+  const options = routeSelectOptions(kind, pair);
+  const select = `<select class="select route-select" data-route-select="${esc(kind)}" ${canWrite ? "" : "disabled"}>${options.items.map(item => `<option value="${esc(item.value)}" ${item.value === options.selected ? "selected" : ""}>${esc(item.label)}</option>`).join("")}</select>`;
+  const input = options.customSelected
+    ? `<input class="route-custom" data-route-custom="${esc(kind)}" type="text" value="${esc(options.customModel)}" placeholder="模型名（可自定义）" ${canWrite ? "" : "disabled"} />`
+    : "";
+  return `${select}${input}`;
 }
 function settingsView() {
   const s = state.settingsData?.settings || {};
@@ -569,7 +709,7 @@ function settingsView() {
       : "未解析（未配置或模型服务缺失）";
     const effectiveClass = resolved.available ? "" : " style=\"color:var(--orange)\"";
     const voice = kind === "tts" ? `<input class="route-voice" data-setting-route="${kind}.voice" type="text" value="${esc(item.voice || "")}" placeholder="音色（可选）" ${canWrite ? "" : "disabled"} />` : "";
-    return `<div class="route-card"><div class="route-card-head"><b>${label}</b><span class="route-card-tools">${modelTestChip(kind)}<button class="link route-test-btn" data-route-test="${esc(kind)}" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>测试</button>${statusChip}</span></div><small>${esc(kindHints[kind] || "")}</small><div class="route-inputs">${providerSelect(kind, item.provider_id || "", canWrite)}${modelSelect(kind, item.provider_id || "", item.model || "", canWrite)}${voice}</div><div class="route-effective">当前生效：<b${effectiveClass}>${effective}</b>${resolved.source ? `（来源：${esc(resolved.source)}）` : ""}</div>${modelTestDetail(kind)}</div>`;
+    return `<div class="route-card"><div class="route-card-head"><b>${label}</b><span class="route-card-tools">${modelTestChip(kind)}<button class="link route-test-btn" data-route-test="${esc(kind)}" ${canWrite && !state.modelTestJob?.running ? "" : "disabled"}>测试</button>${statusChip}</span></div><small>${esc(kindHints[kind] || "")}</small><div class="route-inputs"><span class="route-pick">${routeSelect(kind, item, canWrite)}</span>${voice}</div><div class="route-effective">当前生效：<b${effectiveClass}>${effective}</b>${resolved.source ? `（来源：${esc(resolved.source)}）` : ""}</div>${modelTestDetail(kind)}</div>`;
   }).join("");
   const resolvedRows = Object.entries(state.routes?.routes || {}).map(([kind, item]) => { const label = (labels.find(entry => entry[0] === kind) || [kind, kind])[1]; return `<tr><td>${esc(label)}</td><td><code>${esc(item.provider_id || "未配置")}</code></td><td>${esc(item.model || "自动")}</td><td>${esc(item.source || "unavailable")}</td><td><span class="status ${item.available ? "" : "off"}">${item.available ? "已解析" : "未解析"}</span></td></tr>`; }).join("");
   const handled = new Set(["model_routing", "auto_update_enabled", "log_level", "webui_host", "webui_port", "webui_public_url", "auto_backup_enabled", "auto_backup_local_time", "auto_backup_timezone", "auto_backup_dir"]);
@@ -587,7 +727,7 @@ function settingsView() {
     const hintHtml = `<small class="field-hint row-hint">${hint && hint !== label ? esc(hint) : ""}</small>`;
     return `<div class="form-row" title="技术名：${esc(key)}"><label><strong>${esc(label)}</strong><small>${esc(meta)}</small></label><div class="form-input">${input}</div><div class="form-meta"></div>${hintHtml}</div>`;
   }).join("");
-  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestRunning ? "" : "disabled"}>${state.modelTestRunning ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_host"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_port"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_public_url"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">系列治理 / 模型策略</div><h1>全局设置</h1><p>统一模型路由与运行项可直接在此编辑；密钥类配置仍在核 Page 维护。WebUI 连接项保存后需重启生效。</p></div><div class="actions"><button class="btn" id="settings-reload">重读</button><button class="btn primary" id="save-settings" ${canWrite ? "" : "disabled"}>保存设置</button></div></div><nav class="si-subnav" role="tablist" aria-label="设置分区"><button type="button" role="tab" data-si-tab="route">模型路由</button><button type="button" role="tab" data-si-tab="runtime">运行项</button><button type="button" role="tab" data-si-tab="config">完整配置</button><button type="button" role="tab" data-si-tab="resolved">解析快照</button><button type="button" role="tab" data-si-tab="security">账户与安全</button></nav><section class="workspace" data-si-panel="route"><div class="workspace-head"><div class="section-title"><h2>统一模型路由</h2><span>留空 = 跟随 AstrBot 原生模型服务；改完点右上角「保存设置」</span></div><div class="actions"><button class="btn" id="route-test-all" ${canWrite && !state.modelTestJob?.running ? "" : "disabled"}>${state.modelTestJob?.running ? "测试中…" : "测试全部模型"}</button></div></div><p class="form-hint" id="route-test-summary">${modelTestSummary()}</p><div class="route-note">「当前生效」优先级：插件显式配置 &gt; 核路由 &gt; AstrBot 原生。</div><div class="route-cards">${routeCards}<div class="route-card route-card-quiet"><div class="route-card-head"><b>一键回退</b><span class="pill">安全操作</span></div><small>把所有职责恢复为「跟随 AstrBot 原生」；插件自己的显式配置不受影响。</small><div class="form-actions" style="margin-top:2px"><button class="btn" id="route-reset-all" ${canWrite ? "" : "disabled"}>全部跟随原生</button><button class="btn" id="route-export">导出当前路由</button></div></div></div></section><section class="workspace" data-si-panel="runtime"><div class="workspace-head"><div class="section-title"><h2>运行项</h2><span>保存后即时生效</span></div></div><div class="form-grid"><div class="form-row"><label title="技术名：auto_update_enabled"><strong>启用自动更新</strong><small>开关 · 到期自动检查并更新系列插件</small></label><div class="form-input"><label class="switch"><input type="checkbox" id="setting-auto-update" ${s.auto_update_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} /><span>启用自动更新</span></label></div><div class="form-meta"></div></div><div class="form-row"><label title="技术名：log_level"><strong>日志级别</strong><small>文本 · 核自身日志级别</small></label><div class="form-input"><select id="setting-log-level" class="select" ${canWrite ? "" : "disabled"}>${["DEBUG", "INFO", "WARNING", "ERROR"].map(level => `<option value="${level}" ${String(s.log_level || "INFO").toUpperCase() === level ? "selected" : ""}>${level}</option>`).join("")}</select></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_host"><label title="技术名：webui_host"><strong>WebUI 监听地址</strong><small>文本 · 绑定地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-host" value="${esc(s.webui_host || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_port"><label title="技术名：webui_port"><strong>WebUI 端口</strong><small>整数 · 修改后需重启（重启生效）</small></label><div class="form-input"><input type="number" id="setting-webui-port" min="1" max="65535" value="${esc(s.webui_port ?? "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div><div class="form-row" data-cond-dep="webui_enabled" data-cond-on="true" data-cond-field="webui_public_url"><label title="技术名：webui_public_url"><strong>WebUI 对外地址</strong><small>文本 · 对外展示地址（重启生效）</small></label><div class="form-input"><input type="text" id="setting-webui-url" value="${esc(s.webui_public_url || "")}" ${canWrite ? "" : "disabled"} /></div><div class="form-meta"></div></div></div></section><section class="workspace" data-si-panel="config"><div class="workspace-head"><div class="section-title"><h2>完整配置</h2><span>${Object.keys(state.settingsData?.schema || {}).length} 个字段；只读字段不会提交</span></div></div><div class="form-grid">${genericRows || `<p class="empty-cell">当前后端未提供配置 schema。</p>`}</div></section><section class="workspace" data-si-panel="resolved"><div class="workspace-head"><div class="section-title"><h2>当前路由解析快照</h2><span>模型路由 1.1 · 「已解析」表示配置已解析到 provider，不代表 API 一定可调用</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>能力</th><th>模型服务商</th><th>模型</th><th>来源</th><th>状态</th></tr></thead><tbody>${resolvedRows}</tbody></table></div><div class="footer"><span>插件显式配置 &gt; 核路由 &gt; AstrBot 原生模型服务。</span><span>只接受安全字段，不回显密钥。</span></div></section><section class="workspace" data-si-panel="security">${securityPanel()}</section>`;
 }
 function formatBytes(value) {
   const size = Number(value || 0);
@@ -1200,10 +1340,7 @@ function bindDashboard() {
   document.getElementById("route-export")?.addEventListener("click", exportRoutes); document.getElementById("save-settings")?.addEventListener("click", () => saveSettings()); document.getElementById("refresh-control")?.addEventListener("click", () => loadControl({ force: true })); document.getElementById("toggle-control")?.addEventListener("click", toggleControl); document.getElementById("security-logout")?.addEventListener("click", logout);
   document.getElementById("rules-reload")?.addEventListener("click", () => loadRules()); document.getElementById("save-rule")?.addEventListener("click", () => saveRule()); document.getElementById("mirrors-reload")?.addEventListener("click", () => loadMirrors()); document.getElementById("save-mirror")?.addEventListener("click", () => saveMirror()); document.getElementById("benchmark-mirrors")?.addEventListener("click", () => benchmarkMirrors()); document.getElementById("check-recommendations")?.addEventListener("click", () => checkRecommendations()); document.getElementById("apply-recommendations")?.addEventListener("click", () => applyAllRecommendations()); document.getElementById("admins-reload")?.addEventListener("click", () => loadAdmins()); document.getElementById("admin-create")?.addEventListener("click", () => createAdmin()); document.querySelectorAll("[data-admin-update]").forEach(node => node.addEventListener("click", () => updateAdmin(node.dataset.adminUpdate)));
   document.querySelectorAll("[data-log-module]").forEach(node => node.addEventListener("click", () => { const id = node.dataset.logModule; state.logModules = state.logModules.includes(id) ? state.logModules.filter(item => item !== id) : [...state.logModules, id]; dashboard(); })); document.querySelectorAll("[data-log-toggle]").forEach(node => node.addEventListener("click", () => { const key = node.dataset.logToggle; if (state.logExpanded.has(key)) state.logExpanded.delete(key); else state.logExpanded.add(key); dashboard(); })); document.querySelectorAll("[data-log-problem]").forEach(node => node.addEventListener("click", () => { state.logModules = [node.dataset.logProblem]; state.logThreshold = node.querySelector(".managed") ? "ERROR" : "WARNING"; state.logQuery = node.dataset.logCode || ""; dashboard(); })); const logSearch = document.getElementById("log-search"); logSearch?.addEventListener("input", () => { state.logQuery = logSearch.value; dashboard(); requestAnimationFrame(() => { const next = document.getElementById("log-search"); next?.focus(); next?.setSelectionRange(state.logQuery.length, state.logQuery.length); }); });
-  const bindRouteModel = node => node.addEventListener("change", () => { if (node.value !== "__custom__") return; const input = document.createElement("input"); input.className = "route-model"; input.dataset.routeModel = node.dataset.routeModel; input.type = "text"; input.placeholder = "模型名（可自定义）"; input.disabled = node.disabled; node.replaceWith(input); input.focus(); });
-  const bindRouteModels = () => document.querySelectorAll("[data-route-model]").forEach(bindRouteModel);
-  document.querySelectorAll("[data-route-provider]").forEach(node => node.addEventListener("change", () => { const kind = node.dataset.routeProvider; const model = document.querySelector(`[data-route-model="${CSS.escape(kind)}"]`); if (!model) return; const holder = document.createElement("div"); holder.innerHTML = modelSelect(kind, node.value, "", !model.disabled); const replacement = holder.firstElementChild; if (!replacement) return; model.replaceWith(replacement); bindRouteModel(replacement); }));
-  bindRouteModels();
+  bindRouteSelects();
   document.getElementById("check-updates")?.addEventListener("click", () => checkUpdates()); document.getElementById("reload-transactions")?.addEventListener("click", () => loadTransactions()); document.querySelectorAll("[data-rollback]").forEach(node => node.addEventListener("click", () => rollbackUpdate(node.dataset.rollback)));
   document.getElementById("mobile-more")?.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); sheet.hidden = !sheet.hidden; document.getElementById("mobile-more")?.setAttribute("aria-expanded", String(!sheet.hidden)); });
   document.querySelectorAll("#mobile-more-sheet [data-view], #mobile-more-sheet #mobile-logout").forEach(node => node.addEventListener("click", () => { const sheet = document.getElementById("mobile-more-sheet"); if (sheet) sheet.hidden = true; document.getElementById("mobile-more")?.setAttribute("aria-expanded", "false"); }));
@@ -1419,6 +1556,15 @@ async function loadSettings() {
     state.settingsData = await get("settings");
     try { state.modelOptions = await get("model-options"); } catch (error) { state.modelOptions = null; }
     try { state.routes = await get("model-routing"); } catch (error) { state.routes = null; }
+    try {
+      const status = await get("model-routing/test/status");
+      if (status?.job?.running) {
+        state.modelTestJob = status.job;
+        startModelTestPolling();
+      } else if (status?.job) {
+        state.modelTest = { results: status.job.results || [], testedAt: status.job.tested_at || "", durationMs: status.job.duration_ms || 0 };
+      }
+    } catch (error) { /* 作业状态读取失败不影响设置页 */ }
     if (state.view === "settings") dashboard();
   } catch (error) { notify(error.message, true); }
 }
@@ -1436,8 +1582,8 @@ async function loadBackupView() {
 }
 async function resetAllRoutes() {
   if (!(await confirmDialog("把所有职责恢复为「跟随 AstrBot 原生」？插件自己的显式配置不受影响。"))) return;
-  document.querySelectorAll("[data-route-provider]").forEach(node => { node.value = ""; });
-  document.querySelectorAll("[data-route-model]").forEach(node => { node.value = ""; });
+  document.querySelectorAll("[data-route-select]").forEach(node => { node.value = ""; });
+  document.querySelectorAll("[data-route-custom]").forEach(node => node.remove());
   document.querySelectorAll("[data-setting-route]").forEach(node => { node.value = ""; });
   await saveSettings();
 }
@@ -1449,14 +1595,14 @@ function exportRoutes() {
 async function saveSettings() {
   if (!(state.session?.role === "owner" || state.session?.role === "admin")) { notify("设置修改仅 admin 及以上可执行", true); return; }
   const routes = {};
-  document.querySelectorAll("[data-route-provider]").forEach(node => {
-    const kind = node.dataset.routeProvider;
-    const model = document.querySelector(`[data-route-model="${CSS.escape(kind)}"]`);
+  document.querySelectorAll("[data-route-select]").forEach(node => {
+    const kind = node.dataset.routeSelect;
+    const pair = parseModelRouteValue(node.value);
+    const custom = document.querySelector(`[data-route-custom="${CSS.escape(kind)}"]`);
+    const modelValue = pair.model === "__custom__" ? (custom?.value || "").trim() : pair.model;
     const voice = document.querySelector(`[data-setting-route="${CSS.escape(kind)}.voice"]`);
-    const providerId = node.value.trim();
-    const modelValue = model?.value === "__custom__" ? "" : (model?.value || "").trim();
-    if (!providerId && !modelValue && !voice?.value.trim()) return;
-    routes[kind] = { provider_id: providerId, model: modelValue };
+    if (!pair.provider_id && !modelValue && !voice?.value.trim()) return;
+    routes[kind] = { provider_id: pair.provider_id, model: modelValue };
     if (kind === "tts" && voice?.value.trim()) routes[kind].voice = voice.value.trim();
   });
   document.querySelectorAll("[data-setting-route]").forEach(node => {
@@ -1467,7 +1613,7 @@ async function saveSettings() {
   // 只提交当前视图里真实存在的字段：备份页没有路由 / 自动更新 / 日志级别控件，
   // 无条件兜底会把模型路由清空、把自动更新写成 false、把日志级别写成 INFO。
   const payload = {};
-  if (document.querySelector("[data-route-provider]")) payload.model_routing = routes;
+  if (document.querySelector("[data-route-select]")) payload.model_routing = routes;
   const autoUpdateNode = document.getElementById("setting-auto-update");
   if (autoUpdateNode) payload.auto_update_enabled = !!autoUpdateNode.checked;
   const logLevelNode = document.getElementById("setting-log-level");

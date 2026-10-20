@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="title">核 · 模块运营中心</title>
-  <link rel="stylesheet" href="./style.css?v=0.22.2-1" />
-    <link rel="stylesheet" href="./series-ui.css?v=0.22.2-1" />
+  <link rel="stylesheet" href="./style.css?v=0.23.1-1" />
+    <link rel="stylesheet" href="./series-ui.css?v=0.23.1-1" />
 </head>
 <body data-series-ui="1">
   <main class="shell">
@@ -93,6 +93,7 @@
     <section id="settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" tabindex="0">
       <nav class="si-subnav" role="tablist" aria-label="设置分区">
         <button type="button" role="tab" data-si-tab="config" data-i18n="settingsConfigTab">运行配置</button>
+        <button type="button" role="tab" data-si-tab="model" data-i18n="settingsModelTab">模型管理</button>
         <button type="button" role="tab" data-si-tab="auto" data-i18n="settingsAutoTab">自动更新</button>
         <button type="button" role="tab" data-si-tab="accounts" data-i18n="settingsAccountsTab">控制中心账户</button>
         <button type="button" role="tab" data-si-tab="mirrors" data-i18n="settingsMirrorsTab">镜像与网络</button>
@@ -102,6 +103,22 @@
         <div class="section-heading"><div><h2 data-i18n="configTitle">配置读取与保存</h2><p data-i18n="tokenHint">敏感 token 仅显示是否已配置，留空不会覆盖。</p></div><button type="submit" data-i18n="save">保存</button></div>
         <div id="config-fields" class="form-grid"></div>
       </form>
+      </div>
+      <div id="model" data-si-panel="model" hidden>
+      <form id="model-form" class="card">
+        <div class="section-heading"><div><h2 data-i18n="modelPanelTitle">模型管理</h2><p data-i18n="modelPanelHint">统一模型路由：每项留空 = 跟随 AstrBot 原生。</p></div><button type="submit" data-i18n="saveModelRoutes">保存模型路由</button></div>
+        <div id="model-route-fields" class="model-route-list"></div>
+        <div class="model-route-actions">
+          <button type="button" id="model-test-all" class="primary" data-i18n="modelTestAll">测试全部模型</button>
+          <button type="button" id="model-reset-all" data-i18n="modelResetAll">全部跟随原生</button>
+          <span class="model-test-summary" id="model-test-summary"></span>
+        </div>
+        <div id="model-test-details" class="model-test-details"></div>
+      </form>
+      <article class="card">
+        <div class="section-heading"><div><h2 data-i18n="modelRouteSnapshotTitle">当前路由解析快照</h2><p data-i18n="modelRouteSnapshotHint">「已解析」表示配置已解析到 provider，不代表 API 一定可调用。</p></div><div class="section-actions"><button type="button" id="model-route-refresh" data-i18n="refresh">刷新</button></div></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="modelRouteKind">能力</th><th data-i18n="modelRouteProvider">模型服务商</th><th data-i18n="modelRouteModel">模型</th><th data-i18n="modelRouteSource">来源</th><th data-i18n="modelRouteStatus">状态</th></tr></thead><tbody id="model-route-resolved"><tr><td colspan="5" data-i18n="loading">加载中…</td></tr></tbody></table></div>
+      </article>
       </div>
       <div data-si-panel="auto" hidden>
       <form id="rule-form" class="card">
@@ -208,8 +225,8 @@
     <div id="recommendation-status" class="operation-status" role="status" aria-live="polite" hidden></div>
   </main>
   <script src="/api/plugin/page/bridge-sdk.js"></script>
-  <script src="./series-ui.js?v=0.22.2-1"></script>
-  <script src="./series-kernel.js?v=0.22.2-1"></script>
-  <script type="module" src="./app.js?v=0.22.2-1"></script>
+  <script src="./series-ui.js?v=0.23.1-1"></script>
+  <script src="./series-kernel.js?v=0.23.1-1"></script>
+  <script type="module" src="./app.js?v=0.23.1-1"></script>
 </body>
 </html>

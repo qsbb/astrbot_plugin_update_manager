@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+import uuid
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -46,6 +50,7 @@ from .core.mirrors import resolve_mirror
 from .core.model_probe import (
     ResolvedProvider,
     probe_routes as probe_model_routes_core,
+    safe_error_text,
 )
 from .core.model_router import (
     MODEL_KINDS,
@@ -88,7 +93,7 @@ from .series_diagnostics import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_update_manager"
-__version__ = "0.22.2"
+__version__ = "0.23.1"
 _current_instance: "UpdateManagerPlugin | None" = None
 
 # 独立 WebUI「全局设置」可写的字段白名单：仅限模型路由与低风险运行项。
@@ -162,6 +167,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
         self.enabled = self._get_bool("enabled", True)
         self.auto_update_enabled = self._get_bool("auto_update_enabled", False)
         self._terminated = False
+        # 模型自检作业：Page 与独立 WebUI 共用同一份内存快照，页面轮询读取逐项进度。
+        self._model_probe_job: dict[str, Any] | None = None
+        self._model_probe_task: asyncio.Task[Any] | None = None
         self._apply_log_level(str(self._get("log_level", "INFO")))
         plugin_root = Path(
             str(self._get("plugin_root", "")) or Path(__file__).resolve().parent.parent
@@ -596,6 +604,143 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
                 kinds = [str(item) for item in candidate]
         return await self.probe_model_routes(kinds)
 
+    # ------------------------------------------------------ 模型自检作业
+    # Page 与独立 WebUI 共用同一份内存作业快照：前端只轮询 status，逐项更新状态，
+    # 避免“只要一个职责没跑完就全部显示测试中”。
+
+    @staticmethod
+    def _model_probe_now() -> str:
+        return datetime.now(UTC).astimezone().isoformat(timespec="seconds")
+
+    @staticmethod
+    def _model_probe_public_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
+        """把自检结果投影成纯 JSON 字段，绝不把 provider 实例带进快照。"""
+        return {
+            "kind": str(entry.get("kind") or ""),
+            "state": str(entry.get("state") or "unavailable"),
+            "latency_ms": int(entry.get("latency_ms") or 0),
+            "error": str(entry.get("error") or ""),
+            "provider_id": str(entry.get("provider_id") or ""),
+            "provider_label": str(entry.get("provider_label") or ""),
+            "model": str(entry.get("model") or ""),
+            "source": str(entry.get("source") or ""),
+            "reused_from": str(entry.get("reused_from") or ""),
+            "timeout_seconds": float(entry.get("timeout_seconds") or 0),
+            "tested_at": str(entry.get("tested_at") or ""),
+        }
+
+    def _model_probe_snapshot(self, job: Mapping[str, Any]) -> dict[str, Any]:
+        order = list(job.get("order") or [])
+        results = job.get("results") or {}
+        entries = [
+            results.get(kind) or {"kind": kind, "state": "pending"} for kind in order
+        ]
+        done = sum(
+            1 for item in entries if item.get("state") not in {"pending", "running"}
+        )
+        ok = sum(1 for item in entries if item.get("state") == "ok")
+        failed = sum(1 for item in entries if item.get("state") == "failed")
+        return {
+            "job_id": str(job.get("job_id") or ""),
+            "running": bool(job.get("running")),
+            "started_at": str(job.get("started_at") or ""),
+            "finished_at": str(job.get("finished_at") or ""),
+            "tested_at": str(job.get("tested_at") or ""),
+            "duration_ms": int(job.get("duration_ms") or 0),
+            "concurrency": int(job.get("concurrency") or 3),
+            "total": len(entries),
+            "done": done,
+            "ok": ok,
+            "failed": failed,
+            "results": entries,
+        }
+
+    def model_probe_status(self) -> dict[str, Any]:
+        """读取当前（或最近一次）模型自检作业快照；没有作业时返回 job=None。"""
+        job = self._model_probe_job
+        if not isinstance(job, dict):
+            return {"success": True, "job": None}
+        return {"success": True, "job": self._model_probe_snapshot(job)}
+
+    def start_model_probe(self, kinds: Any = None) -> dict[str, Any]:
+        """启动一次模型自检作业；同一时间只允许一个，忙时返回当前快照。"""
+        wanted = [
+            kind
+            for kind in (list(kinds) if kinds else list(MODEL_KINDS))
+            if kind in MODEL_KINDS
+        ] or list(MODEL_KINDS)
+        current = self._model_probe_job
+        if isinstance(current, dict) and current.get("running"):
+            return {
+                "success": False,
+                "error": "MODEL_PROBE_BUSY",
+                "job": self._model_probe_snapshot(current),
+            }
+        job: dict[str, Any] = {
+            "job_id": uuid.uuid4().hex[:12],
+            "running": True,
+            "started_at": self._model_probe_now(),
+            "finished_at": "",
+            "tested_at": "",
+            "duration_ms": 0,
+            "concurrency": 3,
+            "order": wanted,
+            "results": {kind: {"kind": kind, "state": "pending"} for kind in wanted},
+        }
+        self._model_probe_job = job
+        self._model_probe_task = asyncio.ensure_future(
+            self._run_model_probe_job(job, wanted)
+        )
+        return {"success": True, "job": self._model_probe_snapshot(job)}
+
+    async def _run_model_probe_job(
+        self, job: dict[str, Any], wanted: list[str]
+    ) -> None:
+        started = time.perf_counter()
+        results: dict[str, dict[str, Any]] = job["results"]
+
+        def on_group_start(kind_list: list[str]) -> None:
+            for kind in kind_list:
+                results[kind] = {"kind": kind, "state": "running"}
+
+        def on_group_done(entries: dict[str, dict[str, Any]]) -> None:
+            for kind, entry in entries.items():
+                results[kind] = self._model_probe_public_entry(entry)
+
+        try:
+            payload = await probe_model_routes_core(
+                wanted,
+                self._resolve_probe_provider,
+                concurrency=int(job.get("concurrency") or 3),
+                on_group_start=on_group_start,
+                on_group_done=on_group_done,
+            )
+            job["tested_at"] = str(payload.get("tested_at") or "")
+            job["duration_ms"] = int(payload.get("duration_ms") or 0)
+        except Exception as exc:  # noqa: BLE001 - 作业异常必须收敛成逐项失败
+            message = safe_error_text(exc) or type(exc).__name__
+            for kind in wanted:
+                current = results.get(kind) or {"kind": kind}
+                if current.get("state") in {"pending", "running"}:
+                    results[kind] = {**current, "state": "failed", "error": message}
+        finally:
+            job["running"] = False
+            job["finished_at"] = self._model_probe_now()
+            if not job.get("duration_ms"):
+                job["duration_ms"] = round((time.perf_counter() - started) * 1000)
+            self._model_probe_task = None
+
+    async def _webui_model_test_start(self, payload: Any = None) -> dict[str, Any]:
+        kinds = None
+        if isinstance(payload, Mapping):
+            candidate = payload.get("kinds")
+            if isinstance(candidate, (list, tuple)) and candidate:
+                kinds = [str(item) for item in candidate]
+        return self.start_model_probe(kinds)
+
+    async def _webui_model_test_status(self) -> dict[str, Any]:
+        return self.model_probe_status()
+
     def diagnostic_events(self, after_seq: int = 0, limit: int = 200) -> dict[str, Any]:
         return read_diagnostic_events(after_seq=after_seq, limit=limit)
 
@@ -682,6 +827,8 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
             settings_save=self._webui_settings_save,
             model_options=self._webui_model_options,
             model_test=self._webui_model_test,
+            model_test_start=self._webui_model_test_start,
+            model_test_status=self._webui_model_test_status,
             backup_status=self._webui_backup_status,
             backup_run=self._webui_backup_run,
             backup_list=self._webui_backup_list,
@@ -1808,6 +1955,9 @@ class UpdateManagerPlugin(PagesAPIMixin, Star):
 
     async def terminate(self) -> None:
         global _current_instance
+        if self._model_probe_task is not None:
+            self._model_probe_task.cancel()
+            self._model_probe_task = None
         self.coordinator.cancel()
         try:
             if self.webui_server is not None:

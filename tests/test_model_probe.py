@@ -174,3 +174,37 @@ def test_probe_routes_accepts_plain_provider_and_sync_runner():
     result = asyncio.run(run_sync_runner())
     assert result["state"] == "ok"
     assert calls == ["called"]
+
+
+def test_probe_routes_reports_group_progress_without_changing_results():
+    """逐项进度回调：每个分组开始/结束各一次，回调异常不影响自检结果。"""
+    starts: list[list[str]] = []
+    dones: list[dict] = []
+    shared = ChatProvider()
+
+    def on_start(kinds: list[str]) -> None:
+        starts.append(list(kinds))
+        raise RuntimeError("observer blew up")  # 回调异常必须被吞掉
+
+    payload = asyncio.run(
+        probe_routes(
+            ["conversation", "fast", "reasoning", "tts"],
+            lambda kind: (
+                ResolvedProvider(provider=shared, provider_id="p-shared")
+                if kind != "tts"
+                else None
+            ),
+            concurrency=3,
+            on_group_start=on_start,
+            on_group_done=dones.append,
+        )
+    )
+
+    by_kind = {item["kind"]: item for item in payload["results"]}
+    assert by_kind["conversation"]["state"] == "ok"
+    assert by_kind["fast"]["reused_from"] == "conversation"
+    assert by_kind["tts"]["state"] == "unavailable"
+    # 对话三兄弟共用同一分组；tts 单独一组
+    assert sorted(starts) == [["conversation", "fast", "reasoning"], ["tts"]]
+    done_kinds = sorted(kind for entry in dones for kind in entry)
+    assert done_kinds == ["conversation", "fast", "reasoning", "tts"]

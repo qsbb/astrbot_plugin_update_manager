@@ -250,6 +250,18 @@ class PagesAPIMixin:
                 ["POST"],
                 "测试各职责模型连通性（官方 provider 自检）",
             ),
+            (
+                "model-routing/test/start",
+                self._pages_model_test_start,
+                ["POST"],
+                "启动模型自检作业（逐项状态可轮询）",
+            ),
+            (
+                "model-routing/test/status",
+                self._pages_model_test_status,
+                ["GET"],
+                "读取模型自检作业的逐项进度",
+            ),
             ("backup/status", self._pages_backup_status, ["GET"], "读取自动备份状态"),
             ("backup/run", self._pages_backup_run, ["POST"], "立即执行一次 AstrBot 官方备份"),
             ("backup/list", self._pages_backup_list, ["GET"], "列出目标目录里的备份文件"),
@@ -560,6 +572,24 @@ class PagesAPIMixin:
         kinds = data.get("kinds") if isinstance(data, dict) else None
         payload = await probe(kinds)
         return json_response(payload)
+
+    async def _pages_model_test_start(self):
+        starter = getattr(self, "start_model_probe", None)
+        if not callable(starter):
+            return json_response(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
+            )
+        data = await self._request_json()
+        kinds = data.get("kinds") if isinstance(data, dict) else None
+        return json_response(starter(kinds))
+
+    async def _pages_model_test_status(self):
+        getter = getattr(self, "model_probe_status", None)
+        if not callable(getter):
+            return json_response(
+                {"success": False, "error": "MODEL_ROUTER_UNAVAILABLE"}, status=503
+            )
+        return json_response(getter())
 
     @staticmethod
     def _diagnostic_text(value: Any, limit: int | None = None) -> str:
