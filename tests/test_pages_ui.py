@@ -306,13 +306,30 @@ def test_catalog_updates_are_click_only_and_never_auto_checked():
     assert 'apiPost("catalog/update", payload)' in js
     assert 'data-force-update="true"' in js
     assert "即使已是最新版或远端版本更旧" in js
+    # 已安装插件不渲染"已安装"灰色占位按钮（更新/强制更新/启停操作已承担交互）
+    assert """    const install = item.installed
+      ? ""
+      : actionButton(item, "install", "install", actions.install);""" in js
+    # 后端 force_update 不再要求版本状态已知（点击时现场取版本）
+    api = (PLUGIN_ROOT / "pages_api.py").read_text(encoding="utf-8")
+    assert '"force_update": bool(' in api
+    assert (
+        """                        "force_update": bool(
+                            snapshot
+                            and snapshot.loaded
+                            and trusted.plugin_id != PLUGIN_ID
+                            and capabilities.update_plugin
+                        ),"""
+        in api
+    )
     assert "even when it is the same version or older" in js
-    # 普通更新仅允许新版本；强制更新额外允许同版本和本地较新。
+    # 普通更新仅允许新版本；强制更新在未检查/未知状态也可点击（后端现场取版本并把关）
     assert "Boolean(view?.update_available)" in js
     assert (
         '["update_available", "up_to_date", "local_newer"].includes(view?.version_status)'
-        in js
+        not in js
     )
+    assert "const forceEnabled = operable;" in js
     assert 't("notChecked")' in js
     assert "未检查" in js
     assert 'checkUpdates: "Check catalog updates"' in js

@@ -1986,7 +1986,9 @@ function catalogUpdateButton(item) {
   const view = catalogVersionView(item);
   const operable = Boolean(item.update_lifecycle?.operable);
   const updateEnabled = operable && Boolean(view?.update_available);
-  const forceEnabled = operable && ["update_available", "up_to_date", "local_newer"].includes(view?.version_status);
+  // 强制更新在未检查/未知版本状态也可点击：点击时后端会现场获取最新版本，
+  // 若运行时不支持（如核自身/加载失败）仍会被后端拒绝——不必在前端卡死。
+  const forceEnabled = operable;
   const lifecycleReason = errorReason(item.update_lifecycle?.reason);
   const updateHint = updateEnabled ? "" : `title="${escapeHtml(operable ? t("unavailableAction") : lifecycleReason)}"`;
   const forceHint = forceEnabled ? "" : `title="${escapeHtml(operable ? t("forceUpdateUnavailable") : lifecycleReason)}"`;
@@ -2244,13 +2246,13 @@ async function loadRecommendations(check = false, forceRefresh = true) {
   list.innerHTML = items.map((item) => {
     const actions = item.actions || {};
     const install = item.installed
-      ? `<button type="button" disabled>${escapeHtml(t("installed"))}</button>`
+      ? ""
       : actionButton(item, "install", "install", actions.install);
     const lifecycle = item.installed
       ? `${actionButton(item, "update", "update", actions.update)}${forceUpdateButton(item, actions.force_update)}${lifecycleSwitch(item, actions)}`
       : "";
     const versionDetail = `${t("currentVersion")}: ${escapeHtml(item.version || "—")} · ${t("latestVersion")}: ${escapeHtml(item.latest_version || "—")}`;
-    return `<article class="recommendation-item" id="recommendation-${escapeHtml(item.plugin_id)}" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key" title="技术名：${escapeHtml(item.key)}">${escapeHtml((item.name || "·").trim().slice(0, 1))}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.installed ? t("installed") : t("notLoaded")} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
+    return `<article class="recommendation-item" id="recommendation-${escapeHtml(item.plugin_id)}" data-update-available="${String(Boolean(item.update_available))}"><div class="recommendation-copy"><span class="series-key" title="技术名：${escapeHtml(item.key)}">${escapeHtml((item.name || "·").trim().slice(0, 1))}</span><div><strong>${escapeHtml(item.name)}</strong><p class="recommendation-description" lang="zh-CN">${escapeHtml(item.description_zh || "")}</p><code>${escapeHtml(item.plugin_id)}</code><span class="version-line">${versionStatusBadge(item)}<span>${versionDetail} · ${item.activated ? t("active") : t("inactive")}</span></span>${versionError(item)}<a href="${escapeHtml(item.repo_url)}" target="_blank" rel="noopener noreferrer" data-external-url="${escapeHtml(item.repo_url)}">${escapeHtml(item.repo_url)}</a></div></div><div class="recommendation-actions">${install}${lifecycle}</div></article>`;
   }).join("");
   renderOverview();
 }

@@ -2961,8 +2961,6 @@ class PagesAPIMixin:
                         "force_update": bool(
                             snapshot
                             and snapshot.loaded
-                            and version_check["version_status"]
-                            in {"update_available", "up_to_date", "local_newer"}
                             and trusted.plugin_id != PLUGIN_ID
                             and capabilities.update_plugin
                         ),
